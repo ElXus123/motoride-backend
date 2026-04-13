@@ -1,4 +1,5 @@
-const CACHE_NAME = 'ruta-motera-v3';
+const CACHE_NAME = 'ruta-motera-v4';
+const TILE_CACHE = 'map-tiles-v2';
 const CORE_ASSETS = ['/', '/index.html'];
 
 self.addEventListener('install', (event) => {
@@ -23,6 +24,9 @@ self.addEventListener('fetch', (event) => {
   const requestUrl = new URL(event.request.url);
   const isSameOrigin = requestUrl.origin === self.location.origin;
   const isNavigation = event.request.mode === 'navigate';
+  const isTileRequest =
+    requestUrl.hostname.includes('basemaps.cartocdn.com') ||
+    requestUrl.hostname.includes('tile.openstreetmap.org');
 
   // For app routes, prefer network then fallback to cached shell.
   if (isNavigation) {
@@ -38,8 +42,30 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Cache map tiles (cross-origin) so zoom/movement stays smooth and survives short offline periods.
+  if (isTileRequest) {
+    event.respondWith(
+      caches.open(TILE_CACHE).then(async (cache) => {
+        const cached = await cache.match(event.request);
+        if (cached) {
+          fetch(event.request)
+            .then((res) => {
+              if (res && res.ok) cache.put(event.request, res.clone());
+            })
+            .catch(() => {});
+          return cached;
+        }
+
+        const response = await fetch(event.request);
+        if (response) cache.put(event.request, response.clone());
+        return response;
+      })
+    );
+    return;
+  }
+
   // Cache-first for same-origin static assets (except manifest to avoid stale installability metadata).
-  if (isSameOrigin && (requestUrl.pathname.startsWith('/assets/') || requestUrl.pathname.endsWith('.png')) && !requestUrl.pathname.endsWith('manifest.json')) {
+  if (isSameOrigin && (requestUrl.pathname.startsWith('/assets/') || requestUrl.pathname.endsWith('.png')) && !requestUrl.pathname.endsWith('manifest.json') && !requestUrl.pathname.endsWith('manifest.webmanifest')) {
     event.respondWith(
       caches.match(event.request).then((cached) => {
         if (cached) return cached;

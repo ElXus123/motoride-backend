@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { doc, setDoc, getDoc, updateDoc, arrayUnion, arrayRemove, collection, query, where, onSnapshot, deleteDoc, orderBy, limit } from 'firebase/firestore';
 import { db, logOut, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { parseRouteData } from '../lib/gpx';
-import { Users, Plus, LogOut, User as UserIcon, Activity, Trash2, Trophy, Calendar, MapPin, Search, Clock, ChevronRight, Upload, X, Map as MapIcon, Play } from 'lucide-react';
+import { Users, Plus, LogOut, User as UserIcon, Activity, Trash2, Trophy, Calendar, MapPin, Search, Clock, ChevronRight, Upload, X, Map as MapIcon, Play, HeartHandshake, CircleDollarSign } from 'lucide-react';
 import FriendsModal from './FriendsModal';
 
 interface DashboardProps {
@@ -51,7 +51,16 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   const [nearbyRoutes, setNearbyRoutes] = useState<any[]>([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showFriendsModal, setShowFriendsModal] = useState(false);
+  const [showSupportModal, setShowSupportModal] = useState(false);
   const [showPreviewModal, setShowPreviewModal] = useState<any>(null);
+  const supportPopupRef = useRef<Window | null>(null);
+  const lastBackHandledAtRef = useRef(0);
+  const prevLayersRef = useRef({
+    showCreateModal: false,
+    showFriendsModal: false,
+    showSupportModal: false,
+    hasPreview: false,
+  });
   const [indexBuilding, setIndexBuilding] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -138,6 +147,67 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
+
+  const openSupportLink = (url: string) => {
+    const popup = window.open(
+      url,
+      'supportWindow',
+      'popup=yes,width=520,height=760,noopener,noreferrer'
+    );
+    if (popup) {
+      supportPopupRef.current = popup;
+    } else {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
+  };
+
+  // Create browser-history layers for dashboard overlays.
+  useEffect(() => {
+    const prev = prevLayersRef.current;
+    if (showCreateModal && !prev.showCreateModal) window.history.pushState({ layer: 'create' }, '');
+    if (showFriendsModal && !prev.showFriendsModal) window.history.pushState({ layer: 'friends' }, '');
+    if (showSupportModal && !prev.showSupportModal) window.history.pushState({ layer: 'support' }, '');
+    if (!!showPreviewModal && !prev.hasPreview) window.history.pushState({ layer: 'preview' }, '');
+
+    prevLayersRef.current = {
+      showCreateModal,
+      showFriendsModal,
+      showSupportModal,
+      hasPreview: !!showPreviewModal,
+    };
+  }, [showCreateModal, showFriendsModal, showSupportModal, showPreviewModal]);
+
+  // Mobile back button: close external popup/overlays before leaving dashboard.
+  useEffect(() => {
+    const onPopState = () => {
+      const now = Date.now();
+      if (now - lastBackHandledAtRef.current < 300) return;
+      lastBackHandledAtRef.current = now;
+
+      if (supportPopupRef.current && !supportPopupRef.current.closed) {
+        supportPopupRef.current.close();
+        supportPopupRef.current = null;
+        return;
+      }
+      if (showPreviewModal) {
+        setShowPreviewModal(null);
+        return;
+      }
+      if (showCreateModal) {
+        setShowCreateModal(false);
+        return;
+      }
+      if (showFriendsModal) {
+        setShowFriendsModal(false);
+        return;
+      }
+      if (showSupportModal) {
+        setShowSupportModal(false);
+      }
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [showCreateModal, showFriendsModal, showSupportModal, showPreviewModal]);
 
   useEffect(() => {
     if (!user) return;
@@ -453,6 +523,35 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       </header>
 
       <main className="max-w-5xl mx-auto p-6 space-y-8">
+        {/* App Status + Support */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="md:col-span-2 bg-zinc-900/50 border border-zinc-800 rounded-2xl px-4 py-3 flex flex-wrap items-center gap-2">
+            <span className={`text-[11px] font-black px-2.5 py-1 rounded-full ${isOffline ? 'bg-red-500/20 text-red-300' : 'bg-emerald-500/20 text-emerald-300'}`}>
+              {isOffline ? 'Offline' : 'Online'}
+            </span>
+            <span className="text-[11px] font-black px-2.5 py-1 rounded-full bg-blue-500/20 text-blue-300">
+              Nivel {level}
+            </span>
+            <span className="text-[11px] font-black px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-300">
+              {points} pts
+            </span>
+            <span className="text-xs text-zinc-400 ml-1">Todo listo para ruta, comunidad y navegación.</span>
+          </div>
+
+          <button
+            onClick={() => setShowSupportModal(true)}
+            className="bg-zinc-900 border border-zinc-800 hover:border-orange-500/40 rounded-2xl px-4 py-3 flex items-center justify-center gap-3 transition-all"
+          >
+            <div className="w-9 h-9 rounded-xl bg-orange-500/20 text-orange-400 flex items-center justify-center">
+              <HeartHandshake size={18} />
+            </div>
+            <div className="text-left">
+              <p className="text-sm font-bold text-white">Apoyar proyecto</p>
+              <p className="text-[11px] text-zinc-500">Opcional y sin bloquear funciones</p>
+            </div>
+          </button>
+        </div>
+
         {/* Quick Actions */}
         <div className="grid grid-cols-1 gap-6">
           <div className="bg-gradient-to-br from-orange-500 to-orange-600 p-8 rounded-[2rem] shadow-xl shadow-orange-500/10 relative overflow-hidden group">
@@ -781,6 +880,38 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
 
       {/* Friends Modal */}
       {showFriendsModal && <FriendsModal onClose={() => setShowFriendsModal(false)} onRepeatRoute={onRepeatRoute} />}
+
+      {/* Support Modal */}
+      {showSupportModal && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="bg-zinc-900 border border-zinc-800 w-full max-w-md rounded-3xl overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-200">
+            <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                <HeartHandshake size={20} className="text-orange-400" />
+                Apoyar MotoBikeSocial
+              </h2>
+              <button onClick={() => setShowSupportModal(false)} className="p-2 hover:bg-zinc-800 rounded-full transition-colors text-zinc-400">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-3">
+              <button
+                onClick={() => openSupportLink('https://ko-fi.com/motorideapp')}
+                className="w-full bg-zinc-950 border border-zinc-800 hover:border-emerald-500/40 rounded-2xl p-4 flex items-center gap-3 transition-all"
+              >
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+                  <CircleDollarSign size={18} />
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-white">Donar (Ko-fi / similar)</p>
+                  <p className="text-[11px] text-zinc-500">Aporte voluntario para mantener servidores y mejoras.</p>
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Create Route Modal */}
       {showCreateModal && (

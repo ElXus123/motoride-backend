@@ -415,6 +415,9 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
   const [isCompactUI, setIsCompactUI] = useState(window.innerWidth < 420 || window.innerHeight < 760);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const alertsMenuContainerRef = useRef<HTMLDivElement>(null);
+  const settingsMenuContainerRef = useRef<HTMLDivElement>(null);
+  const rankingPanelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleResize = () => {
@@ -424,6 +427,29 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  useEffect(() => {
+    const handleOutsideTap = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node;
+
+      if (showAlertMenu && alertsMenuContainerRef.current && !alertsMenuContainerRef.current.contains(target)) {
+        setShowAlertMenu(false);
+      }
+      if (showSettings && settingsMenuContainerRef.current && !settingsMenuContainerRef.current.contains(target)) {
+        setShowSettings(false);
+      }
+      if (showRanking && rankingPanelRef.current && !rankingPanelRef.current.contains(target)) {
+        setShowRanking(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleOutsideTap);
+    document.addEventListener('touchstart', handleOutsideTap, { passive: true });
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideTap);
+      document.removeEventListener('touchstart', handleOutsideTap);
+    };
+  }, [showAlertMenu, showSettings, showRanking]);
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -672,30 +698,56 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
     if (!currentLocation) return;
     
     const prefetch = async () => {
-      const zoomLevels = [14, 15, 16]; // Focus on high detail levels
-      const radius = 2; // Number of tiles around center
-      
+      const zoomLevels = [13, 14, 15, 16]; // Multi-level cache around user
+      const radiusKm = 5; // Preload ~5km around user
+      const latDelta = radiusKm / 111;
+      const lngDelta = radiusKm / (111 * Math.max(Math.cos((currentLocation.lat * Math.PI) / 180), 0.2));
+
+      const tileUrls: string[] = [];
       for (const z of zoomLevels) {
-        const x = lon2tile(currentLocation.lng, z);
-        const y = lat2tile(currentLocation.lat, z);
-        
-        for (let i = -radius; i <= radius; i++) {
-          for (let j = -radius; j <= radius; j++) {
-            const url = isDarkMode 
-              ? `https://a.basemaps.cartocdn.com/dark_all/${z}/${x+i}/${y+j}.png`
-              : `https://a.basemaps.cartocdn.com/rastertiles/voyager/${z}/${x+i}/${y+j}.png`;
-            
-            // Simple image prefetch
-            const img = new Image();
-            img.src = url;
+        const minX = lon2tile(currentLocation.lng - lngDelta, z);
+        const maxX = lon2tile(currentLocation.lng + lngDelta, z);
+        const minY = lat2tile(currentLocation.lat + latDelta, z);
+        const maxY = lat2tile(currentLocation.lat - latDelta, z);
+
+        for (let x = Math.min(minX, maxX); x <= Math.max(minX, maxX); x++) {
+          for (let y = Math.min(minY, maxY); y <= Math.max(minY, maxY); y++) {
+            tileUrls.push(
+              isDarkMode
+                ? `https://a.basemaps.cartocdn.com/dark_all/${z}/${x}/${y}.png`
+                : `https://a.basemaps.cartocdn.com/rastertiles/voyager/${z}/${x}/${y}.png`
+            );
           }
         }
       }
+
+      try {
+        if ('caches' in window) {
+          const cache = await caches.open('map-tiles-v1');
+          await Promise.all(
+            tileUrls.map(async (url) => {
+              const req = new Request(url, { mode: 'no-cors' });
+              const cached = await cache.match(req);
+              if (!cached) {
+                const res = await fetch(req);
+                if (res) await cache.put(req, res.clone());
+              }
+            })
+          );
+        } else {
+          tileUrls.forEach((url) => {
+            const img = new Image();
+            img.src = url;
+          });
+        }
+      } catch {
+        // Prefetch is best-effort; ignore failures.
+      }
     };
 
-    // Prefetch every 500m or so to avoid spamming
+    // Prefetch every ~1km to avoid excessive traffic
     const lastPrefetchDist = (window as any)._lastPrefetchDist || 0;
-    if (Math.abs(localDistance - lastPrefetchDist) > 0.5) {
+    if (Math.abs(localDistance - lastPrefetchDist) > 1) {
       prefetch();
       (window as any)._lastPrefetchDist = localDistance;
     }
@@ -731,6 +783,8 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
   const [showSummary, setShowSummary] = useState(false);
   const [summaryData, setSummaryData] = useState<any>(null);
   const [isSharingSummary, setIsSharingSummary] = useState(false);
+  const [currentSpeedLimit, setCurrentSpeedLimit] = useState<number | null>(null);
+  const lastSpeedLimitFetchRef = useRef<{ lat: number; lng: number; time: number } | null>(null);
 
   const createSummaryImage = async () => {
     if (!summaryData) return null;
@@ -1097,6 +1151,8 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
   const sendAlert = (type: string) => {
     setAlertType(type);
     setShowAlertMenu(false);
+    setShowSettings(false);
+    if (navigator.vibrate) navigator.vibrate(120);
     
     // Broadcast alert via socket
     socket.emit('trigger-alert', {
@@ -1111,6 +1167,65 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
 
   const currentSpeedKmh = speed ? Math.round(speed * 3.6) : 0;
   const isMoving = currentSpeedKmh > 2;
+
+  // Fetch current road speed limit (OSM/Overpass, best-effort)
+  useEffect(() => {
+    if (!currentLocation) return;
+
+    const now = Date.now();
+    const last = lastSpeedLimitFetchRef.current;
+    if (last) {
+      const movedMeters = getDistance(currentLocation.lat, currentLocation.lng, last.lat, last.lng);
+      const elapsedMs = now - last.time;
+      if (movedMeters < 150 && elapsedMs < 15000) return;
+    }
+
+    lastSpeedLimitFetchRef.current = { lat: currentLocation.lat, lng: currentLocation.lng, time: now };
+
+    const parseMaxSpeed = (value: string | undefined): number | null => {
+      if (!value) return null;
+      const numeric = value.match(/\d+/);
+      return numeric ? Number(numeric[0]) : null;
+    };
+
+    const controller = new AbortController();
+    const query = `
+      [out:json][timeout:8];
+      way(around:80,${currentLocation.lat},${currentLocation.lng})["highway"]["maxspeed"];
+      out tags center 20;
+    `;
+
+    fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      body: query,
+      signal: controller.signal
+    })
+      .then(res => res.json())
+      .then(data => {
+        const elements = Array.isArray(data?.elements) ? data.elements : [];
+        let bestLimit: number | null = null;
+        let bestDist = Number.POSITIVE_INFINITY;
+
+        for (const el of elements) {
+          const limit = parseMaxSpeed(el?.tags?.maxspeed);
+          const lat = el?.center?.lat;
+          const lng = el?.center?.lon;
+          if (!limit || typeof lat !== 'number' || typeof lng !== 'number') continue;
+          const dist = getDistance(currentLocation.lat, currentLocation.lng, lat, lng);
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestLimit = limit;
+          }
+        }
+
+        setCurrentSpeedLimit(bestLimit);
+      })
+      .catch(() => {
+        // Keep previous value on network/API failure.
+      });
+
+    return () => controller.abort();
+  }, [currentLocation]);
 
   // Fall detection
   useEffect(() => {
@@ -1164,6 +1279,60 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
       case 'Repostar': return <Fuel size={24} className="shrink-0" />;
       case 'Caída': return <Activity size={24} className="shrink-0 text-red-100 animate-pulse" />;
       default: return <AlertCircle size={24} className="shrink-0" />;
+    }
+  };
+
+  const getAlertUi = (type?: string) => {
+    switch (type) {
+      case 'Parado':
+        return {
+          title: 'PARADA EN MARGEN',
+          card: 'bg-zinc-600 border-zinc-200/35',
+          badge: 'bg-zinc-900/60 text-zinc-100'
+        };
+      case 'Caída':
+        return {
+          title: 'CAÍDA DETECTADA',
+          card: 'bg-red-600 border-red-300/40',
+          badge: 'bg-red-800/70 text-red-100'
+        };
+      case 'Accidente':
+        return {
+          title: 'ACCIDENTE',
+          card: 'bg-orange-600 border-orange-200/40',
+          badge: 'bg-orange-900/60 text-orange-100'
+        };
+      case 'Peligro':
+        return {
+          title: 'PELIGRO EN VÍA',
+          card: 'bg-amber-500 border-amber-200/40',
+          badge: 'bg-amber-900/55 text-amber-100'
+        };
+      case 'Policía':
+        return {
+          title: 'CONTROL / POLICÍA',
+          card: 'bg-blue-600 border-blue-200/40',
+          badge: 'bg-blue-900/60 text-blue-100'
+        };
+      case 'Repostar':
+      case 'Repostando':
+        return {
+          title: 'PARADA A REPOSTAR',
+          card: 'bg-emerald-600 border-emerald-200/40',
+          badge: 'bg-emerald-900/60 text-emerald-100'
+        };
+      case 'Averiado':
+        return {
+          title: 'MOTO AVERIADA',
+          card: 'bg-fuchsia-600 border-fuchsia-200/40',
+          badge: 'bg-fuchsia-900/60 text-fuchsia-100'
+        };
+      default:
+        return {
+          title: type?.toUpperCase() || 'ALERTA',
+          card: 'bg-red-500 border-white/25',
+          badge: 'bg-zinc-900/40 text-white'
+        };
     }
   };
 
@@ -1322,9 +1491,47 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
              <Navigation size={20} />
            </button>
 
-           <div className="relative">
+          <div className="relative" ref={alertsMenuContainerRef}>
+            <button
+              onClick={() => {
+                setShowSettings(false);
+                setShowAlertMenu(!showAlertMenu);
+              }}
+              className={`p-3 rounded-full shadow-xl transition-colors ${showAlertMenu ? 'bg-red-500 text-white' : 'bg-zinc-800 text-zinc-400'}`}
+              title="Avisos rápidos"
+            >
+              <Bell size={20} />
+            </button>
+
+            {showAlertMenu && (
+              <div className="absolute top-0 right-14 bg-zinc-950/95 backdrop-blur-xl border border-zinc-800 rounded-3xl p-2 shadow-2xl flex flex-col gap-1 min-w-[220px] max-w-[min(90vw,300px)] z-[2001] animate-in fade-in slide-in-from-right-4 duration-200">
+                <div className="px-4 py-2 border-b border-zinc-800 mb-1">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Alertas</p>
+                </div>
+                <div className="grid grid-cols-3 gap-1 px-1">
+                  <button onClick={() => sendAlert('Parado')} className="flex flex-col items-center gap-1 text-white hover:bg-zinc-800 p-2 rounded-xl text-[10px] font-bold transition-colors" title="Parado">
+                    <AlertCircle size={16} className="text-yellow-500" />
+                    <span>Parado</span>
+                  </button>
+                  <button onClick={() => sendAlert('Averiado')} className="flex flex-col items-center gap-1 text-white hover:bg-zinc-800 p-2 rounded-xl text-[10px] font-bold transition-colors" title="Averiado">
+                    <Wrench size={16} className="text-red-500" />
+                    <span>Avería</span>
+                  </button>
+                  <button onClick={() => sendAlert('Repostando')} className="flex flex-col items-center gap-1 text-white hover:bg-zinc-800 p-2 rounded-xl text-[10px] font-bold transition-colors" title="Repostando">
+                    <Fuel size={16} className="text-blue-500" />
+                    <span>Repostar</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+           <div className="relative" ref={settingsMenuContainerRef}>
              <button 
-               onClick={() => setShowSettings(!showSettings)}
+              onClick={() => {
+                setShowAlertMenu(false);
+                setShowSettings(!showSettings);
+              }}
                className={`p-3 rounded-full shadow-xl transition-colors ${showSettings ? 'bg-zinc-100 text-zinc-900' : 'bg-zinc-800 text-zinc-400'}`}
                title="Menú"
              >
@@ -1359,8 +1566,11 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
                    Modo {isDarkMode ? 'Claro' : 'Oscuro'}
                  </button>
 
-                 <button 
-                   onClick={handleSmartCalibration}
+                <button 
+                  onClick={() => {
+                    setShowSettings(false);
+                    handleSmartCalibration();
+                  }}
                    className="flex items-center gap-3 text-white hover:bg-zinc-800 p-3 rounded-2xl text-sm font-bold transition-colors"
                  >
                    <div className="w-8 h-8 rounded-xl bg-green-500/20 flex items-center justify-center text-green-500">
@@ -1379,8 +1589,11 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
                    {isFullscreen ? 'Salir Pantalla Completa' : 'Pantalla Completa'}
                  </button>
 
-                 <button 
-                   onClick={toggleLandscape}
+                <button 
+                  onClick={() => {
+                    setShowSettings(false);
+                    toggleLandscape();
+                  }}
                    className="flex items-center gap-3 text-white hover:bg-zinc-800 p-3 rounded-2xl text-sm font-bold transition-colors"
                  >
                    <div className="w-8 h-8 rounded-xl bg-indigo-500/20 flex items-center justify-center text-indigo-500">
@@ -1389,8 +1602,11 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
                    Forzar Horizontal
                  </button>
 
-                 <button 
-                   onClick={enterPocketMode}
+                <button 
+                  onClick={() => {
+                    setShowSettings(false);
+                    enterPocketMode();
+                  }}
                    className="flex items-center gap-3 text-white hover:bg-zinc-800 p-3 rounded-2xl text-sm font-bold transition-colors"
                  >
                    <div className="w-8 h-8 rounded-xl bg-zinc-800 flex items-center justify-center text-zinc-400">
@@ -1409,24 +1625,6 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
                    Usuarios
                  </button>
 
-                 <div className="px-4 py-2 border-t border-zinc-800 mt-1 mb-1">
-                   <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Alertas</p>
-                 </div>
-
-                 <div className="grid grid-cols-3 gap-1 px-1">
-                   <button onClick={() => sendAlert('Parado')} className="flex flex-col items-center gap-1 text-white hover:bg-zinc-800 p-2 rounded-xl text-[10px] font-bold transition-colors" title="Parado">
-                     <AlertCircle size={16} className="text-yellow-500" />
-                     <span>Parado</span>
-                   </button>
-                   <button onClick={() => sendAlert('Averiado')} className="flex flex-col items-center gap-1 text-white hover:bg-zinc-800 p-2 rounded-xl text-[10px] font-bold transition-colors" title="Averiado">
-                     <Wrench size={16} className="text-red-500" />
-                     <span>Avería</span>
-                   </button>
-                   <button onClick={() => sendAlert('Repostando')} className="flex flex-col items-center gap-1 text-white hover:bg-zinc-800 p-2 rounded-xl text-[10px] font-bold transition-colors" title="Repostando">
-                     <Fuel size={16} className="text-blue-500" />
-                     <span>Repostar</span>
-                   </button>
-                 </div>
                </div>
              )}
            </div>
@@ -1448,14 +1646,19 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
           {activeAlerts.map(loc => {
             const dist = currentLocation ? getDistance(currentLocation.lat, currentLocation.lng, loc.lat, loc.lng) : null;
             const distStr = dist ? (dist > 1000 ? `${(dist/1000).toFixed(1)}km` : `${Math.round(dist)}m`) : '';
+            const alertUi = getAlertUi(loc.alert?.type);
             return (
-              <div key={loc.uid} className="bg-red-500 text-white p-3 rounded-2xl shadow-2xl flex items-center gap-3 animate-bounce">
-                {getAlertIcon(loc.alert?.type || '')}
-                <div>
-                  <p className="font-bold">{loc.displayName || 'Motero'}</p>
-                  <p className="text-sm">
-                    {loc.alert?.type === 'Caída' ? `¡CAÍDA DETECTADA! a ${distStr}` : loc.alert?.type || 'Alerta'}
-                  </p>
+              <div key={loc.uid} className={`${alertUi.card} text-white p-3 rounded-2xl shadow-2xl border flex items-center gap-3`}>
+                <div className="w-10 h-10 rounded-xl bg-black/20 flex items-center justify-center shrink-0">
+                  {getAlertIcon(loc.alert?.type || '')}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-black text-[11px] tracking-wide">{alertUi.title}</p>
+                    {distStr && <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${alertUi.badge}`}>{distStr}</span>}
+                  </div>
+                  <p className="font-semibold truncate">{loc.displayName || 'Motero'}</p>
+                  <p className="text-xs opacity-90">Aviso en tu ruta</p>
                 </div>
               </div>
             );
@@ -1474,12 +1677,12 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
           >
             {!isPocketLocked ? (
               <div className="text-center space-y-8 p-8">
-                <div className="relative w-32 h-32 mx-auto">
+                <div className="relative w-32 h-32 mx-auto overflow-visible">
                   <svg className="w-full h-full -rotate-90">
                     <circle
                       cx="64"
                       cy="64"
-                      r="60"
+                      r="56"
                       fill="transparent"
                       stroke="currentColor"
                       strokeWidth="8"
@@ -1488,13 +1691,13 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
                     <motion.circle
                       cx="64"
                       cy="64"
-                      r="60"
+                      r="56"
                       fill="transparent"
                       stroke="currentColor"
                       strokeWidth="8"
-                      strokeDasharray="377"
-                      initial={{ strokeDashoffset: 377 }}
-                      animate={{ strokeDashoffset: 377 - (377 * (30 - pocketCountdown) / 30) }}
+                      strokeDasharray="352"
+                      initial={{ strokeDashoffset: 352 }}
+                      animate={{ strokeDashoffset: 352 - (352 * (30 - pocketCountdown) / 30) }}
                       className="text-orange-500"
                     />
                   </svg>
@@ -1564,6 +1767,7 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
       <AnimatePresence>
         {showRanking && (
           <motion.div 
+            ref={rankingPanelRef}
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -20 }}
@@ -1617,6 +1821,9 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
           <div className="flex flex-col items-center justify-center min-w-[80px] sm:min-w-[120px] py-2 sm:py-3 px-3 sm:px-6 bg-white/5 rounded-[1.5rem] sm:rounded-[2rem] border border-white/5 shrink-0 landscape:min-w-[80px] landscape:px-3">
             <span className="text-3xl sm:text-5xl font-black leading-none tracking-tighter text-white tabular-nums">{currentSpeedKmh}</span>
             <span className="text-[8px] sm:text-[9px] font-black uppercase tracking-[0.1em] sm:tracking-[0.2em] text-blue-400 mt-0.5 sm:mt-1">km/h</span>
+            <span className={`text-[9px] sm:text-[10px] font-bold mt-1 ${currentSpeedLimit !== null && currentSpeedKmh > currentSpeedLimit ? 'text-red-400' : 'text-zinc-400'}`}>
+              Límite: {currentSpeedLimit ? `${currentSpeedLimit} km/h` : '--'}
+            </span>
           </div>
 
           {/* Lean Angle & Stats Section */}
@@ -1783,13 +1990,17 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
             position={[radar.lat, radar.lng]} 
             icon={L.divIcon({
               html: `<div style="width: 38px; height: 38px; border-radius: 9999px; background: #ffffff; border: 3px solid #dc2626; display: flex; align-items: center; justify-content: center; box-shadow: 0 6px 14px rgba(0, 0, 0, 0.35);">
-                <img src="/RADAR.png" alt="Radar" style="width: 22px; height: 22px; object-fit: contain;" />
+                <img src="/RADAR.png" alt="Radar" style="width: 22px; height: 22px; object-fit: contain;" onerror="this.style.display='none'; this.parentElement.innerHTML='<span style=&quot;color:#dc2626;font-size:16px;font-weight:900;&quot;>R</span>';" />
               </div>`,
               className: 'custom-radar-icon',
               iconSize: [38, 38],
               iconAnchor: [19, 19]
             })}
-          />
+          >
+            <Popup className="custom-popup">
+              <div className="font-semibold text-center">Radar</div>
+            </Popup>
+          </Marker>
         ))}
 
         {/* Other Users' Markers */}

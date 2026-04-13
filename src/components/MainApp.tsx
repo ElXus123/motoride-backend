@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Dashboard from './Dashboard';
 import MapView from './MapView';
 import Profile from './Profile';
@@ -12,6 +12,7 @@ export default function MainApp() {
   const [repeatedRoute, setRepeatedRoute] = useState<string | null>(null);
   const [showProfile, setShowProfile] = useState(false);
   const [autoJoining, setAutoJoining] = useState(false);
+  const lastBackHandledAtRef = useRef(0);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -41,6 +42,36 @@ export default function MainApp() {
       performAutoJoin();
     }
   }, [user, activeGroupId, autoJoining]);
+
+  // Browser back by layers: profile -> route -> dashboard
+  useEffect(() => {
+    const onPopState = () => {
+      const now = Date.now();
+      if (now - lastBackHandledAtRef.current < 300) return;
+      lastBackHandledAtRef.current = now;
+
+      if (showProfile) {
+        setShowProfile(false);
+        return;
+      }
+      if (activeGroupId || repeatedRoute) {
+        setActiveGroupId(null);
+        setRepeatedRoute(null);
+      }
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [showProfile, activeGroupId, repeatedRoute]);
+
+  useEffect(() => {
+    if (showProfile) window.history.pushState({ layer: 'profile' }, '');
+  }, [showProfile]);
+
+  useEffect(() => {
+    if (activeGroupId || repeatedRoute) {
+      window.history.pushState({ layer: 'route' }, '');
+    }
+  }, [activeGroupId, repeatedRoute]);
 
   if (autoJoining) {
     return (
