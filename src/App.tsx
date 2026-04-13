@@ -13,9 +13,16 @@ const AppContent = () => {
   const { user, loading, error } = useAuth();
   const [showInstallNotice, setShowInstallNotice] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [isSafari, setIsSafari] = useState(false);
+  const [isIOS, setIsIOS] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    const ua = window.navigator.userAgent;
+    const safariDetected = /Safari/i.test(ua) && !/Chrome|CriOS|Edg|OPR|SamsungBrowser/i.test(ua);
+    const iosDetected = /iPhone|iPad|iPod/i.test(ua);
+    setIsSafari(safariDetected);
+    setIsIOS(iosDetected);
 
     const alreadyDismissed = window.localStorage.getItem('motoride_install_notice_dismissed') === 'true';
     const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
@@ -46,6 +53,26 @@ const AppContent = () => {
       setShowInstallNotice(false);
     }
     setDeferredPrompt(null);
+  };
+
+  const requestFullscreen = async () => {
+    try {
+      const el = document.documentElement as any;
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+        return;
+      }
+      if (el.requestFullscreen) {
+        await el.requestFullscreen();
+      } else if (el.webkitRequestFullscreen) {
+        await el.webkitRequestFullscreen();
+      } else {
+        alert('Tu navegador no permite pantalla completa directa. En Safari: Compartir -> Añadir a pantalla de inicio para abrirla a pantalla completa.');
+      }
+    } catch (err) {
+      console.error('Fullscreen not available:', err);
+      alert('No se pudo activar pantalla completa automáticamente. En Safari usa: Compartir -> Añadir a pantalla de inicio.');
+    }
   };
   
   if (loading) {
@@ -91,10 +118,40 @@ const AppContent = () => {
               <div>
                 <h2 className="font-black text-lg leading-tight">Instala MotoRide para mejor rendimiento</h2>
                 <p className="text-zinc-400 text-sm mt-1">
-                  Recomendado abrirla e instalarla desde Chrome como app para una experiencia mas estable.
+                  Te recomendamos instalarla para que cargue mas rapido, use mejor el GPS y funcione como una app real.
                 </p>
               </div>
             </div>
+
+            <div className="rounded-2xl border border-zinc-700 bg-zinc-900/60 p-3 mb-3 text-sm text-zinc-200">
+              <p className="font-semibold mb-1">Como instalarla en 20 segundos:</p>
+              {isSafari ? (
+                <>
+                  <p className="text-zinc-300">1) Abrela en Safari.</p>
+                  <p className="text-zinc-300">2) Pulsa Compartir (icono cuadrado con flecha).</p>
+                  <p className="text-zinc-300">3) Toca Anadir a pantalla de inicio para usarla en modo app.</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-zinc-300">1) Abrela en Chrome.</p>
+                  <p className="text-zinc-300">2) Pulsa Instalar app (si aparece abajo).</p>
+                  <p className="text-zinc-300">3) Si no aparece, usa el menu (tres puntos) -> Instalar aplicacion.</p>
+                </>
+              )}
+            </div>
+
+            {(isSafari || isIOS) && (
+              <div className="rounded-2xl border border-blue-500/30 bg-blue-500/10 p-3 mb-3 text-sm text-zinc-200">
+                <p className="font-semibold mb-2">Recomendado en Safari/iPhone</p>
+                <p className="text-zinc-300 mb-3">Para mejor visibilidad en ruta, usa pantalla completa.</p>
+                <button
+                  onClick={requestFullscreen}
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl py-2.5 transition-colors"
+                >
+                  Activar pantalla completa
+                </button>
+              </div>
+            )}
 
             <div className="rounded-2xl border border-yellow-500/30 bg-yellow-500/10 p-3 mb-5 text-sm text-zinc-200">
               <p className="font-semibold flex items-center gap-2 mb-1"><ShieldAlert size={16} /> Aviso legal y de seguridad</p>
@@ -114,7 +171,7 @@ const AppContent = () => {
                 </button>
               ) : (
                 <div className="flex-1 text-xs text-zinc-400 bg-zinc-900 border border-zinc-800 rounded-xl py-3 px-3 text-center">
-                  En Chrome: menu (⋮) - Instalar aplicacion
+                  {isSafari ? 'Si no puedes instalar: Safari -> Compartir -> Anadir a pantalla de inicio.' : 'Si no ves el boton: Chrome -> menu (tres puntos) -> Instalar aplicacion.'}
                 </div>
               )}
               <button

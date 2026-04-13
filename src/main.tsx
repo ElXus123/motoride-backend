@@ -38,8 +38,8 @@ const setupPWAAssets = () => {
 
   // Build manifest at runtime so icon URL always points to bundled asset.
   const manifest = {
-    name: 'Ruta Motera Pro',
-    short_name: 'RutaMotera',
+    name: 'MotoBikeSocial',
+    short_name: 'MotoBikeSocial',
     description: 'Navegador y telemetria para moteros con inclinometro y radares.',
     start_url: '/',
     scope: '/',
