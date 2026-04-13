@@ -18,6 +18,7 @@ import { getActivePointsConfig } from '../lib/pointsConfig';
 import { fetchRainViewerTileUrl } from '../lib/rainviewer';
 import socket from '../lib/socket';
 import { useVoiceChat } from '../hooks/useVoiceChat';
+import PremiumBadge from './PremiumBadge';
 import { Upload, ArrowLeft, Copy, Check, Navigation, AlertTriangle, Play, Square, ArrowUp, MapPin, Trophy, Bell, AlertCircle, Wrench, Fuel, X, Maximize, Minimize, Search, Share2, Menu, Moon, Sun, Target, LogOut, Users, Mic, MicOff, ShieldAlert, Activity, Layers, Lock, LockOpen, Smartphone, RotateCw, Crown } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -40,14 +41,20 @@ type ScreenOrientationLockArg =
   | 'landscape-secondary';
 
 // Custom icon creator for avatars with level
-const createAvatarIcon = (url: string, level: number = 1) => {
+const createAvatarIcon = (url: string, level: number = 1, isPremium: boolean = false) => {
+  const ring = isPremium ? '#f59e0b' : '#f97316';
+  const lvlBg = isPremium ? '#d97706' : '#f97316';
+  const crown = isPremium
+    ? `<div style="position:absolute;top:-5px;left:-3px;width:17px;height:17px;background:linear-gradient(160deg,#fde68a,#f59e0b);border-radius:50%;border:2px solid #18181b;box-shadow:0 1px 4px rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;font-size:9px;line-height:1;">👑</div>`
+    : '';
   return L.divIcon({
     className: 'custom-avatar-icon',
     html: `<div style="position: relative; width: 44px; height: 44px;">
-             <div style="width: 40px; height: 40px; border-radius: 50%; overflow: hidden; border: 3px solid #f97316; background: white; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">
+             ${crown}
+             <div style="width: 40px; height: 40px; border-radius: 50%; overflow: hidden; border: 3px solid ${ring}; background: white; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">
                <img src="${url || 'https://via.placeholder.com/40'}" style="width: 100%; height: 100%; object-fit: cover;" />
              </div>
-             <div style="position: absolute; bottom: -2px; right: -2px; background: #f97316; color: white; border-radius: 50%; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 900; border: 2px solid #18181b; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">
+             <div style="position: absolute; bottom: -2px; right: -2px; background: ${lvlBg}; color: white; border-radius: 50%; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 900; border: 2px solid #18181b; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">
                ${level}
              </div>
            </div>`,
@@ -57,7 +64,21 @@ const createAvatarIcon = (url: string, level: number = 1) => {
 };
 
 // Component for the current user marker to handle smooth rotation and position
-const CurrentUserMarker = ({ position, heading, displayNameToUse, userLevel, score }: { position: [number, number], heading: number, displayNameToUse: string, userLevel: number, score: number }) => {
+const CurrentUserMarker = ({
+  position,
+  heading,
+  displayNameToUse,
+  userLevel,
+  score,
+  isPremium
+}: {
+  position: [number, number];
+  heading: number;
+  displayNameToUse: string;
+  userLevel: number;
+  score: number;
+  isPremium?: boolean;
+}) => {
   const markerRef = useRef<any>(null);
   
   const icon = useMemo(() => {
@@ -97,6 +118,7 @@ const CurrentUserMarker = ({ position, heading, displayNameToUse, userLevel, sco
         <div className="font-semibold text-center">{displayNameToUse} (Tú)</div>
         <div className="text-xs text-gray-500 text-center">
           Nivel {userLevel} • {score} pts
+          {isPremium ? <div className="mt-1 text-amber-500 font-bold">Premium</div> : null}
         </div>
       </Popup>
     </Marker>
@@ -224,6 +246,35 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
   const [customName, setCustomName] = useState<string | null>(null);
   const [customPhotoURL, setCustomPhotoURL] = useState<string | null>(null);
   const [group, setGroup] = useState<any>(null);
+  const [memberPremiumByUid, setMemberPremiumByUid] = useState<Record<string, boolean>>({});
+
+  const groupMembersKey = useMemo(() => {
+    if (!Array.isArray(group?.members)) return '';
+    return [...group.members].filter(Boolean).sort().join('|');
+  }, [group?.members]);
+
+  useEffect(() => {
+    if (!groupMembersKey) {
+      setMemberPremiumByUid({});
+      return;
+    }
+    const ids = groupMembersKey.split('|').filter(Boolean);
+    const unsubs = ids.map((uid) =>
+      onSnapshot(
+        doc(db, 'users', uid),
+        (snap) => {
+          const v = snap.exists() && snap.data()?.isPremium === true;
+          setMemberPremiumByUid((prev) => (prev[uid] === v ? prev : { ...prev, [uid]: v }));
+        },
+        () => {
+          setMemberPremiumByUid((prev) => (uid in prev ? { ...prev, [uid]: false } : prev));
+        }
+      )
+    );
+    return () => {
+      unsubs.forEach((u) => u());
+    };
+  }, [groupMembersKey]);
 
   useEffect(() => {
     if (!user) return;
@@ -252,7 +303,6 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
   const [weatherFetchFailed, setWeatherFetchFailed] = useState(false);
   const [weatherTilesLoaded, setWeatherTilesLoaded] = useState(false);
   const [weatherTileErrors, setWeatherTileErrors] = useState(0);
-  const [useFirestoreFallback, setUseFirestoreFallback] = useState(true);
   const [distance, setDistance] = useState(0); // in km
   const [localDistance, setLocalDistance] = useState(0); // for auto-start and save check
   const lastLocRef = useRef<{lat: number, lng: number} | null>(null);
@@ -737,32 +787,6 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
     return unsub;
   }, [groupId, preloadedRoute]);
 
-  useEffect(() => {
-    let connectTimer: any;
-    const onConnect = () => {
-      if (connectTimer) clearTimeout(connectTimer);
-      // Keep fallback briefly for bootstrap/late packets, then turn it off.
-      connectTimer = setTimeout(() => setUseFirestoreFallback(false), 8000);
-    };
-    const onDisconnect = () => {
-      setUseFirestoreFallback(true);
-    };
-
-    socket.on('connect', onConnect);
-    socket.on('disconnect', onDisconnect);
-    if (socket.connected) {
-      onConnect();
-    } else {
-      setUseFirestoreFallback(true);
-    }
-
-    return () => {
-      if (connectTimer) clearTimeout(connectTimer);
-      socket.off('connect', onConnect);
-      socket.off('disconnect', onDisconnect);
-    };
-  }, [groupId]);
-
   // Listen to locations of group members via Socket.io
   useEffect(() => {
     const handleLocationUpdate = (data: any) => {
@@ -800,8 +824,9 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
     socket.on('alert-triggered', handleAlertTriggered);
 
     const unsubs: Array<() => void> = [];
-    // Keep Firestore listener only as fallback (socket unhealthy / bootstrap).
-    if (useFirestoreFallback && group?.members?.length) {
+    // Firestore en paralelo al socket: cuando alguien entra tarde, el host sigue viendo su doc locations/
+    // aunque falle un paquete o el socket estuviera ya en modo "solo tiempo real".
+    if (group?.members?.length) {
       const chunks = [];
       for (let i = 0; i < group.members.length; i += 10) {
         chunks.push(group.members.slice(i, i + 10));
@@ -843,7 +868,7 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
       socket.off('alert-triggered', handleAlertTriggered);
       unsubs.forEach(u => u());
     };
-  }, [group?.members, useFirestoreFallback]);
+  }, [group?.members]);
 
   useEffect(() => {
     if (isHost) return;
@@ -1725,8 +1750,11 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
   );
 
   const markerLocations = useMemo(
-    () => otherLocations.filter(loc => typeof loc.lat === 'number' && typeof loc.lng === 'number'),
-    [otherLocations]
+    () =>
+      otherLocations
+        .filter((loc) => typeof loc.lat === 'number' && typeof loc.lng === 'number')
+        .map((loc) => ({ ...loc, isPremium: memberPremiumByUid[loc.uid] === true })),
+    [otherLocations, memberPremiumByUid]
   );
 
   // Find active alerts from other users
@@ -1737,9 +1765,23 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
 
   const rankingLocations = useMemo(
     () =>
-      [...otherLocations, { uid: user?.uid, displayName: user?.displayName || 'Tú', score: score, photoURL: user?.photoURL, level: userLevel }]
+      [
+        ...otherLocations.map((l) => ({
+          ...l,
+          isPremium: memberPremiumByUid[l.uid] === true
+        })),
+        {
+          uid: user?.uid,
+          displayName: user?.displayName || 'Tú',
+          score: score,
+          photoURL: user?.photoURL,
+          level: userLevel,
+          isPremium: user?.isPremium === true
+        }
+      ]
+        .filter((row) => row.uid)
         .sort((a, b) => (b.score || 0) - (a.score || 0)),
-    [otherLocations, user?.uid, user?.displayName, user?.photoURL, score, userLevel]
+    [otherLocations, user?.uid, user?.displayName, user?.photoURL, user?.isPremium, score, userLevel, memberPremiumByUid]
   );
 
   // Real participant count: unique UIDs, counting current user once.
@@ -2269,7 +2311,10 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
                       </div>
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs font-bold text-white truncate">{loc.displayName}</p>
+                      <p className="text-xs font-bold text-white truncate flex items-center gap-1.5">
+                        <span className="truncate">{loc.displayName}</span>
+                        {loc.isPremium ? <PremiumBadge compact /> : null}
+                      </p>
                       <p className="text-[10px] text-zinc-500 font-mono">{loc.score || 0} pts</p>
                     </div>
                   </div>
@@ -2459,6 +2504,8 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
             maxZoom={20}
             crossOrigin
             className="leaflet-radar-overlay"
+            keepBuffer={24}
+            noWrap={false}
             eventHandlers={{
               tileload: () => setWeatherTilesLoaded(true),
               tileerror: () => setWeatherTileErrors((e) => e + 1),
@@ -2507,12 +2554,18 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
         ))}
 
         {/* Other Users' Markers */}
-        {markerLocations.map(loc => (
-          <Marker key={loc.uid} position={[loc.lat, loc.lng]} icon={createAvatarIcon(loc.photoURL, loc.level)} zIndexOffset={100}>
+        {markerLocations.map((loc) => (
+          <Marker
+            key={loc.uid}
+            position={[loc.lat, loc.lng]}
+            icon={createAvatarIcon(loc.photoURL, loc.level, loc.isPremium === true)}
+            zIndexOffset={100}
+          >
             <Popup className="custom-popup">
               <div className="font-semibold text-center">{loc.displayName}</div>
               <div className="text-xs text-gray-500 text-center">
                 Nivel {loc.level || 1} • {loc.score || 0} pts
+                {loc.isPremium ? <div className="mt-1 text-amber-500 font-bold">Premium</div> : null}
               </div>
             </Popup>
           </Marker>
@@ -2520,12 +2573,13 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
 
         {/* Current User Marker (Navigation Arrow) */}
         {displayLocation && typeof displayLocation.lat === 'number' && typeof displayLocation.lng === 'number' && (
-          <CurrentUserMarker 
+          <CurrentUserMarker
             position={[displayLocation.lat, displayLocation.lng]}
             heading={currentSpeedKmh > 2 ? navigationHeading : 0}
             displayNameToUse={displayNameToUse}
             userLevel={userLevel}
             score={score}
+            isPremium={user?.isPremium === true}
           />
         )}
 

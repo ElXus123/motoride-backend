@@ -111,9 +111,11 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
   const setUserPremium = async (uid: string, isPremium: boolean) => {
     try {
       await updateDoc(doc(db, 'users', uid), { isPremium });
+      setPremiumSearchResults((prev) => prev.map((u) => (u.id === uid ? { ...u, isPremium } : u)));
+      window.alert(isPremium ? 'Usuario marcado como Premium.' : 'Premium desactivado para este usuario.');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${uid}`);
-      window.alert('No se pudo actualizar el estado Premium.');
+      window.alert('No se pudo actualizar el estado Premium. ¿Reglas de Firestore desplegadas?');
     }
   };
 

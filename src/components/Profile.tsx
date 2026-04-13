@@ -5,6 +5,7 @@ import { updateProfile } from 'firebase/auth';
 import { db, auth, logOut, handleFirestoreError, OperationType } from '../firebase';
 import { calculateLevel } from '../lib/utils';
 import { ArrowLeft, Camera, LogOut } from 'lucide-react';
+import PremiumBadge from './PremiumBadge';
 
 export default function Profile({ onBack }: { onBack: () => void }) {
   const { user } = useAuth();
@@ -96,7 +97,11 @@ export default function Profile({ onBack }: { onBack: () => void }) {
 
         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-3xl flex flex-col items-center">
           <div className="relative mb-6 group">
-            <div className="w-32 h-32 rounded-full overflow-hidden border-4 border-orange-500 bg-zinc-800">
+            <div
+              className={`w-32 h-32 rounded-full overflow-hidden border-4 bg-zinc-800 ${
+                user?.isPremium === true || userData?.isPremium === true ? 'border-amber-500' : 'border-orange-500'
+              }`}
+            >
               {photoURL ? (
                 <img src={photoURL} alt="Avatar" className="w-full h-full object-cover" />
               ) : (
@@ -108,6 +113,12 @@ export default function Profile({ onBack }: { onBack: () => void }) {
               <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
             </label>
           </div>
+
+          {(user?.isPremium === true || userData?.isPremium === true) && (
+            <div className="mb-4">
+              <PremiumBadge />
+            </div>
+          )}
 
           {/* Experience Bar */}
           {userData && (() => {

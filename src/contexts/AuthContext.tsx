@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, onAuthStateChanged } from 'firebase/auth';
-import { doc, setDoc, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 
 interface AuthContextType {
@@ -43,15 +43,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         
         const userRef = doc(db, 'users', currentUser.uid);
         try {
-          await setDoc(userRef, {
+          const existing = await getDoc(userRef);
+          const profileBase = {
             uid: currentUser.uid,
             displayName: currentUser.displayName || 'Motero',
             email: currentUser.email || '',
             displayNameLower: (currentUser.displayName || 'Motero').toLowerCase(),
-            friends: [],
-            friendRequestsIncoming: [],
-            friendRequestsOutgoing: [],
-          }, { merge: true });
+          };
+          // Nunca volver a escribir friends/solicitudes en cada login: merge sobrescribe esos campos y vacía la lista.
+          if (!existing.exists()) {
+            await setDoc(userRef, {
+              ...profileBase,
+              friends: [],
+              friendRequestsIncoming: [],
+              friendRequestsOutgoing: [],
+            });
+          } else {
+            await setDoc(userRef, profileBase, { merge: true });
+          }
         } catch (err: any) {
           console.error("Error saving user to Firestore:", err);
           if (err.message?.includes('quota') || err.code === 'resource-exhausted') {

@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, getDocs, doc, getDoc, updateDoc, arrayUnion, arrayRemove, onSnapshot, orderBy, limit, startAt, endAt, where } from 'firebase/firestore';
+import { collection, query, getDocs, doc, getDoc, updateDoc, writeBatch, arrayUnion, arrayRemove, onSnapshot, orderBy, limit, startAt, endAt, where } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { X, Search, UserPlus, UserMinus, User as UserIcon, Play, Check, Clock, Ban } from 'lucide-react';
+import PremiumBadge from './PremiumBadge';
 
 export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () => void, onRepeatRoute: (route: string) => void }) {
   const { user } = useAuth();
@@ -127,8 +128,10 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
   const removeFriend = async (friendId: string) => {
     if (!user) return;
     try {
-      await updateDoc(doc(db, 'users', user.uid), { friends: arrayRemove(friendId) });
-      await updateDoc(doc(db, 'users', friendId), { friends: arrayRemove(user.uid) });
+      const batch = writeBatch(db);
+      batch.update(doc(db, 'users', user.uid), { friends: arrayRemove(friendId) });
+      batch.update(doc(db, 'users', friendId), { friends: arrayRemove(user.uid) });
+      await batch.commit();
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
     }
@@ -137,8 +140,10 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
   const sendFriendRequest = async (targetId: string) => {
     if (!user || targetId === user.uid) return;
     try {
-      await updateDoc(doc(db, 'users', user.uid), { friendRequestsOutgoing: arrayUnion(targetId) });
-      await updateDoc(doc(db, 'users', targetId), { friendRequestsIncoming: arrayUnion(user.uid) });
+      const batch = writeBatch(db);
+      batch.update(doc(db, 'users', user.uid), { friendRequestsOutgoing: arrayUnion(targetId) });
+      batch.update(doc(db, 'users', targetId), { friendRequestsIncoming: arrayUnion(user.uid) });
+      await batch.commit();
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
     }
@@ -147,8 +152,10 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
   const cancelFriendRequest = async (targetId: string) => {
     if (!user) return;
     try {
-      await updateDoc(doc(db, 'users', user.uid), { friendRequestsOutgoing: arrayRemove(targetId) });
-      await updateDoc(doc(db, 'users', targetId), { friendRequestsIncoming: arrayRemove(user.uid) });
+      const batch = writeBatch(db);
+      batch.update(doc(db, 'users', user.uid), { friendRequestsOutgoing: arrayRemove(targetId) });
+      batch.update(doc(db, 'users', targetId), { friendRequestsIncoming: arrayRemove(user.uid) });
+      await batch.commit();
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
     }
@@ -157,14 +164,16 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
   const acceptFriendRequest = async (requesterId: string) => {
     if (!user) return;
     try {
-      await updateDoc(doc(db, 'users', user.uid), {
+      const batch = writeBatch(db);
+      batch.update(doc(db, 'users', user.uid), {
         friendRequestsIncoming: arrayRemove(requesterId),
         friends: arrayUnion(requesterId)
       });
-      await updateDoc(doc(db, 'users', requesterId), {
+      batch.update(doc(db, 'users', requesterId), {
         friendRequestsOutgoing: arrayRemove(user.uid),
         friends: arrayUnion(user.uid)
       });
+      await batch.commit();
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
     }
@@ -173,8 +182,10 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
   const rejectFriendRequest = async (requesterId: string) => {
     if (!user) return;
     try {
-      await updateDoc(doc(db, 'users', user.uid), { friendRequestsIncoming: arrayRemove(requesterId) });
-      await updateDoc(doc(db, 'users', requesterId), { friendRequestsOutgoing: arrayRemove(user.uid) });
+      const batch = writeBatch(db);
+      batch.update(doc(db, 'users', user.uid), { friendRequestsIncoming: arrayRemove(requesterId) });
+      batch.update(doc(db, 'users', requesterId), { friendRequestsOutgoing: arrayRemove(user.uid) });
+      await batch.commit();
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
     }
@@ -225,7 +236,11 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
           {selectedUser ? (
             <div className="space-y-6">
               <div className="flex items-center gap-4">
-                <div className="w-20 h-20 rounded-full overflow-hidden border-2 border-orange-500 bg-zinc-800">
+                <div
+                  className={`w-20 h-20 rounded-full overflow-hidden border-2 bg-zinc-800 ${
+                    selectedUser.isPremium === true ? 'border-amber-500' : 'border-orange-500'
+                  }`}
+                >
                   {selectedUser.photoURL ? (
                     <img src={selectedUser.photoURL} alt="Avatar" className="w-full h-full object-cover" />
                   ) : (
@@ -235,7 +250,10 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                   )}
                 </div>
                 <div>
-                  <h3 className="text-2xl font-bold">{selectedUser.displayName}</h3>
+                  <h3 className="text-2xl font-bold flex items-center gap-2 flex-wrap">
+                    {selectedUser.displayName}
+                    {selectedUser.isPremium === true ? <PremiumBadge /> : null}
+                  </h3>
                   <p className="text-zinc-400">Nivel {selectedUser.level || 1} • {selectedUser.points || 0} pts</p>
                 </div>
               </div>
@@ -323,7 +341,10 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                               {res.photoURL ? <img src={res.photoURL} alt="" className="w-full h-full object-cover" /> : <UserIcon size={20} className="m-auto h-full text-zinc-500" />}
                             </div>
                             <div>
-                              <p className="font-bold">{res.displayName}</p>
+                              <p className="font-bold flex items-center gap-2 flex-wrap">
+                                {res.displayName}
+                                {res.isPremium === true ? <PremiumBadge compact /> : null}
+                              </p>
                               <p className="text-xs text-zinc-500">Nivel {res.level || 1}</p>
                             </div>
                           </div>
@@ -370,7 +391,10 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                   <div className="space-y-2">
                     {incomingUsers.map((u) => (
                         <div key={`incoming-${u.uid || u.id}`} className="flex items-center justify-between bg-zinc-950 border border-zinc-800 p-3 rounded-xl">
-                          <p className="text-sm font-semibold">{u.displayName}</p>
+                          <p className="text-sm font-semibold flex items-center gap-2">
+                            {u.displayName}
+                            {u.isPremium === true ? <PremiumBadge compact /> : null}
+                          </p>
                           <div className="flex gap-2">
                             <button onClick={() => acceptFriendRequest(u.uid)} className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"><Check size={18} /></button>
                             <button onClick={() => rejectFriendRequest(u.uid)} className="p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20"><Ban size={18} /></button>
@@ -398,7 +422,10 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                             {friend.photoURL ? <img src={friend.photoURL} alt="" className="w-full h-full object-cover" /> : <UserIcon size={20} className="m-auto h-full text-zinc-500" />}
                           </div>
                           <div className="min-w-0">
-                            <p className="font-bold truncate">{friend.displayName}</p>
+                            <p className="font-bold truncate flex items-center gap-2">
+                              <span className="truncate">{friend.displayName}</span>
+                              {friend.isPremium === true ? <PremiumBadge compact /> : null}
+                            </p>
                             <p className="text-xs text-zinc-500">Nivel {friend.level || 1}</p>
                           </div>
                         </div>

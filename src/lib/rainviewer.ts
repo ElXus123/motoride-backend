@@ -17,7 +17,13 @@ const DEFAULT_HOST = 'https://tilecache.rainviewer.com';
 export async function fetchRainViewerTileUrl(): Promise<{ baseUrl: string; maxNativeZoom: number } | null> {
   const buildUrl = (data: WeatherMapsApi): { baseUrl: string; maxNativeZoom: number } | null => {
     const host = (data.host || DEFAULT_HOST).replace(/\/$/, '');
-    const frames = data.radar?.nowcast?.length ? data.radar.nowcast : data.radar?.past;
+    // Preferir `past` (mosaico de observación global); `nowcast` a veces es más acotado regionalmente.
+    const frames =
+      data.radar?.past && data.radar.past.length > 0
+        ? data.radar.past
+        : data.radar?.nowcast && data.radar.nowcast.length > 0
+          ? data.radar.nowcast
+          : null;
     const last = frames && frames.length ? frames[frames.length - 1] : null;
     const path = last?.path;
     if (!path) return null;

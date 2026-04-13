@@ -47,6 +47,8 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
   const peersRef = useRef<{ [key: string]: Peer.Instance }>({});
   const peerStreamsRef = useRef<{ [key: string]: MediaStream }>({});
   const audioRefs = useRef<{ [key: string]: HTMLAudioElement }>({});
+  const canUseVoiceRef = useRef(canUseVoice);
+  canUseVoiceRef.current = canUseVoice;
 
   const clearMicError = useCallback(() => setMicError(null), []);
 
@@ -151,7 +153,7 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
     if (!groupId || !canUseVoice) return;
 
     const handleUserJoined = (callerId: string) => {
-      if (!masterStreamRef.current) return;
+      if (!canUseVoiceRef.current || !masterStreamRef.current) return;
       if (peersRef.current[callerId]) return;
 
       let localStream: MediaStream;
@@ -192,7 +194,7 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
     };
 
     const handleSignal = (data: { caller: string; signal: any }) => {
-      if (!masterStreamRef.current) return;
+      if (!canUseVoiceRef.current || !masterStreamRef.current) return;
 
       const { caller, signal } = data;
 
@@ -258,8 +260,26 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
     };
   }, [groupId, canUseVoice]);
 
+  useEffect(() => {
+    if (canUseVoice) return;
+    if (masterStreamRef.current) {
+      try {
+        masterStreamRef.current.getTracks().forEach((t) => t.stop());
+      } catch {
+        /* ignore */
+      }
+      masterStreamRef.current = null;
+    }
+    Object.keys(peersRef.current).forEach((peerId) => removePeer(peerId));
+    setIsVoiceActive(false);
+    setPeers({});
+    if (groupId) {
+      socket.emit('leave-voice', groupId);
+    }
+  }, [canUseVoice, groupId]);
+
   const toggleVoice = async () => {
-    if (!canUseVoice) return;
+    if (!canUseVoiceRef.current) return;
     if (isVoiceActive) {
       setMicError(null);
       Object.keys(peersRef.current).forEach((peerId) => removePeer(peerId));
@@ -289,6 +309,10 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
           20000,
           'El micrófono no respondió a tiempo. Reinicia la pestaña y vuelve a pulsar voz.'
         );
+        if (!canUseVoiceRef.current) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
         masterStreamRef.current = stream;
         socket.emit('join-voice', groupId);
         setIsVoiceActive(true);

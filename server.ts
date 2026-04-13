@@ -40,8 +40,10 @@ async function startServer() {
       (socket as any).groupId = data.groupId;
       (socket as any).uid = data.uid;
       console.log(`User ${socket.id} (uid: ${data.uid}) joined group: ${data.groupId}`);
-      // Pide a los demás que reenvíen posición: el host ve al recién unido aunque llevara el mapa abierto sin refrescar.
+      // Los que ya estaban reenvían su posición (el recién unido ve al host).
       socket.to(data.groupId).emit("location-sync-request", { joinedUid: data.uid });
+      // El recién unido también reenvía la suya: el host la recibe aunque el primer paquete se perdiera.
+      socket.emit("location-sync-request", { joinedUid: data.uid, self: true });
     });
 
     socket.on("leave-group", (data: { groupId: string, uid: string, isHost?: boolean, timestamp?: number }) => {

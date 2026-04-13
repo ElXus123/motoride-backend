@@ -10,6 +10,7 @@ import { requestJson } from '../lib/network';
 import { Users, Plus, LogOut, User as UserIcon, Activity, Trash2, Trophy, Calendar, MapPin, Search, Clock, ChevronRight, Upload, X, Map as MapIcon, Play, HeartHandshake, CircleDollarSign, Shield, CheckCircle2, AlertCircle, Mail } from 'lucide-react';
 import FriendsModal from './FriendsModal';
 import AdminPointsPanel from './AdminPointsPanel';
+import PremiumBadge from './PremiumBadge';
 
 interface DashboardProps {
   onJoinGroup: (id: string) => void;
@@ -550,6 +551,12 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     const groupRef = doc(db, 'groups', routeCode);
     try {
       if (isJoined) {
+        const snap = await getDoc(groupRef);
+        const d = snap.data();
+        if (d?.isScheduled === true && d?.createdBy === user.uid) {
+          alert('Como organizador de una ruta programada no puedes desapuntarte. Borra la ruta si ya no la quieres.');
+          return;
+        }
         await updateDoc(groupRef, {
           members: arrayRemove(user.uid)
         });
@@ -619,6 +626,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
               <span className="text-[11px] font-black text-orange-400 bg-orange-500/15 rounded-full px-2 py-0.5 whitespace-nowrap">
                 Lv. {level}
               </span>
+              {(user?.isPremium === true || userData?.isPremium === true) && <PremiumBadge compact />}
               <p className="text-sm font-bold text-white truncate max-w-[42vw] sm:max-w-xs">
                 {userData?.displayName || user?.displayName || 'Motero'}
               </p>
@@ -655,36 +663,19 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       </header>
 
       <main className="max-w-5xl mx-auto p-6 space-y-8">
-        {/* Support */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="md:col-span-2" />
-
-          <div className="flex flex-col gap-3">
-            <a
-              href="mailto:juarp123@gmail.com?subject=Soporte%20MotoRide&body=Describe%20tu%20problema%20%28dispositivo%2C%20pasos%20para%20reproducirlo%29%3A%0A%0A"
-              className="bg-zinc-900 border border-zinc-800 hover:border-sky-500/40 rounded-2xl px-4 py-3 flex items-center justify-center gap-3 transition-all"
-            >
-              <div className="w-9 h-9 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center">
-                <Mail size={18} />
-              </div>
-              <div className="text-left">
-                <p className="text-sm font-bold text-white">Soporte</p>
-                <p className="text-[11px] text-zinc-500">juarp123@gmail.com</p>
-              </div>
-            </a>
-            <button
-              onClick={() => setShowSupportModal(true)}
-              className="bg-zinc-900 border border-zinc-800 hover:border-orange-500/40 rounded-2xl px-4 py-3 flex items-center justify-center gap-3 transition-all"
-            >
-              <div className="w-9 h-9 rounded-xl bg-orange-500/20 text-orange-400 flex items-center justify-center">
-                <HeartHandshake size={18} />
-              </div>
-              <div className="text-left">
-                <p className="text-sm font-bold text-white">Apoyar proyecto</p>
-                <p className="text-[11px] text-zinc-500">Ko-fi · desbloquea Premium (revisión manual)</p>
-              </div>
-            </button>
-          </div>
+        <div className="flex justify-end">
+          <button
+            onClick={() => setShowSupportModal(true)}
+            className="w-full max-w-sm bg-zinc-900 border border-zinc-800 hover:border-orange-500/40 rounded-2xl px-4 py-3 flex items-center justify-center gap-3 transition-all"
+          >
+            <div className="w-9 h-9 rounded-xl bg-orange-500/20 text-orange-400 flex items-center justify-center">
+              <HeartHandshake size={18} />
+            </div>
+            <div className="text-left">
+              <p className="text-sm font-bold text-white">Apoyar proyecto</p>
+              <p className="text-[11px] text-zinc-500">Ko-fi · desbloquea Premium (revisión manual)</p>
+            </div>
+          </button>
         </div>
 
         {pointsFixError && (
@@ -814,12 +805,19 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                       {(() => {
                         const isJoined = route.members?.includes(user?.uid);
                         const isLive = Date.now() >= route.scheduledTimestamp;
+                        const isCreator = route.createdBy === user?.uid;
                         return (
                           <button 
-                            onClick={() => isLive ? joinGroup(route.code) : toggleRSVP(route.code, isJoined)}
-                            className={`flex-1 py-2 text-white text-sm font-bold rounded-xl transition-all ${isLive ? 'bg-orange-500 hover:bg-orange-600' : (isJoined ? 'bg-red-500/20 text-red-500 hover:bg-red-500/30' : 'bg-blue-500 hover:bg-blue-600')}`}
+                            onClick={() => {
+                              if (isLive) joinGroup(route.code);
+                              else if (isJoined && isCreator) return;
+                              else toggleRSVP(route.code, isJoined);
+                            }}
+                            disabled={!isLive && isJoined && isCreator}
+                            title={!isLive && isJoined && isCreator ? 'Como organizador, borra la ruta si no quieres participar' : undefined}
+                            className={`flex-1 py-2 text-white text-sm font-bold rounded-xl transition-all ${isLive ? 'bg-orange-500 hover:bg-orange-600' : (isJoined && isCreator) ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-70' : (isJoined ? 'bg-red-500/20 text-red-500 hover:bg-red-500/30' : 'bg-blue-500 hover:bg-blue-600')}`}
                           >
-                            {isLive ? 'Unirse a la ruta' : (isJoined ? 'Desapuntarse' : 'Apuntarse')}
+                            {isLive ? 'Unirse a la ruta' : (isJoined && isCreator) ? 'Organizador' : (isJoined ? 'Desapuntarse' : 'Apuntarse')}
                           </button>
                         );
                       })()}
@@ -913,6 +911,10 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                             <ChevronRight size={12} />
                             Unirse a la ruta
                           </button>
+                        ) : route.createdBy === user?.uid ? (
+                          <div className="flex-1 py-1.5 text-[10px] font-medium rounded-lg flex items-center justify-center gap-1 bg-zinc-800/80 text-zinc-500 border border-zinc-700/80 text-center px-1">
+                            Eres el organizador — usa la papelera para borrar la ruta
+                          </div>
                         ) : (
                           <button 
                             onClick={() => toggleRSVP(route.code, true)}
