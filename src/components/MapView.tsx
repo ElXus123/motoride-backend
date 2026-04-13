@@ -632,16 +632,6 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
     return currentLocation;
   }, [currentLocation, navState.routeGeometry, parsedRoute]);
 
-  useEffect(() => {
-    if (isRecording || summaryData) return;
-    const draft = readRideDraft();
-    if (draft?.summaryData) {
-      setSummaryData(draft.summaryData);
-      setRecordedPath(Array.isArray(draft.path) ? draft.path : []);
-      setShowSummary(true);
-    }
-  }, [isRecording, summaryData]);
-
   const { nearbyRadar, radars } = useRoadData(currentLocation);
   const { isVoiceActive, toggleVoice, peersCount } = useVoiceChat(groupId);
 
@@ -982,6 +972,16 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
   const [isSharingSummary, setIsSharingSummary] = useState(false);
   const groupDeletedRef = useRef(false);
   const wakeLockRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (isRecording || summaryData) return;
+    const draft = readRideDraft();
+    if (draft?.summaryData) {
+      setSummaryData(draft.summaryData);
+      setRecordedPath(Array.isArray(draft.path) ? draft.path : []);
+      setShowSummary(true);
+    }
+  }, [isRecording, summaryData]);
 
   const persistRideDraft = (payload: any) => {
     try {

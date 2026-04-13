@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { Component, type ReactNode, useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Login from './components/Login';
 import MainApp from './components/MainApp';
@@ -39,8 +39,8 @@ const runOneShotRecoveryReload = async () => {
   }
 };
 
-class AppErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
-  constructor(props: { children: React.ReactNode }) {
+class AppErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+  constructor(props: { children: ReactNode }) {
     super(props);
     this.state = { hasError: false };
   }
@@ -54,7 +54,7 @@ class AppErrorBoundary extends React.Component<{ children: React.ReactNode }, { 
     runOneShotRecoveryReload();
   }
 
-  render() {
+  render(): ReactNode {
     if (this.state.hasError) {
       return (
         <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center p-6 text-center text-white">

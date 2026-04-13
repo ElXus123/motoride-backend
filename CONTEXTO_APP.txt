@@ -265,6 +265,17 @@ Registro de cambios de sesiones
     - src/components/Profile.tsx
     - src/components/AdminPointsPanel.tsx
     - src/components/FriendsModal.tsx
+  - Fix de build Cloudflare:
+    - Se corrige tipado del ErrorBoundary en App.tsx para TS estricto.
+    - Se reubica efecto de restauracion de borrador en MapView para evitar
+      uso de variables antes de declaracion (isRecording/summaryData).
+  - Archivos tocados:
+    - src/App.tsx
+    - src/components/MapView.tsx
+  - Confirmacion de registro:
+    - Se deja documentado explicitamente este fix de compilacion para
+      Cloudflare (errores TS2339 y TS2448 resueltos) como parte del
+      historial de cambios previo a deploy.
 
 Plantilla para futuras entradas
 - [AAAA-MM-DD]:
