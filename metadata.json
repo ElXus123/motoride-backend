@@ -1,0 +1,9 @@
+{
+  "name": "MotoRide",
+  "description": "Navegador y telemetría para moteros con inclinómetro, radares y rutas en tiempo real.",
+  "requestFramePermissions": [
+    "geolocation",
+    "camera",
+    "microphone"
+  ]
+}
