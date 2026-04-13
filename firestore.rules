@@ -57,6 +57,12 @@ service cloud.firestore {
              isValidOptionalBool('isPremium');
     }
 
+    function isOptionalRouteGeoJSON(data) {
+      return !('routeGeoJSON' in data) ||
+             data.routeGeoJSON == null ||
+             (data.routeGeoJSON is string && data.routeGeoJSON.size() <= 1000000);
+    }
+
     function isValidGroup(data) {
       return hasRequiredFields(['name', 'code', 'createdBy', 'members', 'isScheduled', 'scheduledTimestamp', 'createdAt']) &&
              isValidString('name', 1, 100) &&
@@ -66,7 +72,7 @@ service cloud.firestore {
              data.members.size() <= 100 &&
              isValidNumber('scheduledTimestamp') &&
              isValidNumber('createdAt') &&
-             isValidOptionalString('routeGeoJSON', 1000000) &&
+             isOptionalRouteGeoJSON(data) &&
              isValidOptionalString('province', 50) &&
              isValidOptionalString('municipality', 50) &&
              isValidOptionalString('description', 500) &&

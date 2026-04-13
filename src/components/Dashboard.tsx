@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { doc, setDoc, getDoc, updateDoc, arrayUnion, arrayRemove, collection, query, where, onSnapshot, deleteDoc, orderBy, limit } from 'firebase/firestore';
@@ -127,6 +127,13 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   const [destination, setDestination] = useState('');
   const [destinationPreview, setDestinationPreview] = useState<string | null>(null);
   const [destinationSuggestions, setDestinationSuggestions] = useState<any[]>([]);
+  /** Si el usuario elige una sugerencia, reutilizamos coords y evitamos otra petición Nominatim al generar. */
+  const destinationPickedRef = useRef<{
+    displayName: string;
+    lat: number;
+    lon: number;
+    address?: Record<string, string>;
+  } | null>(null);
   const [routeOptions, setRouteOptions] = useState({
     curves: true,
     secondary: true,
@@ -145,9 +152,9 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       return;
     }
     const timer = setTimeout(async () => {
-      const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(destination)}&limit=5&countrycodes=es`;
+      const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(destination)}&limit=5&countrycodes=es&addressdetails=1`;
       try {
-        const geoData = await requestJson<any[]>(geocodeUrl, { timeoutMs: 9000, retries: 1, backoffMs: 500 });
+        const geoData = await requestJson<any[]>(geocodeUrl, { timeoutMs: 8000, retries: 0, backoffMs: 400 });
         if (geoData && geoData.length > 0) {
           setDestinationPreview(geoData[0].display_name);
           setDestinationSuggestions(geoData.slice(0, 5));
@@ -165,7 +172,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
         setDestinationPreview('Error al buscar');
         setDestinationSuggestions([]);
       }
-    }, 1500);
+    }, 900);
     return () => clearTimeout(timer);
   }, [destination]);
 
@@ -218,6 +225,11 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     setShowSupportModal(false);
     setDonationEngagementStart(null);
   };
+
+  const closeCreateModal = useCallback(() => {
+    setShowCreateModal(false);
+    setLoading(false);
+  }, []);
 
   useEffect(() => {
     if (showSupportModal) {
@@ -291,7 +303,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
         return;
       }
       if (showCreateModal) {
-        setShowCreateModal(false);
+        closeCreateModal();
         return;
       }
       if (showFriendsModal) {
@@ -304,7 +316,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, [showCreateModal, showFriendsModal, showSupportModal, showPreviewModal, routeGenFeedback]);
+  }, [showCreateModal, showFriendsModal, showSupportModal, showPreviewModal, routeGenFeedback, closeCreateModal]);
 
   useEffect(() => {
     if (!user) return;
@@ -400,31 +412,32 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       ? new Date(`${scheduledDate}T${scheduledTime}`).getTime() 
       : Date.now();
 
+    // Firestore rules: routeGeoJSON must be absent or a string — null rejects validation (espontánea sin GPX).
     const groupData = {
       name: finalRouteName,
       code,
       createdBy: user.uid,
       members: [user.uid],
-      routeGeoJSON: gpxData,
       isScheduled: routeType === 'scheduled',
       scheduledTimestamp,
       province: province.trim().toLowerCase(),
       municipality: municipality.trim().toLowerCase(),
       description: description.trim(),
       isEsporadica,
-      createdAt: Date.now()
+      createdAt: Date.now(),
+      ...(gpxData ? { routeGeoJSON: gpxData } : {}),
     };
 
     try {
       await setDoc(doc(db, 'groups', code), groupData);
+      setShowCreateModal(false);
+      if (routeType === 'instant') {
+        onJoinGroup(code);
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, `groups/${code}`);
-    }
-    setLoading(false);
-    setShowCreateModal(false);
-    
-    if (routeType === 'instant') {
-      onJoinGroup(code);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -432,94 +445,175 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     if (!destination || !user) return;
     setLoading(true);
     try {
-      // Use Nominatim with addressdetails to get province/municipality
-      const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(destination)}&limit=1&countrycodes=es&addressdetails=1`;
-      const geoData = await requestJson<any[]>(geocodeUrl, { timeoutMs: 10000, retries: 1, backoffMs: 600 });
-      
-      let destCoords = "";
-      if (geoData && geoData.length > 0) {
-        destCoords = `${geoData[0].lon},${geoData[0].lat}`;
-      } else if (destination.includes(',')) {
-        destCoords = destination;
-      } else {
+      if (!navigator.geolocation) {
         setRouteGenFeedback({
           kind: 'error',
-          title: 'Destino no encontrado',
-          detail: 'Prueba con una ciudad más concreta (por ejemplo: Salou, Tarragona).'
+          title: 'GPS no disponible',
+          detail: 'Tu navegador no permite obtener la ubicación. Prueba desde el móvil o otro navegador.'
         });
-        setLoading(false);
         return;
       }
 
-      navigator.geolocation.getCurrentPosition(async (pos) => {
-        const start = `${pos.coords.longitude},${pos.coords.latitude}`;
-        
-        // Use a more flexible routing profile if possible, or simulate by adding parameters
-        // OSRM public API is limited, but we can try to influence it by choosing different endpoints if available
-        // For now, we'll use the standard driving profile but we'll try to use 'driving' vs 'car' if supported
-        const profile = 'driving'; 
-        
-        // If curves or secondary are selected and NOT highway, we can try to use a different routing engine or waypoints
-        // Since we are limited to OSRM public API, we will use it but add a note.
-        // Actually, some OSRM instances support 'continue_straight' or other hints.
-        const url = `https://router.project-osrm.org/route/v1/${profile}/${start};${destCoords}?overview=full&geometries=geojson&steps=true`;
-        
-        const data = await requestJson<any>(url, { timeoutMs: 12000, retries: 1, backoffMs: 700 });
-        if (data.code === 'Ok') {
-          const route = data.routes[0];
-          setGpxData(JSON.stringify(route.geometry));
-          setRouteStats({
-            distance: route.distance / 1000,
-            duration: route.duration / 60
-          });
-          setRouteGenerated(true);
-          setIsEsporadica(false);
-          
-          // Try to extract province and municipality from geocoding result
-          if (geoData[0].address) {
-            const addr = geoData[0].address;
-            const city = addr.city || addr.town || addr.village || addr.municipality;
-            const prov = addr.province || addr.state || addr.region;
-            if (city) setMunicipality(city);
-            if (prov) setProvince(prov);
-          } else {
-            // Fallback: try to parse display_name
-            const parts = geoData[0].display_name.split(',').map((p: string) => p.trim());
-            if (parts.length >= 2) {
-              setMunicipality(parts[0]);
-              setProvince(parts[parts.length - 2] || parts[1]);
+      const trimmed = destination.trim();
+
+      const resolveDestination = async (): Promise<
+        | { ok: true; geoData: any[]; destCoords: string }
+        | { ok: false }
+      > => {
+        const pick = destinationPickedRef.current;
+        if (
+          pick &&
+          pick.displayName === trimmed &&
+          Number.isFinite(pick.lat) &&
+          Number.isFinite(pick.lon)
+        ) {
+          return {
+            ok: true,
+            geoData: [
+              {
+                lat: String(pick.lat),
+                lon: String(pick.lon),
+                display_name: pick.displayName,
+                address: pick.address,
+              },
+            ],
+            destCoords: `${pick.lon},${pick.lat}`,
+          };
+        }
+
+        if (trimmed.includes(',')) {
+          const parts = trimmed.split(',').map((s) => s.trim());
+          if (parts.length >= 2) {
+            const lon = parseFloat(parts[0]);
+            const lat = parseFloat(parts[1]);
+            if (Number.isFinite(lon) && Number.isFinite(lat)) {
+              return {
+                ok: true,
+                geoData: [{ lat: String(lat), lon: String(lon), display_name: trimmed }],
+                destCoords: `${lon},${lat}`,
+              };
             }
           }
-
-          if (!routeOptions.highway && route.distance > 0) {
-            // If the user doesn't want highways, we should ideally use a different API.
-            // For now, we'll just alert them if the route seems to use highways (OSRM usually does)
-            console.log("Route generated with OSRM. Note: OSRM public API defaults to fastest route.");
-          }
-
-          setRouteGenFeedback({
-            kind: 'success',
-            title: '¡Ruta lista!',
-            detail: geoData[0]?.display_name || destination
-          });
-        } else {
-          setRouteGenFeedback({
-            kind: 'error',
-            title: 'No se pudo calcular la ruta',
-            detail: 'Prueba con otro destino o inténtalo de nuevo en unos segundos.'
-          });
         }
-        setLoading(false);
-      }, () => {
+
+        const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(trimmed)}&limit=1&countrycodes=es&addressdetails=1`;
+        const geoData = await requestJson<any[]>(geocodeUrl, { timeoutMs: 8000, retries: 0, backoffMs: 400 });
+        if (geoData && geoData.length > 0) {
+          const g0 = geoData[0];
+          return {
+            ok: true,
+            geoData,
+            destCoords: `${g0.lon},${g0.lat}`,
+          };
+        }
+        return { ok: false };
+      };
+
+      const gpsPromise = new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          timeout: 12000,
+          maximumAge: 120000,
+          enableHighAccuracy: false,
+        });
+      });
+
+      const geoOutcomePromise = resolveDestination()
+        .then((r) => ({ ok: true as const, r }))
+        .catch((e) => {
+          console.error(e);
+          return { ok: false as const, geoNetError: true as const };
+        });
+
+      const gpsOutcomePromise = gpsPromise
+        .then((p) => ({ ok: true as const, p }))
+        .catch(() => ({ ok: false as const, gpsErr: true as const }));
+
+      const [geoOutcome, gpsOutcome] = await Promise.all([geoOutcomePromise, gpsOutcomePromise]);
+
+      if (!gpsOutcome.ok) {
         setRouteGenFeedback({
           kind: 'error',
           title: 'Sin posición GPS',
-          detail: 'Permite el acceso a la ubicación en el navegador y vuelve a generar la ruta.'
+          detail: 'Permite la ubicación en el navegador o espera unos segundos. Si ya diste permiso, activa el GPS del dispositivo.',
         });
-        setLoading(false);
-      });
+        return;
+      }
+      if (!geoOutcome.ok) {
+        setRouteGenFeedback({
+          kind: 'error',
+          title: 'Error de red',
+          detail: 'No se pudo contactar con el buscador de direcciones. Revisa la conexión e inténtalo de nuevo.',
+        });
+        return;
+      }
+
+      const destResult = geoOutcome.r;
+      if (!destResult.ok) {
+        setRouteGenFeedback({
+          kind: 'error',
+          title: 'Destino no encontrado',
+          detail: 'Prueba con una ciudad más concreta o elige un resultado de la lista.',
+        });
+        return;
+      }
+
+      const { geoData, destCoords } = destResult;
+      const pos = gpsOutcome.p;
+
+      const start = `${pos.coords.longitude},${pos.coords.latitude}`;
+      const profile = 'driving';
+      // steps=false aligera la respuesta del servidor público OSRM (solo necesitamos la geometría).
+      const url = `https://router.project-osrm.org/route/v1/${profile}/${start};${destCoords}?overview=full&geometries=geojson&steps=false`;
+
+      const data = await requestJson<any>(url, { timeoutMs: 15000, retries: 0, backoffMs: 500 });
+      if (data.code === 'Ok') {
+        const route = data.routes[0];
+        setGpxData(JSON.stringify(route.geometry));
+        setRouteStats({
+          distance: route.distance / 1000,
+          duration: route.duration / 60
+        });
+        setRouteGenerated(true);
+        setIsEsporadica(false);
+
+        if (geoData[0]?.address) {
+          const addr = geoData[0].address;
+          const city = addr.city || addr.town || addr.village || addr.municipality;
+          const prov = addr.province || addr.state || addr.region;
+          if (city) setMunicipality(city);
+          if (prov) setProvince(prov);
+        } else if (geoData[0]?.display_name) {
+          const parts = geoData[0].display_name.split(',').map((p: string) => p.trim());
+          if (parts.length >= 2) {
+            setMunicipality(parts[0]);
+            setProvince(parts[parts.length - 2] || parts[1]);
+          }
+        }
+
+        if (!routeOptions.highway && route.distance > 0) {
+          console.log('Route generated with OSRM. Note: OSRM public API defaults to fastest route.');
+        }
+
+        setRouteGenFeedback({
+          kind: 'success',
+          title: '¡Ruta lista!',
+          detail: geoData[0]?.display_name || destination
+        });
+      } else {
+        setRouteGenFeedback({
+          kind: 'error',
+          title: 'No se pudo calcular la ruta',
+          detail: 'Prueba con otro destino o inténtalo de nuevo en unos segundos.'
+        });
+      }
     } catch (e) {
       console.error(e);
+      setRouteGenFeedback({
+        kind: 'error',
+        title: 'Error de red',
+        detail: 'No se pudo contactar con el servicio de rutas. Revisa la conexión e inténtalo de nuevo.'
+      });
+    } finally {
       setLoading(false);
     }
   };
@@ -691,7 +785,10 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
               <h2 className="text-3xl font-black mb-2 leading-tight">¿Listo para rodar?</h2>
               <p className="text-orange-100 mb-8 text-base opacity-90 max-w-md">Crea una ruta instantánea o programa una para el futuro con tus amigos.</p>
               <button 
-                onClick={() => setShowCreateModal(true)}
+                onClick={() => {
+                  setLoading(false);
+                  setShowCreateModal(true);
+                }}
                 className="bg-white text-orange-600 px-8 py-4 rounded-2xl font-bold flex items-center gap-2 hover:bg-orange-50 shadow-lg transition-all active:scale-95"
               >
                 <Plus size={24} />
@@ -1135,7 +1232,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           <div className="bg-zinc-900 border border-zinc-800 w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-200">
             <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
               <h2 className="text-xl font-bold">Configurar Nueva Ruta</h2>
-              <button onClick={() => setShowCreateModal(false)} className="p-2 hover:bg-zinc-800 rounded-full transition-colors">
+              <button onClick={closeCreateModal} className="p-2 hover:bg-zinc-800 rounded-full transition-colors">
                 <X size={20} />
               </button>
             </div>
@@ -1199,7 +1296,14 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                         <input 
                           placeholder="¿A dónde quieres ir? (Ej: Salou, Tarragona)" 
                           value={destination}
-                          onChange={(e) => setDestination(e.target.value)}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setDestination(v);
+                            const p = destinationPickedRef.current;
+                            if (p && v.trim() !== p.displayName) {
+                              destinationPickedRef.current = null;
+                            }
+                          }}
                           className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-3 text-sm outline-none focus:border-blue-500 transition-all"
                         />
                         {destinationPreview && (
@@ -1211,9 +1315,22 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                               <button
                                 key={`${item.place_id || idx}`}
                                 onClick={() => {
-                                  setDestination(item.display_name || '');
-                                  setDestinationPreview(item.display_name || null);
+                                  const name = (item.display_name || '').trim();
+                                  setDestination(name);
+                                  setDestinationPreview(name || null);
                                   setDestinationSuggestions([]);
+                                  const lat = parseFloat(item.lat);
+                                  const lon = parseFloat(item.lon);
+                                  if (name && Number.isFinite(lat) && Number.isFinite(lon)) {
+                                    destinationPickedRef.current = {
+                                      displayName: name,
+                                      lat,
+                                      lon,
+                                      address: item.address,
+                                    };
+                                  } else {
+                                    destinationPickedRef.current = null;
+                                  }
                                 }}
                                 className="w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800 transition-colors"
                               >
