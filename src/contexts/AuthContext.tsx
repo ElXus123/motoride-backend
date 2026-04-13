@@ -37,7 +37,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           uid: currentUser.uid,
           email: currentUser.email,
           displayName: currentUser.displayName,
-          photoURL: currentUser.photoURL
+          photoURL: currentUser.photoURL,
+          isPremium: false,
         });
         
         const userRef = doc(db, 'users', currentUser.uid);
@@ -65,7 +66,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setUser((prev: any) => prev ? { 
               ...prev, 
               displayName: data.displayName || prev.displayName, 
-              photoURL: data.photoURL || prev.photoURL 
+              photoURL: data.photoURL || prev.photoURL,
+              isPremium: data.isPremium === true,
             } : null);
           }
         }, (err) => {

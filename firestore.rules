@@ -114,6 +114,10 @@ service cloud.firestore {
       return !(field in request.resource.data) || request.resource.data[field] is number;
     }
 
+    function isValidOptionalBool(field) {
+      return !(field in request.resource.data) || request.resource.data[field] is bool;
+    }
+
     function isRecent(field) {
       return request.resource.data[field] is number && 
              request.resource.data[field] > (request.time.toMillis() - 3600000) &&
@@ -136,7 +140,8 @@ service cloud.firestore {
              isValidOptionalNumber('totalRightTurns') &&
              (!( 'friends' in data) || data.friends is list) &&
              (!( 'friendRequestsIncoming' in data) || data.friendRequestsIncoming is list) &&
-             (!( 'friendRequestsOutgoing' in data) || data.friendRequestsOutgoing is list);
+             (!( 'friendRequestsOutgoing' in data) || data.friendRequestsOutgoing is list) &&
+             isValidOptionalBool('isPremium');
     }
 
     function isValidGroup(data) {
@@ -191,8 +196,30 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read: if isAuthenticated();
-      allow create: if isOwner(userId) && isValidUser(request.resource.data);
-      allow update: if (isOwner(userId) && isValidUser(request.resource.data)) || isAdmin();
+      // Los usuarios no pueden auto-asignarse premium; solo admin puede cambiar isPremium.
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) &&
+        (!('isPremium' in request.resource.data) || request.resource.data.isPremium == false);
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) && (
+        (isAdmin()) ||
+        (isOwner(userId) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isPremium']))
+      );
+    }
+
+    // Candidatos a premium (donación modal ≥10s); solo el propio usuario escribe su doc; admin lee.
+    match /premiumCandidates/{docId} {
+      allow read: if isAdmin();
+      allow create, update: if isAuthenticated()
+        && request.auth.uid == docId
+        && request.resource.data.uid == docId
+        && request.resource.data.updatedAt is number
+        && isValidOptionalString('email', 120)
+        && isValidOptionalString('displayName', 80)
+        && isValidOptionalString('photoURL', 200000)
+        && request.resource.data.source is string
+        && request.resource.data.source.size() >= 1
+        && request.resource.data.source.size() <= 80
+        && request.resource.data.keys().hasOnly(['uid', 'email', 'displayName', 'photoURL', 'updatedAt', 'source']);
+      allow delete: if isAdmin();
     }
 
     match /groups/{groupId} {

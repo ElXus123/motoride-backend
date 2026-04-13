@@ -38,6 +38,19 @@ html, body, #root {
   background: #09090b !important;
 }
 
+/* Modo bolsillo: anillo de cuenta atrás continuo (evita saltos de Framer + recortes del trazo) */
+.pocket-countdown-ring {
+  stroke-dasharray: 314.16;
+  stroke-dashoffset: 314.16;
+  animation: pocket-countdown-ring-fill 30s linear forwards;
+}
+
+@keyframes pocket-countdown-ring-fill {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
 /* Rain Viewer radar: smooth blend (API max zoom is 7; tiles scale above that) */
 .leaflet-radar-overlay img.leaflet-tile {
   image-rendering: auto;

@@ -40,6 +40,8 @@ async function startServer() {
       (socket as any).groupId = data.groupId;
       (socket as any).uid = data.uid;
       console.log(`User ${socket.id} (uid: ${data.uid}) joined group: ${data.groupId}`);
+      // Pide a los demás que reenvíen posición: el host ve al recién unido aunque llevara el mapa abierto sin refrescar.
+      socket.to(data.groupId).emit("location-sync-request", { joinedUid: data.uid });
     });
 
     socket.on("leave-group", (data: { groupId: string, uid: string, isHost?: boolean, timestamp?: number }) => {
@@ -77,9 +79,16 @@ async function startServer() {
     // WebRTC Signaling
     socket.on("join-voice", (groupId) => {
       if (!groupId) return;
-      socket.join(`${groupId}-voice`);
-      // Notify others in the voice room that a new user joined
-      socket.to(`${groupId}-voice`).emit("user-joined-voice", socket.id);
+      const room = `${groupId}-voice`;
+      const existing = Array.from(io.sockets.adapter.rooms.get(room) ?? []);
+      socket.join(room);
+      socket.to(room).emit("user-joined-voice", socket.id);
+      // Quien entra tarde también debe conocer a los que ya estaban (antes solo el primero veía a los demás).
+      for (const peerId of existing) {
+        if (peerId !== socket.id) {
+          socket.emit("user-joined-voice", peerId);
+        }
+      }
     });
 
     socket.on("leave-voice", (groupId) => {

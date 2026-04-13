@@ -8,6 +8,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { useLocationTracking } from '../hooks/useLocationTracking';
 import { useLeanAngle } from '../hooks/useLeanAngle';
 import { useNavigation } from '../hooks/useNavigation';
+import { useNavigationHeading } from '../hooks/useNavigationHeading';
+import { snapPointToRouteDetailed } from '../lib/navigationPose';
 import { useRoadData } from '../hooks/useRoadData';
 import { parseGPX, parseRouteData } from '../lib/gpx';
 import { getDistance } from '../lib/geoUtils';
@@ -16,7 +18,7 @@ import { getActivePointsConfig } from '../lib/pointsConfig';
 import { fetchRainViewerTileUrl } from '../lib/rainviewer';
 import socket from '../lib/socket';
 import { useVoiceChat } from '../hooks/useVoiceChat';
-import { Upload, ArrowLeft, Copy, Check, Navigation, AlertTriangle, Play, Square, ArrowUp, MapPin, Trophy, Bell, AlertCircle, Wrench, Fuel, X, Maximize, Minimize, Search, Share2, Menu, Moon, Sun, Target, LogOut, Users, Mic, MicOff, ShieldAlert, Activity, Layers, Lock, LockOpen } from 'lucide-react';
+import { Upload, ArrowLeft, Copy, Check, Navigation, AlertTriangle, Play, Square, ArrowUp, MapPin, Trophy, Bell, AlertCircle, Wrench, Fuel, X, Maximize, Minimize, Search, Share2, Menu, Moon, Sun, Target, LogOut, Users, Mic, MicOff, ShieldAlert, Activity, Layers, Lock, LockOpen, Smartphone, RotateCw, Crown } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 // Tile prefetching helpers
@@ -64,6 +66,7 @@ const CurrentUserMarker = ({ position, heading, displayNameToUse, userLevel, sco
         const container = el.querySelector('.user-arrow-container') as HTMLElement;
         if (container) {
           container.style.transform = `rotate(${heading}deg)`;
+          container.style.transition = 'transform 0.18s ease-out';
         }
       }
     }
@@ -88,7 +91,14 @@ const CurrentUserMarker = ({ position, heading, displayNameToUse, userLevel, sco
 
 const getDirectionIcon = (type?: string, modifier?: string) => {
   if (type === 'arrive') return <MapPin size={28} />;
-  
+  if (type === 'roundabout' || type === 'rotary' || type === 'roundabout turn') {
+    return <RotateCw size={28} className="shrink-0" aria-hidden />;
+  }
+  if (type === 'off ramp' || type === 'on ramp') {
+    const rot = modifier?.includes('left') ? -50 : 50;
+    return <ArrowUp size={28} style={{ transform: `rotate(${rot}deg)`, transition: 'transform 0.3s ease-out' }} />;
+  }
+
   let rotation = 0;
   if (modifier?.includes('right')) {
     rotation = modifier.includes('slight') ? 45 : (modifier.includes('sharp') ? 135 : 90);
@@ -97,51 +107,8 @@ const getDirectionIcon = (type?: string, modifier?: string) => {
   } else if (type === 'u-turn') {
     rotation = 180;
   }
-  
+
   return <ArrowUp size={28} style={{ transform: `rotate(${rotation}deg)`, transition: 'transform 0.3s ease-out' }} />;
-};
-
-const getLineCoordinates = (geo: any): [number, number][] => {
-  if (!geo) return [];
-  if (geo.type === 'LineString' && Array.isArray(geo.coordinates)) return geo.coordinates;
-  if (geo.type === 'Feature' && geo.geometry?.type === 'LineString') return geo.geometry.coordinates || [];
-  if (geo.type === 'FeatureCollection' && Array.isArray(geo.features)) {
-    const line = geo.features.find((f: any) => f?.geometry?.type === 'LineString');
-    return line?.geometry?.coordinates || [];
-  }
-  return [];
-};
-
-const snapPointToRoute = (lat: number, lng: number, routeGeo: any) => {
-  const coords = getLineCoordinates(routeGeo);
-  if (coords.length < 2) return { lat, lng, distanceMeters: Number.POSITIVE_INFINITY };
-
-  let best = { lat, lng, distanceMeters: Number.POSITIVE_INFINITY };
-  const cosLat = Math.cos((lat * Math.PI) / 180) || 1;
-  const toXY = (pLat: number, pLng: number) => ({ x: pLng * cosLat, y: pLat });
-
-  const p = toXY(lat, lng);
-  for (let i = 0; i < coords.length - 1; i++) {
-    const a = toXY(coords[i][1], coords[i][0]);
-    const b = toXY(coords[i + 1][1], coords[i + 1][0]);
-    const abx = b.x - a.x;
-    const aby = b.y - a.y;
-    const ab2 = abx * abx + aby * aby;
-    if (ab2 === 0) continue;
-    const apx = p.x - a.x;
-    const apy = p.y - a.y;
-    const t = Math.max(0, Math.min(1, (apx * abx + apy * aby) / ab2));
-    const projX = a.x + abx * t;
-    const projY = a.y + aby * t;
-    const projLat = projY;
-    const projLng = projX / cosLat;
-    const d = getDistance(lat, lng, projLat, projLng);
-    if (d < best.distanceMeters) {
-      best = { lat: projLat, lng: projLng, distanceMeters: d };
-    }
-  }
-
-  return best;
 };
 
 const MotorcycleIcon = ({ angle }: { angle: number }) => (
@@ -191,17 +158,30 @@ const MotorcycleIcon = ({ angle }: { angle: number }) => (
   </div>
 );
 
+// Re-tile after CSS transform / layout shifts (avoids black rectangles on some mobile GPUs).
+const MapInvalidateHelper = ({ layoutKey }: { layoutKey: string }) => {
+  const map = useMap();
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      map.invalidateSize({ animate: false });
+    }, 60);
+    return () => clearTimeout(id);
+  }, [map, layoutKey]);
+  return null;
+};
+
 // Component to handle map centering and rotation
-const MapController = ({ location, heading, isFollowing, showRanking, isRecording, speedKmh }: { location: any, heading: number | null, isFollowing: boolean, showRanking: boolean, isRecording: boolean, speedKmh: number }) => {
+const MapController = ({ location, heading, isFollowing, showRanking, isRecording, speedKmh, hasActiveRoute }: { location: any, heading: number | null, isFollowing: boolean, showRanking: boolean, isRecording: boolean, speedKmh: number, hasActiveRoute: boolean }) => {
   const map = useMap();
   const hasAutoZoomedRef = useRef(false);
   
   useEffect(() => {
     if (isFollowing && location && typeof location.lat === 'number' && typeof location.lng === 'number') {
-      // Dynamic zoom: every +10 km/h zoom out a bit.
+      // Dynamic zoom while recording: start a bit wider so maneuvers stay visible; zoom out slightly as speed rises.
       const speedZoomSteps = Math.floor(Math.max(speedKmh, 0) / 10);
-      const dynamicZoom = Math.max(15.6, 19 - speedZoomSteps * 0.25);
-      const zoom = isRecording ? dynamicZoom : (hasAutoZoomedRef.current ? map.getZoom() : Math.max(map.getZoom(), 17));
+      const dynamicZoom = Math.max(15.4, 17.15 - speedZoomSteps * 0.22);
+      const followZoomInitial = hasActiveRoute ? 15.35 : Math.max(map.getZoom(), 17);
+      const zoom = isRecording ? dynamicZoom : (hasAutoZoomedRef.current ? map.getZoom() : followZoomInitial);
       const isLandscape = window.innerWidth > window.innerHeight;
       
       if (isLandscape) {
@@ -219,7 +199,7 @@ const MapController = ({ location, heading, isFollowing, showRanking, isRecordin
         hasAutoZoomedRef.current = true;
       }
     }
-  }, [location, isFollowing, map, showRanking, isRecording, speedKmh]);
+  }, [location, isFollowing, map, showRanking, isRecording, speedKmh, hasActiveRoute]);
 
   return null;
 };
@@ -272,6 +252,9 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
   const [hostLeftRoute, setHostLeftRoute] = useState(false);
   const [showRanking, setShowRanking] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const rotationLockAppliedRef = useRef(false);
+  const [rotationLocked, setRotationLocked] = useState(false);
+  const [pocketRingSession, setPocketRingSession] = useState(0);
   const [showAlertMenu, setShowAlertMenu] = useState(false);
   const [recordedPath, setRecordedPath] = useState<{lat: number, lng: number}[]>([]);
   const [showSearchModal, setShowSearchModal] = useState(false);
@@ -371,13 +354,7 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
       setPocketDist(0);
       setHasCalibratedInPocket(false);
       if (navigator.vibrate) navigator.vibrate(100);
-      
-      // Restore orientation
-      // @ts-ignore
-      if (screen.orientation && screen.orientation.unlock) {
-        // @ts-ignore
-        screen.orientation.unlock();
-      }
+      releaseOrientationLockUi();
     }, 1500);
   };
 
@@ -433,7 +410,30 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
     };
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (!rotationLockAppliedRef.current) return;
+      try {
+        (screen.orientation as ScreenOrientation & { unlock?: () => void })?.unlock?.();
+      } catch {
+        /* ignore */
+      }
+      rotationLockAppliedRef.current = false;
+    };
+  }, []);
+
+  const releaseOrientationLockUi = () => {
+    try {
+      (screen.orientation as ScreenOrientation & { unlock?: () => void })?.unlock?.();
+    } catch {
+      /* ignore */
+    }
+    rotationLockAppliedRef.current = false;
+    setRotationLocked(false);
+  };
+
   const enterPocketMode = async () => {
+    setPocketRingSession((s) => s + 1);
     setIsPocketMode(true);
     setPocketCountdown(30);
     setIsPocketLocked(false);
@@ -584,7 +584,7 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
   const angleHistoryRef = useRef<number[]>([]);
 
   // Activate real-time location tracking
-  const { speed, heading, currentLocation, error: gpsError } = useLocationTracking(true, groupId, { 
+  const { speed, heading, currentLocation, courseOverGround, error: gpsError } = useLocationTracking(true, groupId, { 
     score, 
     alert: alertType ? { type: alertType, timestamp: Date.now() } : null,
     displayName: displayNameToUse,
@@ -660,21 +660,48 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
   }, [group?.routeGeoJSON]);
 
   const navState = useNavigation(currentLocation, parsedRoute);
+  const navigationHeading = useNavigationHeading(
+    heading,
+    speed,
+    courseOverGround,
+    currentLocation,
+    parsedRoute,
+    navState
+  );
   const displayLocation = useMemo(() => {
     if (!currentLocation) return null;
     const snapCandidate = navState.routeGeometry || parsedRoute;
     if (!snapCandidate) return currentLocation;
 
-    const snapped = snapPointToRoute(currentLocation.lat, currentLocation.lng, snapCandidate);
-    // Prevent aggressive jumps when GPS is clearly off-route; keep reasonable correction only.
-    if (snapped.distanceMeters <= 35) {
+    const snapped = snapPointToRouteDetailed(currentLocation.lat, currentLocation.lng, snapCandidate);
+    if (snapped.distanceMeters <= 42) {
       return { lat: snapped.lat, lng: snapped.lng };
     }
     return currentLocation;
   }, [currentLocation, navState.routeGeometry, parsedRoute]);
 
   const { nearbyRadar, radars } = useRoadData(currentLocation);
-  const { isVoiceActive, toggleVoice, peersCount } = useVoiceChat(groupId);
+  const [hostIsPremium, setHostIsPremium] = useState(false);
+  useEffect(() => {
+    const hostId = group?.createdBy;
+    if (!hostId) {
+      setHostIsPremium(false);
+      return;
+    }
+    const unsub = onSnapshot(
+      doc(db, 'users', hostId),
+      (snap) => {
+        setHostIsPremium(snap.exists() && snap.data()?.isPremium === true);
+      },
+      () => setHostIsPremium(false)
+    );
+    return () => unsub();
+  }, [group?.createdBy]);
+
+  const selfPremium = user?.isPremium === true;
+  const voiceAllowed = selfPremium || hostIsPremium;
+
+  const { isVoiceActive, toggleVoice, peersCount, micError, clearMicError } = useVoiceChat(groupId, voiceAllowed);
 
   // Listen to group data
   useEffect(() => {
@@ -1533,38 +1560,55 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
     }
   }, [gpsError, isHost]);
 
-  const toggleLandscape = async () => {
+  const toggleRotationLock = async () => {
+    const so = screen.orientation as ScreenOrientation & {
+      lock?: (orientation: OrientationLockType) => Promise<void>;
+      unlock?: () => void;
+    };
+
+    if (rotationLockAppliedRef.current) {
+      releaseOrientationLockUi();
+      setShowSettings(false);
+      return;
+    }
+
+    if (!so?.lock) {
+      alert('Tu navegador no soporta bloquear la orientación.');
+      return;
+    }
+
+    const lockToCurrent = async () => {
+      const t = so.type as OrientationLockType;
+      await so.lock(t);
+    };
+
     try {
-      if (!document.fullscreenElement) {
+      await lockToCurrent();
+      rotationLockAppliedRef.current = true;
+      setRotationLocked(true);
+      setShowSettings(false);
+    } catch (firstErr: unknown) {
+      console.warn('Orientation lock failed, retrying with fullscreen:', firstErr);
+      if (!document.fullscreenElement && containerRef.current) {
         try {
-          await containerRef.current?.requestFullscreen();
+          await containerRef.current.requestFullscreen();
           setIsFullscreen(true);
-        } catch (e) {
-          console.warn("Fullscreen request failed", e);
-        }
-      }
-      
-      // @ts-ignore
-      if (screen.orientation && screen.orientation.lock) {
-        try {
-          // Small delay if we just entered fullscreen
-          await new Promise(resolve => setTimeout(resolve, 300));
-          // @ts-ignore
-          await screen.orientation.lock('landscape');
+          await new Promise((r) => setTimeout(r, 280));
+          await lockToCurrent();
+          rotationLockAppliedRef.current = true;
+          setRotationLocked(true);
           setShowSettings(false);
-        } catch (lockError: any) {
-          console.warn("Orientation lock failed:", lockError);
-          if (lockError.message && lockError.message.includes('sandboxed')) {
-            alert("⚠️ Limitación del Navegador: El bloqueo de orientación está restringido dentro de la vista previa de AI Studio.\n\nPara que el Modo Horizontal funcione, pulsa el botón de 'Abrir en pestaña nueva' (arriba a la derecha).");
-          } else {
-            alert("No se pudo forzar el modo horizontal. Asegúrate de tener la rotación automática activada en tu móvil.");
-          }
+          return;
+        } catch (e) {
+          console.warn('Fullscreen + orientation lock failed:', e);
         }
-      } else {
-        alert("Tu navegador no soporta el bloqueo de orientación. Intenta girar el móvil manualmente.");
       }
-    } catch (err) {
-      console.error("Error in toggleLandscape:", err);
+      const msg = firstErr && typeof firstErr === 'object' && 'message' in firstErr ? String((firstErr as Error).message) : '';
+      if (msg.includes('sandboxed')) {
+        alert("⚠️ El bloqueo de orientación no está disponible en esta vista previa. Abre la app en una pestaña normal del navegador.");
+      } else {
+        alert('No se pudo bloquear el giro. Prueba en pantalla completa o comprueba que la rotación no esté bloqueada a nivel del sistema.');
+      }
     }
   };
 
@@ -1791,6 +1835,11 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
                </div>
                <div className="flex-1">
                  <p className={`${isCompactUI ? 'text-base' : 'text-xl'} text-white font-black leading-tight tracking-tight`}>{navState.instruction}</p>
+                 {navState.instructionDetail ? (
+                   <p className={`${isCompactUI ? 'text-xs' : 'text-sm'} text-blue-100/90 font-semibold leading-snug mt-1`}>
+                     {navState.instructionDetail}
+                   </p>
+                 ) : null}
                  {navState.distanceToNext !== null && (
                    <div className="flex items-baseline gap-1 mt-1">
                      <span className={`${isCompactUI ? 'text-xl' : 'text-2xl'} text-blue-400 font-black`}>
@@ -1806,13 +1855,45 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
            )}
          </div>
          
-        <div className="pointer-events-auto flex flex-col-reverse gap-2 items-end">
+        <div className="pointer-events-auto flex flex-col-reverse gap-2 items-end max-w-[min(100vw-2rem,18rem)]">
+           {micError && (
+             <div className="bg-red-950/95 border border-red-500/40 text-red-100 text-[11px] font-medium px-3 py-2 rounded-xl shadow-xl leading-snug">
+               {micError}
+               <button type="button" className="block mt-2 text-orange-400 font-bold underline" onClick={() => clearMicError()}>
+                 Cerrar aviso
+               </button>
+             </div>
+           )}
            <button 
-             onClick={toggleVoice}
-             className={`p-3 rounded-full shadow-xl transition-colors relative ${isVoiceActive ? 'bg-green-500 text-white' : 'bg-zinc-800 text-zinc-400'}`}
-             title={isVoiceActive ? "Desconectar voz" : "Conectar voz"}
+             type="button"
+             onClick={() => {
+               clearMicError();
+               if (!voiceAllowed) {
+                 window.alert(
+                   'El chat de voz es Premium. Si el anfitrión de esta ruta tiene Premium, todo el grupo puede usarlo. Si no, puedes obtenerlo apoyando el proyecto (Ko-fi; activación manual). Menú principal → Apoyar proyecto.'
+                 );
+                 return;
+               }
+               void toggleVoice();
+             }}
+             className={`p-3 rounded-full shadow-xl transition-colors relative shrink-0 ${
+               isVoiceActive
+                 ? 'bg-green-500 text-white'
+                 : micError
+                   ? 'bg-red-900/80 text-red-200 ring-2 ring-red-500/50'
+                   : !voiceAllowed
+                     ? 'bg-zinc-800 text-amber-400 ring-2 ring-amber-500/35'
+                     : 'bg-zinc-800 text-zinc-400'
+             }`}
+             title={
+               !voiceAllowed
+                 ? 'Voz Premium (o anfitrión con Premium)'
+                 : isVoiceActive
+                   ? 'Desconectar voz'
+                   : 'Conectar voz (micrófono)'
+             }
            >
-             {isVoiceActive ? <Mic size={20} /> : <MicOff size={20} />}
+             {isVoiceActive ? <Mic size={20} /> : !voiceAllowed ? <Crown size={20} /> : <MicOff size={20} />}
              {isVoiceActive && peersCount > 0 && (
                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-4 h-4 flex items-center justify-center rounded-full">
                  {peersCount}
@@ -1958,15 +2039,14 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
 
                 <button 
                   onClick={() => {
-                    setShowSettings(false);
-                    toggleLandscape();
+                    void toggleRotationLock();
                   }}
                    className="flex items-center gap-3 text-white hover:bg-zinc-800 p-3 rounded-2xl text-sm font-bold transition-colors"
                  >
-                   <div className="w-8 h-8 rounded-xl bg-indigo-500/20 flex items-center justify-center text-indigo-500">
-                     <Maximize size={18} className="rotate-90" />
+                   <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${rotationLocked ? 'bg-emerald-500/20 text-emerald-400' : 'bg-indigo-500/20 text-indigo-400'}`}>
+                     {rotationLocked ? <Lock size={18} /> : <Smartphone size={18} />}
                    </div>
-                   Forzar Horizontal
+                   {rotationLocked ? 'Desbloquear giro' : 'Bloquear giro'}
                  </button>
 
                 <button 
@@ -2044,40 +2124,46 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
           >
             {!isPocketLocked ? (
               <div className="text-center space-y-8 p-8">
-                <div className="relative w-32 h-32 mx-auto overflow-visible">
-                  <svg className="w-full h-full -rotate-90">
+                <div
+                  key={pocketRingSession}
+                  className="relative w-[148px] h-[148px] mx-auto flex items-center justify-center"
+                >
+                  <svg
+                    className="absolute inset-0 w-full h-full overflow-visible -rotate-90 pointer-events-none"
+                    viewBox="0 0 120 120"
+                    aria-hidden
+                  >
                     <circle
-                      cx="64"
-                      cy="64"
-                      r="56"
+                      cx="60"
+                      cy="60"
+                      r="50"
                       fill="transparent"
                       stroke="currentColor"
-                      strokeWidth="8"
+                      strokeWidth="7"
                       className="text-zinc-800"
                     />
-                    <motion.circle
-                      cx="64"
-                      cy="64"
-                      r="56"
+                    <circle
+                      cx="60"
+                      cy="60"
+                      r="50"
                       fill="transparent"
                       stroke="currentColor"
-                      strokeWidth="8"
-                      strokeDasharray="352"
-                      initial={{ strokeDashoffset: 352 }}
-                      animate={{ strokeDashoffset: 352 - (352 * (30 - pocketCountdown) / 30) }}
-                      className="text-orange-500"
+                      strokeWidth="7"
+                      strokeLinecap="round"
+                      className="text-orange-500 pocket-countdown-ring"
                     />
                   </svg>
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <span className="text-5xl font-black text-white">{pocketCountdown}</span>
-                  </div>
+                  <span className="relative z-10 text-5xl font-black text-white tabular-nums">{pocketCountdown}</span>
                 </div>
                 <div className="space-y-2">
                   <h2 className="text-2xl font-black text-white uppercase tracking-tighter">Modo Bolsillo</h2>
                   <p className="text-zinc-400 text-sm max-w-[200px] mx-auto">Guarda el móvil en tu bolsillo. Se bloqueará automáticamente.</p>
                 </div>
                 <button 
-                  onClick={() => setIsPocketMode(false)}
+                  onClick={() => {
+                    releaseOrientationLockUi();
+                    setIsPocketMode(false);
+                  }}
                   className="px-6 py-3 bg-zinc-800 text-white rounded-2xl font-bold text-sm"
                 >
                   Cancelar
@@ -2319,19 +2405,24 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
         <div 
           className="w-full h-full transition-transform duration-500 ease-out"
           style={{
-            transform: isRecording && currentSpeedKmh > 5 && heading !== null && localDistance >= 0.05 ? `rotate(${-heading}deg) scale(1.08)` : 'none',
-            transformOrigin: 'center center'
+            transform: isRecording && currentSpeedKmh > 3 && localDistance >= 0.05 ? `rotate(${-navigationHeading}deg)` : 'none',
+            transformOrigin: 'center center',
+            willChange: isRecording && currentSpeedKmh > 5 ? 'transform' : 'auto',
           }}
         >
           <MapContainer center={[40.4168, -3.7038]} zoom={6} className="w-full h-full z-0" zoomControl={false} attributionControl={false}>
+        <MapInvalidateHelper
+          layoutKey={`${isRecording ? 1 : 0}_${currentSpeedKmh > 3 ? 1 : 0}_${Math.round(navigationHeading / 8)}_${isDarkMode ? 1 : 0}`}
+        />
         <TileLayer 
           url={isDarkMode 
             ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
             : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
           } 
-          keepBuffer={64}
+          subdomains="abcd"
+          keepBuffer={96}
           updateWhenIdle={false}
-          updateWhenZooming={false}
+          updateWhenZooming
           maxZoom={20}
           maxNativeZoom={19}
         />
@@ -2417,14 +2508,14 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
         {displayLocation && typeof displayLocation.lat === 'number' && typeof displayLocation.lng === 'number' && (
           <CurrentUserMarker 
             position={[displayLocation.lat, displayLocation.lng]}
-            heading={currentSpeedKmh > 5 ? (heading || 0) : 0}
+            heading={currentSpeedKmh > 2 ? navigationHeading : 0}
             displayNameToUse={displayNameToUse}
             userLevel={userLevel}
             score={score}
           />
         )}
 
-        <MapController location={displayLocation} heading={currentSpeedKmh > 5 ? heading : 0} isFollowing={isFollowing} showRanking={showRanking} isRecording={isRecording} speedKmh={currentSpeedKmh} />
+        <MapController location={displayLocation} heading={currentSpeedKmh > 2 ? navigationHeading : 0} isFollowing={isFollowing} showRanking={showRanking} isRecording={isRecording} speedKmh={currentSpeedKmh} hasActiveRoute={!!parsedRoute} />
           </MapContainer>
         </div>
       </div>

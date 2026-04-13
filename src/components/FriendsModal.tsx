@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, getDocs, doc, updateDoc, arrayUnion, arrayRemove, onSnapshot, orderBy, limit, startAt, endAt } from 'firebase/firestore';
+import { collection, query, getDocs, doc, getDoc, updateDoc, arrayUnion, arrayRemove, onSnapshot, orderBy, limit, startAt, endAt } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { X, Search, UserPlus, UserMinus, User as UserIcon, Play, Check, Clock, Ban } from 'lucide-react';
@@ -36,18 +36,19 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
     }
     const fetchFriends = async () => {
       try {
-        // Firestore 'in' query supports up to 10 items.
-        // For a real app, we might need to chunk this or fetch individually.
-        const chunks = [];
-        for (let i = 0; i < userData.friends.length; i += 10) {
-          chunks.push(userData.friends.slice(i, i + 10));
+        const ids: string[] = [...userData.friends];
+        const chunks: string[][] = [];
+        for (let i = 0; i < ids.length; i += 30) {
+          chunks.push(ids.slice(i, i + 30));
         }
-        
-        let allFriends: any[] = [];
+        const allFriends: any[] = [];
         for (const chunk of chunks) {
-          const q = query(collection(db, 'users'), where('uid', 'in', chunk));
-          const snap = await getDocs(q);
-          allFriends = [...allFriends, ...snap.docs.map(d => ({ id: d.id, ...d.data() }))];
+          const snaps = await Promise.all(chunk.map((fid) => getDoc(doc(db, 'users', fid))));
+          for (const s of snaps) {
+            if (s.exists()) {
+              allFriends.push({ id: s.id, uid: s.id, ...s.data() });
+            }
+          }
         }
         setFriends(allFriends);
       } catch (error) {
@@ -63,13 +64,14 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
       return;
     }
     const fetchIncoming = async () => {
-      const chunks = [];
-      for (let i = 0; i < incomingIds.length; i += 10) chunks.push(incomingIds.slice(i, i + 10));
-      let all: any[] = [];
+      const chunks: string[][] = [];
+      for (let i = 0; i < incomingIds.length; i += 30) chunks.push(incomingIds.slice(i, i + 30));
+      const all: any[] = [];
       for (const chunk of chunks) {
-        const q = query(collection(db, 'users'), where('uid', 'in', chunk));
-        const snap = await getDocs(q);
-        all = [...all, ...snap.docs.map((d) => ({ id: d.id, ...d.data() }))];
+        const snaps = await Promise.all(chunk.map((fid) => getDoc(doc(db, 'users', fid))));
+        for (const s of snaps) {
+          if (s.exists()) all.push({ id: s.id, uid: s.id, ...s.data() });
+        }
       }
       setIncomingUsers(all);
     };
@@ -181,14 +183,15 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
   const viewProfile = async (friendUser: any) => {
     setSelectedUser(friendUser);
     setHistoryBlockedMessage(null);
-    const canViewHistory = friendsIds.includes(friendUser.uid);
+    const fid = friendUser.uid || friendUser.id;
+    const canViewHistory = friendsIds.includes(fid);
     if (!canViewHistory) {
       setSelectedUserHistory([]);
       setHistoryBlockedMessage('Debes ser amigo aceptado para ver su historial.');
       return;
     }
     try {
-      const q = query(collection(db, 'rideHistory'), where('uid', '==', friendUser.uid), orderBy('endTime', 'desc'), limit(10));
+      const q = query(collection(db, 'rideHistory'), where('uid', '==', fid), orderBy('endTime', 'desc'), limit(10));
       const snap = await getDocs(q);
       setSelectedUserHistory(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch (error) {
@@ -309,12 +312,13 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                   <div className="space-y-2 mb-8">
                     <h3 className="text-sm font-bold text-zinc-500 uppercase mb-3">Resultados</h3>
                   {searchResults.map(res => {
-                      const isFriend = friendsIds.includes(res.uid);
-                      const isIncoming = incomingIds.includes(res.uid);
-                      const isOutgoing = outgoingIds.includes(res.uid);
+                      const rid = res.uid || res.id;
+                      const isFriend = friendsIds.includes(rid);
+                      const isIncoming = incomingIds.includes(rid);
+                      const isOutgoing = outgoingIds.includes(rid);
                       return (
-                        <div key={res.id} className="flex items-center justify-between bg-zinc-950 border border-zinc-800 p-3 rounded-xl">
-                          <div className="flex items-center gap-3 cursor-pointer" onClick={() => viewProfile(res)}>
+                        <div key={rid} className="flex items-center justify-between bg-zinc-950 border border-zinc-800 p-3 rounded-xl">
+                          <div className="flex items-center gap-3 cursor-pointer" onClick={() => viewProfile({ ...res, uid: rid })}>
                             <div className="w-10 h-10 rounded-full overflow-hidden bg-zinc-800">
                               {res.photoURL ? <img src={res.photoURL} alt="" className="w-full h-full object-cover" /> : <UserIcon size={20} className="m-auto h-full text-zinc-500" />}
                             </div>
@@ -326,19 +330,19 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                           <div className="flex items-center gap-2">
                             {isIncoming ? (
                               <>
-                                <button onClick={() => acceptFriendRequest(res.uid)} className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"><Check size={18} /></button>
-                                <button onClick={() => rejectFriendRequest(res.uid)} className="p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20"><Ban size={18} /></button>
+                                <button onClick={() => acceptFriendRequest(rid)} className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"><Check size={18} /></button>
+                                <button onClick={() => rejectFriendRequest(rid)} className="p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20"><Ban size={18} /></button>
                               </>
                             ) : isFriend ? (
                               <button 
-                                onClick={() => removeFriend(res.uid)}
+                                onClick={() => removeFriend(rid)}
                                 className="p-2 rounded-lg transition-colors bg-red-500/10 text-red-500 hover:bg-red-500/20"
                               >
                                 <UserMinus size={18} />
                               </button>
                             ) : isOutgoing ? (
                               <button
-                                onClick={() => cancelFriendRequest(res.uid)}
+                                onClick={() => cancelFriendRequest(rid)}
                                 className="p-2 rounded-lg transition-colors bg-amber-500/10 text-amber-400 hover:bg-amber-500/20"
                                 title="Solicitud pendiente"
                               >
@@ -346,7 +350,7 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                               </button>
                             ) : (
                               <button 
-                                onClick={() => sendFriendRequest(res.uid)}
+                                onClick={() => sendFriendRequest(rid)}
                                 className="p-2 rounded-lg transition-colors bg-blue-500/10 text-blue-500 hover:bg-blue-500/20"
                               >
                                 <UserPlus size={18} />
@@ -365,7 +369,7 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                   <h3 className="text-sm font-bold text-zinc-500 uppercase mb-3">Solicitudes recibidas</h3>
                   <div className="space-y-2">
                     {incomingUsers.map((u) => (
-                        <div key={`incoming-${u.uid}`} className="flex items-center justify-between bg-zinc-950 border border-zinc-800 p-3 rounded-xl">
+                        <div key={`incoming-${u.uid || u.id}`} className="flex items-center justify-between bg-zinc-950 border border-zinc-800 p-3 rounded-xl">
                           <p className="text-sm font-semibold">{u.displayName}</p>
                           <div className="flex gap-2">
                             <button onClick={() => acceptFriendRequest(u.uid)} className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"><Check size={18} /></button>
@@ -385,9 +389,11 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                 </h3>
                 {friends.length > 0 ? (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {friends.map(friend => (
-                      <div key={friend.id} className="flex items-center justify-between bg-zinc-900 border border-zinc-800 p-3 rounded-xl hover:border-orange-500/50 transition-colors">
-                        <div className="flex items-center gap-3 cursor-pointer flex-1" onClick={() => viewProfile(friend)}>
+                    {friends.map(friend => {
+                      const fid = friend.uid || friend.id;
+                      return (
+                      <div key={fid} className="flex items-center justify-between bg-zinc-900 border border-zinc-800 p-3 rounded-xl hover:border-orange-500/50 transition-colors">
+                        <div className="flex items-center gap-3 cursor-pointer flex-1" onClick={() => viewProfile({ ...friend, uid: fid })}>
                           <div className="w-10 h-10 rounded-full overflow-hidden bg-zinc-800 shrink-0">
                             {friend.photoURL ? <img src={friend.photoURL} alt="" className="w-full h-full object-cover" /> : <UserIcon size={20} className="m-auto h-full text-zinc-500" />}
                           </div>
@@ -397,14 +403,15 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                           </div>
                         </div>
                         <button 
-                          onClick={() => removeFriend(friend.uid)}
+                          onClick={() => removeFriend(fid)}
                           className="p-2 text-zinc-600 hover:text-red-500 transition-colors shrink-0"
                           title="Eliminar amigo"
                         >
                           <UserMinus size={18} />
                         </button>
                       </div>
-                    ))}
+                    );
+                    })}
                   </div>
                 ) : (
                   <div className="text-center py-8 bg-zinc-950 rounded-2xl border border-zinc-800">

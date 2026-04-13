@@ -1,7 +1,22 @@
 import React, { useEffect, useState } from 'react';
-import { collection, doc, onSnapshot, orderBy, query, setDoc, addDoc, updateDoc, getDocs, writeBatch } from 'firebase/firestore';
-import { X, Shield, Save, PlusCircle } from 'lucide-react';
-import { db } from '../firebase';
+import {
+  collection,
+  doc,
+  onSnapshot,
+  orderBy,
+  query,
+  setDoc,
+  addDoc,
+  updateDoc,
+  getDocs,
+  writeBatch,
+  limit,
+  startAt,
+  endAt,
+  deleteDoc
+} from 'firebase/firestore';
+import { X, Shield, Save, PlusCircle, Search, Crown, Trash2 } from 'lucide-react';
+import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
@@ -13,6 +28,10 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
   const [eventName, setEventName] = useState('');
   const [eventMultiplier, setEventMultiplier] = useState(1.2);
   const [eventHours, setEventHours] = useState(24);
+  const [premiumSearchQuery, setPremiumSearchQuery] = useState('');
+  const [premiumSearchResults, setPremiumSearchResults] = useState<any[]>([]);
+  const [premiumSearchLoading, setPremiumSearchLoading] = useState(false);
+  const [premiumCandidates, setPremiumCandidates] = useState<any[]>([]);
 
   useEffect(() => {
     if (!isAdmin) onClose();
@@ -34,6 +53,78 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
       unsubEvents();
     };
   }, []);
+
+  useEffect(() => {
+    const unsub = onSnapshot(
+      query(collection(db, 'premiumCandidates'), orderBy('updatedAt', 'desc')),
+      (snap) => setPremiumCandidates(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+      (err) => console.error('premiumCandidates', err)
+    );
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    if (premiumSearchQuery.trim().length < 2) {
+      setPremiumSearchResults([]);
+      return;
+    }
+    const normalize = (txt: string) =>
+      txt
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim();
+    const t = window.setTimeout(() => {
+      void (async () => {
+        setPremiumSearchLoading(true);
+        try {
+          const qText = normalize(premiumSearchQuery);
+          const q = query(
+            collection(db, 'users'),
+            orderBy('displayNameLower'),
+            startAt(qText),
+            endAt(`${qText}\uf8ff`),
+            limit(20)
+          );
+          const snap = await getDocs(q);
+          let results = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          if (results.length < 5) {
+            const wide = await getDocs(query(collection(db, 'users'), limit(120)));
+            const merged = wide.docs
+              .map((d) => ({ id: d.id, ...d.data() } as any))
+              .filter((u) => normalize(u.displayName || '').includes(qText));
+            const map = new Map<string, any>();
+            [...results, ...merged].forEach((u) => map.set(u.id, u));
+            results = Array.from(map.values()).slice(0, 30);
+          }
+          setPremiumSearchResults(results);
+        } catch (e) {
+          console.error(e);
+        } finally {
+          setPremiumSearchLoading(false);
+        }
+      })();
+    }, 350);
+    return () => clearTimeout(t);
+  }, [premiumSearchQuery]);
+
+  const setUserPremium = async (uid: string, isPremium: boolean) => {
+    try {
+      await updateDoc(doc(db, 'users', uid), { isPremium });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${uid}`);
+      window.alert('No se pudo actualizar el estado Premium.');
+    }
+  };
+
+  const removePremiumCandidate = async (uid: string) => {
+    if (!window.confirm('¿Quitar este usuario de la lista de candidatos?')) return;
+    try {
+      await deleteDoc(doc(db, 'premiumCandidates', uid));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `premiumCandidates/${uid}`);
+    }
+  };
 
   const saveConfig = async () => {
     await setDoc(doc(db, 'appConfig', 'points'), {
@@ -98,11 +189,11 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="fixed inset-0 z-[90] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="w-full max-w-2xl bg-zinc-900 border border-zinc-800 rounded-3xl shadow-2xl overflow-hidden">
+      <div className="w-full max-w-3xl bg-zinc-900 border border-zinc-800 rounded-3xl shadow-2xl overflow-hidden">
         <div className="p-5 border-b border-zinc-800 flex items-center justify-between">
           <h2 className="text-lg font-bold text-white flex items-center gap-2">
             <Shield size={18} className="text-orange-400" />
-            Panel Admin de Puntos
+            Panel Admin
           </h2>
           <button onClick={onClose} className="p-2 rounded-full hover:bg-zinc-800 text-zinc-300">
             <X size={18} />
@@ -110,6 +201,108 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="p-5 space-y-6 max-h-[75vh] overflow-y-auto">
+          <div className="border border-zinc-800 rounded-2xl p-4 space-y-3 bg-zinc-950/50">
+            <h3 className="text-white font-bold flex items-center gap-2">
+              <Crown size={16} className="text-amber-400" />
+              Premium (voz y futuras ventajas)
+            </h3>
+            <p className="text-xs text-zinc-500">
+              Busca por nombre (mín. 2 caracteres). Los cambios se guardan en la cuenta del usuario en Firestore.
+            </p>
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                <input
+                  value={premiumSearchQuery}
+                  onChange={(e) => setPremiumSearchQuery(e.target.value)}
+                  placeholder="Nombre de usuario…"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-3 py-2 text-sm text-white"
+                />
+              </div>
+              {premiumSearchLoading && <span className="text-xs text-zinc-500 self-center">Buscando…</span>}
+            </div>
+            {premiumSearchResults.length > 0 && (
+              <ul className="space-y-2 max-h-48 overflow-y-auto">
+                {premiumSearchResults.map((u) => (
+                  <li
+                    key={u.id}
+                    className="flex items-center justify-between gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-white truncate">{u.displayName || u.id}</p>
+                      <p className="text-[10px] text-zinc-500 truncate">{u.id}</p>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {u.isPremium ? (
+                        <button
+                          type="button"
+                          onClick={() => void setUserPremium(u.id, false)}
+                          className="text-[11px] font-bold px-2 py-1 rounded-lg bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                        >
+                          Quitar
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => void setUserPremium(u.id, true)}
+                          className="text-[11px] font-bold px-2 py-1 rounded-lg bg-amber-500/20 text-amber-300 hover:bg-amber-500/30"
+                        >
+                          Premium
+                        </button>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="border border-amber-500/20 rounded-2xl p-4 space-y-3 bg-amber-500/5">
+            <h3 className="text-white font-bold text-sm">Candidatos Ko-fi (modal donación ≥10 s)</h3>
+            {premiumCandidates.length === 0 ? (
+              <p className="text-xs text-zinc-500">Nadie en la lista todavía.</p>
+            ) : (
+              <ul className="space-y-2 max-h-52 overflow-y-auto">
+                {premiumCandidates.map((c) => (
+                  <li
+                    key={c.id}
+                    className="flex items-center justify-between gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-white truncate">{c.displayName || c.email || c.id}</p>
+                      <p className="text-[10px] text-zinc-500 truncate">
+                        {c.email || 'sin email'} ·{' '}
+                        {typeof c.updatedAt === 'number' && Number.isFinite(c.updatedAt)
+                          ? new Date(c.updatedAt).toLocaleString()
+                          : '—'}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => void setUserPremium(c.id, true)}
+                        className="text-[11px] font-bold px-2 py-1 rounded-lg bg-amber-500/20 text-amber-300 hover:bg-amber-500/30"
+                      >
+                        Marcar premium
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void removePremiumCandidate(c.id)}
+                        className="p-1.5 rounded-lg bg-zinc-800 text-zinc-400 hover:text-red-300"
+                        title="Quitar de candidatos"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="border-t border-zinc-800 pt-5">
+            <h3 className="text-white font-bold mb-3">Puntos</h3>
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <label className="text-sm text-zinc-300">
               Multiplicador base

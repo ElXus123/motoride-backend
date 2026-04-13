@@ -7,7 +7,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { parseGPX, parseRouteData } from '../lib/gpx';
 import { calculateLevel } from '../lib/utils';
 import { requestJson } from '../lib/network';
-import { Users, Plus, LogOut, User as UserIcon, Activity, Trash2, Trophy, Calendar, MapPin, Search, Clock, ChevronRight, Upload, X, Map as MapIcon, Play, HeartHandshake, CircleDollarSign, Shield, RectangleVertical, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Users, Plus, LogOut, User as UserIcon, Activity, Trash2, Trophy, Calendar, MapPin, Search, Clock, ChevronRight, Upload, X, Map as MapIcon, Play, HeartHandshake, CircleDollarSign, Shield, CheckCircle2, AlertCircle, Mail } from 'lucide-react';
 import FriendsModal from './FriendsModal';
 import AdminPointsPanel from './AdminPointsPanel';
 
@@ -96,9 +96,11 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   const [routeGenFeedback, setRouteGenFeedback] = useState<null | { kind: 'success' | 'error'; title: string; detail?: string }>(null);
   const [showFriendsModal, setShowFriendsModal] = useState(false);
   const [showSupportModal, setShowSupportModal] = useState(false);
+  const [donationEngagementStart, setDonationEngagementStart] = useState<number | null>(null);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [showPreviewModal, setShowPreviewModal] = useState<any>(null);
   const supportPopupRef = useRef<Window | null>(null);
+  const premiumCandidateWrittenThisOpenRef = useRef(false);
   const lastBackHandledAtRef = useRef(0);
   const prevLayersRef = useRef({
     showCreateModal: false,
@@ -108,8 +110,6 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   });
   const [indexBuilding, setIndexBuilding] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
-  const DASHBOARD_PORTRAIT_KEY = 'motoride_dashboard_portrait';
-  const [portraitDashboard, setPortraitDashboard] = useState(() => localStorage.getItem(DASHBOARD_PORTRAIT_KEY) === '1');
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deletingType, setDeletingType] = useState<'history' | 'scheduled' | null>(null);
   
@@ -200,39 +200,6 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     };
   }, []);
 
-  useEffect(() => {
-    localStorage.setItem(DASHBOARD_PORTRAIT_KEY, portraitDashboard ? '1' : '0');
-  }, [portraitDashboard]);
-
-  const releasePortraitOrientation = () => {
-    try {
-      (screen.orientation as ScreenOrientation & { unlock?: () => void })?.unlock?.();
-    } catch {
-      /* ignore */
-    }
-  };
-
-  const togglePortraitDashboard = () => {
-    setPortraitDashboard((prev) => {
-      const next = !prev;
-      if (next) {
-        try {
-          const o = screen.orientation as ScreenOrientation & { lock?: (m: string) => Promise<void> };
-          void o?.lock?.('portrait-primary');
-        } catch {
-          /* iOS / desktop often block lock without fullscreen */
-        }
-      } else {
-        releasePortraitOrientation();
-      }
-      return next;
-    });
-  };
-
-  useEffect(() => {
-    return () => releasePortraitOrientation();
-  }, []);
-
   const openSupportLink = (url: string) => {
     const popup = window.open(
       url,
@@ -245,6 +212,46 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       window.open(url, '_blank', 'noopener,noreferrer');
     }
   };
+
+  const closeSupportModal = () => {
+    setShowSupportModal(false);
+    setDonationEngagementStart(null);
+  };
+
+  useEffect(() => {
+    if (showSupportModal) {
+      premiumCandidateWrittenThisOpenRef.current = false;
+    } else {
+      setDonationEngagementStart(null);
+    }
+  }, [showSupportModal]);
+
+  useEffect(() => {
+    if (!showSupportModal || donationEngagementStart == null || !user) return;
+    const id = window.setInterval(async () => {
+      if (Date.now() - donationEngagementStart < 10000) return;
+      if (premiumCandidateWrittenThisOpenRef.current) return;
+      premiumCandidateWrittenThisOpenRef.current = true;
+      try {
+        await setDoc(
+          doc(db, 'premiumCandidates', user.uid),
+          {
+            uid: user.uid,
+            email: user.email || '',
+            displayName: user.displayName || userData?.displayName || '',
+            photoURL: user.photoURL || userData?.photoURL || '',
+            updatedAt: Date.now(),
+            source: 'support_modal_donation_10s'
+          },
+          { merge: true }
+        );
+      } catch (error) {
+        premiumCandidateWrittenThisOpenRef.current = false;
+        handleFirestoreError(error, OperationType.WRITE, `premiumCandidates/${user.uid}`);
+      }
+    }, 500);
+    return () => clearInterval(id);
+  }, [showSupportModal, donationEngagementStart, user, userData?.displayName, userData?.photoURL]);
 
   // Create browser-history layers for dashboard overlays.
   useEffect(() => {
@@ -291,7 +298,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
         return;
       }
       if (showSupportModal) {
-        setShowSupportModal(false);
+        closeSupportModal();
       }
     };
     window.addEventListener('popstate', onPopState);
@@ -588,10 +595,10 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   };
 
   return (
-    <div className={`min-h-screen bg-zinc-950 text-white overflow-x-hidden ${portraitDashboard ? 'max-w-md mx-auto w-full shadow-[0_0_0_1px_rgba(39,39,42,0.6)]' : ''}`}>
+    <div className="min-h-screen bg-zinc-950 text-white overflow-x-hidden">
       {/* Header */}
       <header className="sticky top-0 z-30 bg-zinc-950/80 backdrop-blur-md border-b border-zinc-900 px-6 py-4">
-        <div className={`${portraitDashboard ? 'max-w-md' : 'max-w-5xl'} mx-auto grid grid-cols-[auto_1fr_auto] items-center gap-3`}>
+        <div className="max-w-5xl mx-auto grid grid-cols-[auto_1fr_auto] items-center gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <button 
               onClick={onOpenProfile}
@@ -620,18 +627,6 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={togglePortraitDashboard}
-              className={`p-2 border rounded-full transition-colors ${
-                portraitDashboard
-                  ? 'bg-orange-500/20 border-orange-500/50 text-orange-400'
-                  : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:bg-zinc-800 hover:text-white'
-              }`}
-              title={portraitDashboard ? 'Salir de modo vertical' : 'Modo vertical (fijar retrato)'}
-            >
-              <RectangleVertical size={20} />
-            </button>
             {isAdmin && (
               <button 
                 onClick={() => setShowAdminPanel(true)}
@@ -641,6 +636,13 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                 <Shield size={20} />
               </button>
             )}
+            <a
+              href="mailto:juarp123@gmail.com?subject=Soporte%20MotoRide&body=Describe%20tu%20problema%20%28dispositivo%2C%20pasos%20para%20reproducirlo%29%3A%0A%0A"
+              className="p-2 bg-zinc-900 border border-zinc-800 rounded-full hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-sky-400"
+              title="Contactar soporte"
+            >
+              <Mail size={20} />
+            </a>
             <button 
               onClick={() => setShowFriendsModal(true)}
               className="p-2 bg-zinc-900 border border-zinc-800 rounded-full hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-white"
@@ -652,23 +654,37 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
         </div>
       </header>
 
-      <main className={`${portraitDashboard ? 'max-w-md' : 'max-w-5xl'} mx-auto p-6 space-y-8`}>
+      <main className="max-w-5xl mx-auto p-6 space-y-8">
         {/* Support */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="md:col-span-2" />
 
-          <button
-            onClick={() => setShowSupportModal(true)}
-            className="bg-zinc-900 border border-zinc-800 hover:border-orange-500/40 rounded-2xl px-4 py-3 flex items-center justify-center gap-3 transition-all"
-          >
-            <div className="w-9 h-9 rounded-xl bg-orange-500/20 text-orange-400 flex items-center justify-center">
-              <HeartHandshake size={18} />
-            </div>
-            <div className="text-left">
-              <p className="text-sm font-bold text-white">Apoyar proyecto</p>
-              <p className="text-[11px] text-zinc-500">Opcional y sin bloquear funciones</p>
-            </div>
-          </button>
+          <div className="flex flex-col gap-3">
+            <a
+              href="mailto:juarp123@gmail.com?subject=Soporte%20MotoRide&body=Describe%20tu%20problema%20%28dispositivo%2C%20pasos%20para%20reproducirlo%29%3A%0A%0A"
+              className="bg-zinc-900 border border-zinc-800 hover:border-sky-500/40 rounded-2xl px-4 py-3 flex items-center justify-center gap-3 transition-all"
+            >
+              <div className="w-9 h-9 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center">
+                <Mail size={18} />
+              </div>
+              <div className="text-left">
+                <p className="text-sm font-bold text-white">Soporte</p>
+                <p className="text-[11px] text-zinc-500">juarp123@gmail.com</p>
+              </div>
+            </a>
+            <button
+              onClick={() => setShowSupportModal(true)}
+              className="bg-zinc-900 border border-zinc-800 hover:border-orange-500/40 rounded-2xl px-4 py-3 flex items-center justify-center gap-3 transition-all"
+            >
+              <div className="w-9 h-9 rounded-xl bg-orange-500/20 text-orange-400 flex items-center justify-center">
+                <HeartHandshake size={18} />
+              </div>
+              <div className="text-left">
+                <p className="text-sm font-bold text-white">Apoyar proyecto</p>
+                <p className="text-[11px] text-zinc-500">Ko-fi · desbloquea Premium (revisión manual)</p>
+              </div>
+            </button>
+          </div>
         </div>
 
         {pointsFixError && (
@@ -1081,22 +1097,29 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                 <HeartHandshake size={20} className="text-orange-400" />
                 Apoyar MotoRide
               </h2>
-              <button onClick={() => setShowSupportModal(false)} className="p-2 hover:bg-zinc-800 rounded-full transition-colors text-zinc-400">
+              <button onClick={closeSupportModal} className="p-2 hover:bg-zinc-800 rounded-full transition-colors text-zinc-400">
                 <X size={20} />
               </button>
             </div>
 
             <div className="p-6 space-y-3">
+              <p className="text-[11px] text-zinc-500 leading-relaxed">
+                Si abres la donación y dejas este cuadro abierto al menos 10 segundos, te añadimos a la lista de posibles Premium para contrastar con Ko-fi (no activa Premium solo).
+              </p>
               <button
-                onClick={() => openSupportLink('https://ko-fi.com/motorideapp')}
+                type="button"
+                onClick={() => {
+                  openSupportLink('https://ko-fi.com/motorideapp');
+                  if (user) setDonationEngagementStart(Date.now());
+                }}
                 className="w-full bg-zinc-950 border border-zinc-800 hover:border-emerald-500/40 rounded-2xl p-4 flex items-center gap-3 transition-all"
               >
                 <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
                   <CircleDollarSign size={18} />
                 </div>
                 <div>
-                  <p className="text-sm font-bold text-white">Donar (Ko-fi / similar)</p>
-                  <p className="text-[11px] text-zinc-500">Aporte voluntario para mantener servidores y mejoras.</p>
+                  <p className="text-sm font-bold text-white">Donar (Ko-fi)</p>
+                  <p className="text-[11px] text-zinc-500">Aporte voluntario · chat de voz Premium tras activación manual.</p>
                 </div>
               </button>
             </div>

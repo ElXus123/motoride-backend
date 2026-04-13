@@ -21,7 +21,8 @@ export async function fetchRainViewerTileUrl(): Promise<{ baseUrl: string; maxNa
     const last = frames && frames.length ? frames[frames.length - 1] : null;
     const path = last?.path;
     if (!path) return null;
-    const baseUrl = `${host}${path}/512/{z}/{x}/{y}/6/1_1.png`;
+    // Color 2 = estándar API Rain Viewer (el 6 puede fallar en algunas cuentas / teselas).
+    const baseUrl = `${host}${path}/512/{z}/{x}/{y}/2/1_1.png`;
     return { baseUrl, maxNativeZoom: 7 };
   };
 
