@@ -256,6 +256,8 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
   const [showWeather, setShowWeather] = useState(false);
   const [rainRadar, setRainRadar] = useState<{ url: string; maxNativeZoom: number } | null>(null);
   const [weatherFetchFailed, setWeatherFetchFailed] = useState(false);
+  const [weatherTilesLoaded, setWeatherTilesLoaded] = useState(false);
+  const [weatherTileErrors, setWeatherTileErrors] = useState(0);
   const [useFirestoreFallback, setUseFirestoreFallback] = useState(true);
   const [distance, setDistance] = useState(0); // in km
   const [localDistance, setLocalDistance] = useState(0); // for auto-start and save check
@@ -302,6 +304,8 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
     if (!showWeather) {
       setRainRadar(null);
       setWeatherFetchFailed(false);
+      setWeatherTilesLoaded(false);
+      setWeatherTileErrors(0);
       return;
     }
     let cancelled = false;
@@ -1913,6 +1917,21 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
                     No se pudo cargar el radar ahora. Revisa la conexión; se reintentará al abrir ajustes o cada 10 min.
                   </p>
                 )}
+                {showWeather && !weatherFetchFailed && rainRadar && !weatherTilesLoaded && (
+                  <p className="text-[11px] text-zinc-500 px-3 -mt-2 mb-1 leading-snug">
+                    Cargando radar de lluvia...
+                  </p>
+                )}
+                {showWeather && !weatherFetchFailed && rainRadar && weatherTilesLoaded && weatherTileErrors === 0 && (
+                  <p className="text-[11px] text-emerald-400/90 px-3 -mt-2 mb-1 leading-snug">
+                    Radar activo. Si no ves colores, puede que no haya precipitación en la zona.
+                  </p>
+                )}
+                {showWeather && !weatherFetchFailed && rainRadar && weatherTileErrors > 2 && (
+                  <p className="text-[11px] text-red-400/90 px-3 -mt-2 mb-1 leading-snug">
+                    Problema cargando teselas del radar ({weatherTileErrors}). Prueba a desactivar/activar la capa.
+                  </p>
+                )}
 
                 <button 
                   onClick={() => {
@@ -2335,6 +2354,10 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
             maxZoom={20}
             crossOrigin
             className="leaflet-radar-overlay"
+            eventHandlers={{
+              tileload: () => setWeatherTilesLoaded(true),
+              tileerror: () => setWeatherTileErrors((e) => e + 1),
+            }}
             updateWhenIdle={false}
             updateWhenZooming
           />

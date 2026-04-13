@@ -313,6 +313,25 @@ Registro de cambios de sesiones
     orientacion fullscreen sigue limitada por el sistema sin fullscreen.
   - Archivos: src/lib/rainviewer.ts, src/components/MapView.tsx
 
+- [2026-04-13] Salida real de host/usuarios + popup "Ruta lista":
+  - Salida de grupo robusta:
+    - Se separa salida explicita de desconexion temporal.
+    - Backend Socket.IO: nuevo evento `leave-group` y gracia de reconexion
+      de 20s en `disconnect` antes de emitir `user-left`.
+    - Si el host sale de forma real, se emite `host-left-route`.
+  - Comportamiento en ruta:
+    - Al salir por atras/cerrar/app hide se hace baja real del miembro en
+      `groups.members` (arrayRemove), evitando bajas por cortes de red.
+    - Si el host abandona, se marca `isRecording=false` + `hostLeftAt`,
+      aparece aviso en clientes: no se acumula progreso nuevo y se conserva
+      lo logrado hasta la salida del host.
+  - UX crear ruta:
+    - Se reemplaza `alert()` nativo de "Ruta generada..." por popup/modal
+      personalizado de estilo MotoRide (exito/error, destino y cierre).
+    - El popup tambien cubre errores de geocoding/OSRM/GPS en ese flujo.
+  - Archivos: server.ts, src/components/MapView.tsx,
+    src/hooks/useLocationTracking.ts, src/components/Dashboard.tsx
+
 Plantilla para futuras entradas
 - [AAAA-MM-DD]:
   - Cambio realizado:

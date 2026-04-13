@@ -41,8 +41,9 @@ html, body, #root {
 /* Rain Viewer radar: smooth blend (API max zoom is 7; tiles scale above that) */
 .leaflet-radar-overlay img.leaflet-tile {
   image-rendering: auto;
-  filter: saturate(1.1) contrast(1.06);
-  mix-blend-mode: screen;
+  /* Normal blend: more reliable visibility on all devices */
+  filter: saturate(1.25) contrast(1.12);
+  mix-blend-mode: normal;
 }
 
 .custom-popup .leaflet-popup-content-wrapper {
