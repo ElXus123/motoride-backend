@@ -3,6 +3,7 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import { createServer as createViteServer } from "vite";
 import path from "path";
+import fs from "fs";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -89,10 +90,23 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+    const shouldServeStatic = process.env.SERVE_STATIC === "true";
+    const hasDist = fs.existsSync(path.join(distPath, "index.html"));
+
+    if (shouldServeStatic && hasDist) {
+      app.use(express.static(distPath));
+      app.get('*', (req, res) => {
+        res.sendFile(path.join(distPath, 'index.html'));
+      });
+    } else {
+      // Backend-only mode (recommended on Render when frontend is on Netlify)
+      app.get('/health', (_req, res) => {
+        res.status(200).json({ ok: true, service: "socket-backend" });
+      });
+      app.get('/', (_req, res) => {
+        res.status(200).send('MotoBikeSocial socket backend is running.');
+      });
+    }
   }
 
   httpServer.listen(PORT, "0.0.0.0", () => {

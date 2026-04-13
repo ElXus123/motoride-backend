@@ -539,17 +539,19 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
         return newLocs;
       });
     };
-
-    socket.on('location-updated', handleLocationUpdate);
-    socket.on('user-left', (data: { uid: string }) => {
+    const handleUserLeft = (data: { uid: string }) => {
       setLocations(prev => prev.filter(l => l.uid !== data.uid));
-    });
-    socket.on('alert-triggered', (data: { uid: string, displayName: string, type: string }) => {
+    };
+    const handleAlertTriggered = (data: { uid: string, displayName: string, type: string }) => {
       setLocations(prev => prev.map(l => l.uid === data.uid ? { ...l, alert: { type: data.type, timestamp: Date.now() } } : l));
       setTimeout(() => {
         setLocations(prev => prev.map(l => l.uid === data.uid ? { ...l, alert: null } : l));
       }, 60000);
-    });
+    };
+
+    socket.on('location-updated', handleLocationUpdate);
+    socket.on('user-left', handleUserLeft);
+    socket.on('alert-triggered', handleAlertTriggered);
 
     // Also keep the Firestore listener for initial state and alerts
     if (!group?.members?.length) return;
@@ -588,6 +590,8 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
 
     return () => {
       socket.off('location-updated', handleLocationUpdate);
+      socket.off('user-left', handleUserLeft);
+      socket.off('alert-triggered', handleAlertTriggered);
       unsubs.forEach(u => u());
     };
   }, [group?.members]);
@@ -1180,7 +1184,7 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
   // Dynamic spacing so top overlays never overlap each other.
   const topInset = 16;
   const connectionBannerHeight = !isOnline ? 58 : 0;
-  const headerOverlayHeight = !isMoving ? (parsedRoute ? 168 : 88) : 0;
+  const headerOverlayHeight = parsedRoute ? 168 : (!isMoving ? 88 : 0);
   const headerTopOffset = !isOnline ? topInset + 56 : 0;
   const gpsErrorTop = topInset + connectionBannerHeight + (!isMoving ? 86 : 8);
   const activeAlertsTop = topInset + connectionBannerHeight + headerOverlayHeight + 12;
@@ -1202,7 +1206,7 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
             SIN CONEXIÓN - RECONECTANDO...
           </motion.div>
         )}
-        {!isMoving && (
+        {(
           <motion.div 
             initial={{ y: -100, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
@@ -1211,6 +1215,7 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
             style={{ top: `${headerTopOffset}px` }}
           >
          <div className="pointer-events-auto flex flex-col gap-2 min-w-0 max-w-[calc(100vw-6.5rem)] sm:max-w-sm">
+           {!isMoving && (
            <motion.div 
              layout
              className="flex items-center gap-2 sm:gap-3 bg-zinc-950/80 backdrop-blur-md p-2 rounded-2xl sm:rounded-full border border-zinc-800 shadow-xl overflow-hidden min-w-0"
@@ -1239,6 +1244,7 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
                </div>
              </div>
            </motion.div>
+           )}
 
            {/* Navigation Instruction */}
            {parsedRoute && (
@@ -1534,10 +1540,10 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
             exit={{ opacity: 0, x: -20 }}
             className={`absolute left-4 z-[1001] bg-zinc-950/95 backdrop-blur-md border border-zinc-800 rounded-2xl p-4 shadow-2xl w-64 pointer-events-auto transition-all duration-500 ${
               isLandscape 
-                ? 'bottom-28 flex flex-col' 
+                ? 'bottom-40 flex flex-col max-h-[46vh]' 
                 : ''
             }`}
-            style={{ top: `${rankingTop}px` }}
+            style={{ top: isLandscape ? undefined : `${rankingTop}px` }}
           >
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-white font-bold flex items-center gap-2">
@@ -1697,8 +1703,8 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
       <div className="w-full flex-1 relative overflow-hidden bg-zinc-900">
         <div 
           className="w-full h-full transition-transform duration-500 ease-out"
-          style={{ 
-            transform: isRecording && heading !== null && localDistance >= 0.05 ? `rotate(${-heading}deg) scale(1.5)` : 'none',
+          style={{
+            transform: isRecording && heading !== null && localDistance >= 0.05 ? `rotate(${-heading}deg) scale(1.25)` : 'none',
             transformOrigin: 'center center'
           }}
         >
@@ -1708,11 +1714,9 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
             ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
             : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
           } 
-          keepBuffer={20}
-          updateWhenIdle={false}
-          updateWhenZooming={false}
-          noWrap={true}
-          bounds={[[-90, -180], [90, 180]]}
+          keepBuffer={40}
+          updateWhenIdle={true}
+          updateWhenZooming={true}
           maxZoom={20}
           maxNativeZoom={19}
         />

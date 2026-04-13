@@ -36,32 +36,6 @@ const setupPWAAssets = () => {
   }
   appleIcon.href = appIcon;
 
-  // Build manifest at runtime so icon URL always points to bundled asset.
-  const manifest = {
-    name: 'MotoBikeSocial',
-    short_name: 'MotoBikeSocial',
-    description: 'Navegador y telemetria para moteros con inclinometro y radares.',
-    start_url: '/',
-    scope: '/',
-    display: 'standalone',
-    background_color: '#09090b',
-    theme_color: '#f97316',
-    orientation: 'any',
-    icons: [
-      { src: appIcon, sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
-      { src: appIcon, sizes: '512x512', type: 'image/png', purpose: 'any maskable' }
-    ]
-  };
-
-  const manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' });
-  const manifestUrl = URL.createObjectURL(manifestBlob);
-  let manifestLink = document.querySelector("link[rel='manifest']") as HTMLLinkElement | null;
-  if (!manifestLink) {
-    manifestLink = document.createElement('link');
-    manifestLink.rel = 'manifest';
-    document.head.appendChild(manifestLink);
-  }
-  manifestLink.href = manifestUrl;
 };
 
 setupPWAAssets();

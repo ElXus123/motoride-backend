@@ -22,6 +22,16 @@ export const useLocationTracking = (isActive: boolean, groupId: string, extraDat
     if (groupId && groupId !== 'REPEATED' && user) {
       socket.emit('join-group', { groupId, uid: user.uid });
     }
+
+    const rejoinOnConnect = () => {
+      if (groupId && groupId !== 'REPEATED' && user) {
+        socket.emit('join-group', { groupId, uid: user.uid });
+      }
+    };
+    socket.on('connect', rejoinOnConnect);
+    return () => {
+      socket.off('connect', rejoinOnConnect);
+    };
   }, [groupId, user]);
 
   // Force update when alert changes - only if it's a new alert
@@ -96,6 +106,29 @@ export const useLocationTracking = (isActive: boolean, groupId: string, extraDat
               alert: extraDataRef.current?.alert || null,
               level: extraDataRef.current?.level || 1
             });
+
+            // Fallback persistence for cross-client visibility if socket packets are missed.
+            if (now % 10000 < 1200) {
+              setDoc(
+                doc(db, 'locations', user.uid),
+                {
+                  uid: user.uid,
+                  lat: latitude,
+                  lng: longitude,
+                  speed: gpsSpeed || 0,
+                  heading: gpsHeading || 0,
+                  score: extraDataRef.current?.score || 0,
+                  timestamp: now,
+                  photoURL: extraDataRef.current?.photoURL || '',
+                  displayName: extraDataRef.current?.displayName || 'Motero',
+                  alert: extraDataRef.current?.alert || null,
+                  level: extraDataRef.current?.level || 1
+                },
+                { merge: true }
+              ).catch(() => {
+                // Non-blocking fallback write.
+              });
+            }
           }
         },
         (err) => {

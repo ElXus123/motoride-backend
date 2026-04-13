@@ -123,6 +123,7 @@ const AppContent = () => {
               </div>
             </div>
 
+            {(deferredPrompt || isSafari) && (
             <div className="rounded-2xl border border-zinc-700 bg-zinc-900/60 p-3 mb-3 text-sm text-zinc-200">
               <p className="font-semibold mb-1">Como instalarla en 20 segundos:</p>
               {isSafari ? (
@@ -139,6 +140,7 @@ const AppContent = () => {
                 </>
               )}
             </div>
+            )}
 
             {(isSafari || isIOS) && (
               <div className="rounded-2xl border border-blue-500/30 bg-blue-500/10 p-3 mb-3 text-sm text-zinc-200">
@@ -169,11 +171,7 @@ const AppContent = () => {
                 >
                   Instalar app
                 </button>
-              ) : (
-                <div className="flex-1 text-xs text-zinc-400 bg-zinc-900 border border-zinc-800 rounded-xl py-3 px-3 text-center">
-                  {isSafari ? 'Si no puedes instalar: Safari -> Compartir -> Anadir a pantalla de inicio.' : 'Si no ves el boton: Chrome -> menu (tres puntos) -> Instalar aplicacion.'}
-                </div>
-              )}
+              ) : null}
               <button
                 onClick={dismissInstallNotice}
                 className="px-4 py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-100 font-semibold transition-colors"
