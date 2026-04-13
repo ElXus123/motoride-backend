@@ -146,14 +146,16 @@ const MotorcycleIcon = ({ angle }: { angle: number }) => (
 );
 
 // Component to handle map centering and rotation
-const MapController = ({ location, heading, isFollowing, showRanking, isRecording }: { location: any, heading: number | null, isFollowing: boolean, showRanking: boolean, isRecording: boolean }) => {
+const MapController = ({ location, heading, isFollowing, showRanking, isRecording, speedKmh }: { location: any, heading: number | null, isFollowing: boolean, showRanking: boolean, isRecording: boolean, speedKmh: number }) => {
   const map = useMap();
   const hasAutoZoomedRef = useRef(false);
   
   useEffect(() => {
     if (isFollowing && location && typeof location.lat === 'number' && typeof location.lng === 'number') {
-      // Auto-zoom once when GPS gets first valid user location.
-      const zoom = isRecording ? 19 : (hasAutoZoomedRef.current ? map.getZoom() : Math.max(map.getZoom(), 17));
+      // Dynamic zoom: every +10 km/h zoom out a bit.
+      const speedZoomSteps = Math.floor(Math.max(speedKmh, 0) / 10);
+      const dynamicZoom = Math.max(15.6, 19 - speedZoomSteps * 0.25);
+      const zoom = isRecording ? dynamicZoom : (hasAutoZoomedRef.current ? map.getZoom() : Math.max(map.getZoom(), 17));
       const isLandscape = window.innerWidth > window.innerHeight;
       
       if (isLandscape) {
@@ -171,7 +173,7 @@ const MapController = ({ location, heading, isFollowing, showRanking, isRecordin
         hasAutoZoomedRef.current = true;
       }
     }
-  }, [location, isFollowing, map, showRanking, isRecording]);
+  }, [location, isFollowing, map, showRanking, isRecording, speedKmh]);
 
   return null;
 };
@@ -231,6 +233,7 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
   const [hasCalibratedInPocket, setHasCalibratedInPocket] = useState(false);
   const longPressTimerRef = useRef<any>(null);
   const tapResetTimerRef = useRef<any>(null);
+  const pocketTapsRef = useRef(0);
 
   // Ensure score is always an integer, rounding up if necessary
   useEffect(() => {
@@ -244,7 +247,7 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
     let timer: any;
     if (isPocketMode && !isPocketLocked && pocketCountdown > 0) {
       timer = setInterval(() => {
-        setPocketCountdown(prev => prev - 1);
+        setPocketCountdown(prev => (prev > 0 ? prev - 1 : 0));
       }, 1000);
     } else if (pocketCountdown === 0 && !isPocketLocked) {
       setIsPocketLocked(true);
@@ -264,47 +267,60 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
     return () => clearInterval(timer);
   }, [isPocketMode, isPocketLocked, pocketCountdown]);
 
+  useEffect(() => {
+    pocketTapsRef.current = pocketTaps;
+  }, [pocketTaps]);
+
+  const startPocketLongPressUnlock = () => {
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+    setIsLongPressing(true);
+    longPressTimerRef.current = setTimeout(() => {
+      // Unlock!
+      setIsPocketLocked(false);
+      setIsPocketMode(false);
+      setPocketCountdown(30);
+      setPocketTaps(0);
+      pocketTapsRef.current = 0;
+      setIsLongPressing(false);
+      setPocketDist(0);
+      setHasCalibratedInPocket(false);
+      if (navigator.vibrate) navigator.vibrate(100);
+      
+      // Restore orientation
+      // @ts-ignore
+      if (screen.orientation && screen.orientation.unlock) {
+        // @ts-ignore
+        screen.orientation.unlock();
+      }
+    }, 1500);
+  };
+
   const handlePocketTouchStart = () => {
     if (!isPocketLocked) return;
     
     const now = Date.now();
     const timeDiff = now - lastPocketTapTime;
-    
-    if (pocketTaps < 3) {
-      if (timeDiff < 400 || pocketTaps === 0) {
-        setPocketTaps(prev => prev + 1);
-        setLastPocketTapTime(now);
-      } else {
-        setPocketTaps(1);
-        setLastPocketTapTime(now);
-      }
 
-      // Reset combo if user pauses too much between taps.
+    let nextTaps = pocketTapsRef.current;
+    if (nextTaps < 3) {
+      nextTaps = (timeDiff < 450 || nextTaps === 0) ? nextTaps + 1 : 1;
+      setPocketTaps(nextTaps);
+      pocketTapsRef.current = nextTaps;
+      setLastPocketTapTime(now);
+
       if (tapResetTimerRef.current) clearTimeout(tapResetTimerRef.current);
-      tapResetTimerRef.current = setTimeout(() => {
-        setPocketTaps(0);
-      }, 1200);
-    } else if (pocketTaps === 3) {
-      // Start long press
-      setIsLongPressing(true);
-      longPressTimerRef.current = setTimeout(() => {
-        // Unlock!
-        setIsPocketLocked(false);
-        setIsPocketMode(false);
-        setPocketCountdown(30);
-        setPocketTaps(0);
-        setIsLongPressing(false);
-        setPocketDist(0);
-        setHasCalibratedInPocket(false);
-        if (navigator.vibrate) navigator.vibrate(100);
-        
-        // Restore orientation
-        // @ts-ignore
-        if (screen.orientation && screen.orientation.unlock) {
-          // @ts-ignore
-          screen.orientation.unlock();
-        }
-      }, 1500);
+      if (nextTaps < 3) {
+        // Reset combo if user pauses too much between taps.
+        tapResetTimerRef.current = setTimeout(() => {
+          setPocketTaps(0);
+          pocketTapsRef.current = 0;
+        }, 1200);
+      }
+    }
+
+    // Once armed (3 taps), this press is the required long-press.
+    if (nextTaps >= 3) {
+      startPocketLongPressUnlock();
     }
   };
 
@@ -314,9 +330,13 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
       longPressTimerRef.current = null;
     }
     setIsLongPressing(false);
-    if (pocketTaps === 3 && isPocketLocked) {
-      // Long-press not completed: require full combo again to avoid accidental unlocks.
-      setPocketTaps(0);
+    if (pocketTapsRef.current >= 3 && isPocketLocked) {
+      // Keep unlock armed briefly, then reset if no successful long press.
+      if (tapResetTimerRef.current) clearTimeout(tapResetTimerRef.current);
+      tapResetTimerRef.current = setTimeout(() => {
+        setPocketTaps(0);
+        pocketTapsRef.current = 0;
+      }, 1800);
     }
   };
 
@@ -332,6 +352,7 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
     setPocketCountdown(30);
     setIsPocketLocked(false);
     setPocketTaps(0);
+    pocketTapsRef.current = 0;
     setPocketDist(0);
     setHasCalibratedInPocket(false);
     if (tapResetTimerRef.current) clearTimeout(tapResetTimerRef.current);
@@ -700,7 +721,7 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
     } else if (absAngle < 5 && inCurve) {
       setInCurve(false);
       const currentSpeed = (speed || 0) * 3.6;
-      if (currentSpeed > 5) {
+      if (currentSpeed >= 20) {
         setScore(prev => Math.ceil(prev + currentCurveMax));
       }
       setCurrentCurveMax(0);
@@ -1181,6 +1202,14 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
     Date.now() - loc.alert.timestamp < 60000
   );
 
+  // Real participant count: unique UIDs, counting current user once.
+  const uniqueOtherUsersCount = new Set(
+    locations
+      .filter(loc => loc.uid && loc.uid !== user?.uid)
+      .map(loc => loc.uid)
+  ).size;
+  const participantCount = (user ? 1 : 0) + uniqueOtherUsersCount;
+
   // Dynamic spacing so top overlays never overlap each other.
   const topInset = 16;
   const connectionBannerHeight = !isOnline ? 58 : 0;
@@ -1215,7 +1244,7 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
             style={{ top: `${headerTopOffset}px` }}
           >
          <div className="pointer-events-auto flex flex-col gap-2 min-w-0 max-w-[calc(100vw-6.5rem)] sm:max-w-sm">
-           {!isMoving && (
+        {(
            <motion.div 
              layout
              className="flex items-center gap-2 sm:gap-3 bg-zinc-950/80 backdrop-blur-md p-2 rounded-2xl sm:rounded-full border border-zinc-800 shadow-xl overflow-hidden min-w-0"
@@ -1231,7 +1260,7 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
                  <span>Código: <strong className="text-orange-500">{groupId}</strong></span>
                  <div className="flex items-center gap-1 bg-zinc-800/50 px-1.5 py-0.5 rounded-md">
                    <Users size={12} className="text-zinc-400" />
-                   <span className="font-bold text-white">{locations.length + 1}</span>
+                   <span className="font-bold text-white">{participantCount}</span>
                  </div>
                  <div className="flex items-center gap-1">
                    <button onClick={copyCode} className="hover:text-white transition-colors p-1" title="Copiar código">
@@ -1442,8 +1471,6 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="absolute inset-0 z-[5000] bg-black flex flex-col items-center justify-center select-none touch-none"
-            onPointerDown={handlePocketTouchStart}
-            onPointerUp={handlePocketTouchEnd}
           >
             {!isPocketLocked ? (
               <div className="text-center space-y-8 p-8">
@@ -1493,7 +1520,9 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
                     scale: isLongPressing ? 1.2 : 1,
                     opacity: isLongPressing ? 1 : 0.5
                   }}
-                  className="text-white"
+                  className="text-white p-2 rounded-full touch-none"
+                  onPointerDown={handlePocketTouchStart}
+                  onPointerUp={handlePocketTouchEnd}
                 >
                   {isLongPressing ? (
                     <div className="relative w-24 h-24">
@@ -1704,7 +1733,7 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
         <div 
           className="w-full h-full transition-transform duration-500 ease-out"
           style={{
-            transform: isRecording && heading !== null && localDistance >= 0.05 ? `rotate(${-heading}deg) scale(1.25)` : 'none',
+            transform: isRecording && currentSpeedKmh > 5 && heading !== null && localDistance >= 0.05 ? `rotate(${-heading}deg) scale(1.08)` : 'none',
             transformOrigin: 'center center'
           }}
         >
@@ -1714,9 +1743,9 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
             ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
             : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
           } 
-          keepBuffer={40}
-          updateWhenIdle={true}
-          updateWhenZooming={true}
+          keepBuffer={64}
+          updateWhenIdle={false}
+          updateWhenZooming={false}
           maxZoom={20}
           maxNativeZoom={19}
         />
@@ -1779,14 +1808,14 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
         {currentLocation && typeof currentLocation.lat === 'number' && typeof currentLocation.lng === 'number' && (
           <CurrentUserMarker 
             position={[currentLocation.lat, currentLocation.lng]}
-            heading={heading || 0}
+            heading={currentSpeedKmh > 5 ? (heading || 0) : 0}
             displayNameToUse={displayNameToUse}
             userLevel={userLevel}
             score={score}
           />
         )}
 
-        <MapController location={currentLocation} heading={heading} isFollowing={isFollowing} showRanking={showRanking} isRecording={isRecording} />
+        <MapController location={currentLocation} heading={currentSpeedKmh > 5 ? heading : 0} isFollowing={isFollowing} showRanking={showRanking} isRecording={isRecording} speedKmh={currentSpeedKmh} />
           </MapContainer>
         </div>
       </div>
@@ -1802,8 +1831,16 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
             <motion.div 
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="bg-zinc-900 border border-zinc-800 w-full max-w-md rounded-[2.5rem] overflow-hidden shadow-2xl p-6 text-center my-auto"
+              className="relative bg-zinc-900 border border-zinc-800 w-full max-w-md rounded-[2.5rem] overflow-hidden shadow-2xl p-6 text-center my-auto"
             >
+              <button
+                onClick={shareSummaryImage}
+                disabled={isSharingSummary}
+                className="absolute top-5 right-5 w-11 h-11 rounded-full bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-white flex items-center justify-center transition-colors"
+                title={isSharingSummary ? 'Generando imagen...' : 'Compartir resumen'}
+              >
+                <Share2 size={18} />
+              </button>
               <div className="w-16 h-16 bg-orange-500 rounded-3xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-orange-500/20">
                 <Trophy size={32} className="text-white" />
               </div>
@@ -1829,34 +1866,27 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
                   </p>
                 </div>
                 <div className="bg-zinc-950 p-3 rounded-3xl border border-zinc-800">
-                  <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500 mb-0.5">Puntos Totales</p>
-                  <p className="text-xl font-black text-orange-500">+{summaryData.score}</p>
-                  {summaryData.distanceBonus > 0 && (
-                    <p className="text-[10px] text-emerald-400 font-bold mt-1">Bonus distancia: +{summaryData.distanceBonus}</p>
-                  )}
+                  <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500 mb-0.5">Curvas Izq./Der.</p>
+                  <p className="text-lg font-black text-white">{summaryData.leftTurns} / {summaryData.rightTurns}</p>
                 </div>
                 <div className="bg-zinc-950 p-3 rounded-3xl border border-zinc-800">
                   <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500 mb-0.5">Puntos Base</p>
                   <p className="text-xl font-black text-white">+{summaryData.baseScore ?? summaryData.score}</p>
                 </div>
                 <div className="bg-zinc-950 p-3 rounded-3xl border border-zinc-800">
-                  <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500 mb-0.5">Curvas Izq./Der.</p>
-                  <p className="text-lg font-black text-white">{summaryData.leftTurns} / {summaryData.rightTurns}</p>
+                  <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500 mb-0.5">Puntos + Bonus</p>
+                  <p className="text-xl font-black text-orange-500">+{summaryData.score}</p>
+                  {summaryData.distanceBonus > 0 && (
+                    <p className="text-[10px] text-emerald-400 font-bold mt-1">Bonus distancia: +{summaryData.distanceBonus}</p>
+                  )}
                 </div>
-                <div className="bg-zinc-950 p-3 rounded-3xl border border-zinc-800">
+                <div className="bg-zinc-950 p-3 rounded-3xl border border-zinc-800 col-span-2">
                   <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500 mb-0.5">Inclinación Máx.</p>
-                  <p className="text-lg font-black text-white">Izq. {summaryData.maxLeanLeft}° / Der. {summaryData.maxLeanRight}°</p>
+                  <p className="text-2xl font-black text-white">Izq. {summaryData.maxLeanLeft}° / Der. {summaryData.maxLeanRight}°</p>
                 </div>
               </div>
 
               <div className="space-y-3">
-                <button
-                  onClick={shareSummaryImage}
-                  disabled={isSharingSummary}
-                  className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-black py-4 rounded-2xl transition-all shadow-lg shadow-emerald-600/20"
-                >
-                  {isSharingSummary ? 'Generando imagen...' : 'Compartir Resumen (imagen)'}
-                </button>
                 <button 
                   onClick={async () => {
                     try {
