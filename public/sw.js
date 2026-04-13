@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ruta-motera-v2';
+const CACHE_NAME = 'ruta-motera-v3';
 const CORE_ASSETS = ['/', '/index.html'];
 
 self.addEventListener('install', (event) => {
@@ -38,8 +38,8 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Cache-first for same-origin static assets.
-  if (isSameOrigin && (requestUrl.pathname.startsWith('/assets/') || requestUrl.pathname.endsWith('.png') || requestUrl.pathname.endsWith('.json'))) {
+  // Cache-first for same-origin static assets (except manifest to avoid stale installability metadata).
+  if (isSameOrigin && (requestUrl.pathname.startsWith('/assets/') || requestUrl.pathname.endsWith('.png')) && !requestUrl.pathname.endsWith('manifest.json')) {
     event.respondWith(
       caches.match(event.request).then((cached) => {
         if (cached) return cached;
