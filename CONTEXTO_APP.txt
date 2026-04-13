@@ -276,6 +276,13 @@ Registro de cambios de sesiones
     - Se deja documentado explicitamente este fix de compilacion para
       Cloudflare (errores TS2339 y TS2448 resueltos) como parte del
       historial de cambios previo a deploy.
+  - Ajuste final de build:
+    - Se elimina la implementacion class-based del ErrorBoundary que
+      causaba incompatibilidad TS en entorno Cloudflare.
+    - Se mantiene recuperacion global via listeners de error en AppContent.
+    - Build local confirmado OK (`npm run build`) sin errores.
+  - Archivos tocados:
+    - src/App.tsx
 
 Plantilla para futuras entradas
 - [AAAA-MM-DD]:

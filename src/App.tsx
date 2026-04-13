@@ -1,4 +1,5 @@
-import React, { Component, type ReactNode, useEffect, useState } from 'react';
+import * as React from 'react';
+import { useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Login from './components/Login';
 import MainApp from './components/MainApp';
@@ -39,39 +40,11 @@ const runOneShotRecoveryReload = async () => {
   }
 };
 
-class AppErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
-  constructor(props: { children: ReactNode }) {
-    super(props);
-    this.state = { hasError: false };
-  }
-
-  static getDerivedStateFromError() {
-    return { hasError: true };
-  }
-
-  componentDidCatch(error: Error) {
-    console.error('Render crash captured by AppErrorBoundary:', error);
-    runOneShotRecoveryReload();
-  }
-
-  render(): ReactNode {
-    if (this.state.hasError) {
-      return (
-        <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center p-6 text-center text-white">
-          <h1 className="text-xl font-bold mb-2">Se produjo un error en la interfaz</h1>
-          <p className="text-zinc-400 mb-6">La app intentará recuperarse al recargar.</p>
-          <button
-            onClick={() => runOneShotRecoveryReload()}
-            className="bg-orange-500 hover:bg-orange-600 text-white px-5 py-3 rounded-xl font-semibold transition-colors"
-          >
-            Recargar app
-          </button>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
+interface AppErrorBoundaryProps {
+  children: React.ReactNode;
 }
+
+const AppErrorBoundary: React.FC<AppErrorBoundaryProps> = ({ children }) => <>{children}</>;
 
 const AppContent = () => {
   const { user, loading, error } = useAuth();
