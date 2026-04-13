@@ -27,8 +27,11 @@ export async function fetchRainViewerTileUrl(): Promise<{ baseUrl: string; maxNa
     const last = frames && frames.length ? frames[frames.length - 1] : null;
     const path = last?.path;
     if (!path) return null;
-    // Color 2 = estándar API Rain Viewer (el 6 puede fallar en algunas cuentas / teselas).
-    const baseUrl = `${host}${path}/512/{z}/{x}/{y}/2/1_1.png`;
+    // Misma convención que el ejemplo oficial Leaflet de Rain Viewer: la URL puede usar 256 o 512,
+    // pero en Leaflet hay que usar tileSize 256 siempre; si no, {z}/{x}/{y} no encajan con su CDN.
+    const pathPixelSize =
+      typeof window !== 'undefined' && window.devicePixelRatio >= 2 ? 512 : 256;
+    const baseUrl = `${host}${path}/${pathPixelSize}/{z}/{x}/{y}/2/1_1.png`;
     return { baseUrl, maxNativeZoom: 7 };
   };
 

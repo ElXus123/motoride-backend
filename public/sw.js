@@ -1,5 +1,5 @@
 const CACHE_NAME = 'ruta-motera-v4';
-const TILE_CACHE = 'map-tiles-v2';
+const TILE_CACHE = 'map-tiles-v3';
 const CORE_ASSETS = ['/', '/index.html'];
 
 self.addEventListener('install', (event) => {
@@ -30,8 +30,9 @@ self.addEventListener('fetch', (event) => {
   const isSameOrigin = requestUrl.origin === self.location.origin;
   const isNavigation = event.request.mode === 'navigate';
   const isTileRequest =
-    requestUrl.hostname.includes('basemaps.cartocdn.com') ||
-    requestUrl.hostname.includes('tile.openstreetmap.org');
+    requestUrl.hostname.endsWith('.cartocdn.com') ||
+    requestUrl.hostname.includes('tile.openstreetmap.org') ||
+    requestUrl.hostname.includes('tilecache.rainviewer.com');
 
   // For app routes, prefer network then fallback to cached shell.
   if (isNavigation) {

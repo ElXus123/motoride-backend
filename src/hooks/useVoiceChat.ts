@@ -21,7 +21,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
 function micErrorMessage(err: unknown): string {
   const name = err && typeof err === 'object' && 'name' in err ? String((err as DOMException).name) : '';
   if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-    return 'Micrófono denegado. En el candado de la barra del navegador, permite micrófono para este sitio y vuelve a pulsar el botón de voz.';
+    return 'Micrófono denegado o bloqueado. Toca el candado o ⋮ en la barra de direcciones → Permisos del sitio → Micrófono: Permitir. En iPhone: Ajustes → Safari → la web → Micrófono. Luego vuelve a pulsar el botón de voz.';
   }
   if (name === 'NotFoundError') {
     return 'No se detecta micrófono en el dispositivo.';
@@ -32,7 +32,7 @@ function micErrorMessage(err: unknown): string {
   if (err instanceof Error && err.message.includes('no respondió')) {
     return err.message;
   }
-  return 'No se pudo usar el micrófono. Cierra la app y vuelve a abrir MotoRide desde el navegador (no en iframe).';
+  return 'No se pudo usar el micrófono. Abre MotoRide en el navegador (no dentro de Instagram/Facebook), con HTTPS o localhost, y no en modo incógnito si el navegador bloquea el mic ahí.';
 }
 
 /**
@@ -278,7 +278,7 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
     }
   }, [canUseVoice, groupId]);
 
-  const toggleVoice = async () => {
+  const toggleVoice = () => {
     if (!canUseVoiceRef.current) return;
     if (isVoiceActive) {
       setMicError(null);
@@ -289,26 +289,53 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
       }
       socket.emit('leave-voice', groupId);
       setIsVoiceActive(false);
-    } else {
-      if (!groupId) return;
-      clearMicError();
-      if (!navigator.mediaDevices?.getUserMedia) {
-        setMicError('Tu navegador no permite acceso al micrófono desde esta página.');
-        return;
-      }
-      try {
-        const stream = await withTimeout(
-          navigator.mediaDevices.getUserMedia({
-            audio: {
-              echoCancellation: true,
-              noiseSuppression: true,
-              channelCount: 1,
-            },
-            video: false,
-          }),
-          20000,
-          'El micrófono no respondió a tiempo. Reinicia la pestaña y vuelve a pulsar voz.'
-        );
+      return;
+    }
+
+    if (!groupId) return;
+    clearMicError();
+
+    if (typeof window !== 'undefined' && !window.isSecureContext) {
+      setMicError(
+        'El micrófono solo está permitido en conexión segura. Usa https:// o abre la app en localhost; en el móvil evita http:// con la IP de la red.'
+      );
+      return;
+    }
+
+    const md = navigator.mediaDevices;
+    const gUM = md?.getUserMedia?.bind(md);
+    if (!gUM) {
+      setMicError(
+        'Tu navegador no expone el micrófono aquí. Actualiza Safari/Chrome o abre MotoRide en el navegador del sistema (no en un visor embebido).'
+      );
+      return;
+    }
+
+    const timeoutMsg = 'El micrófono no respondió a tiempo. Reinicia la pestaña y vuelve a pulsar voz.';
+
+    const constraintsIdeal: MediaStreamConstraints = {
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+      video: false,
+    };
+
+    const constraintsSimple: MediaStreamConstraints = { audio: true, video: false };
+
+    const acquire = (constraints: MediaStreamConstraints) =>
+      withTimeout(gUM(constraints), 20000, timeoutMsg);
+
+    acquire(constraintsIdeal)
+      .catch((e: unknown) => {
+        const n = e && typeof e === 'object' && 'name' in e ? String((e as DOMException).name) : '';
+        if (n === 'OverconstrainedError' || n === 'ConstraintNotSatisfiedError') {
+          return acquire(constraintsSimple);
+        }
+        throw e;
+      })
+      .then((stream: MediaStream) => {
         if (!canUseVoiceRef.current) {
           stream.getTracks().forEach((t) => t.stop());
           return;
@@ -317,13 +344,13 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
         socket.emit('join-voice', groupId);
         setIsVoiceActive(true);
         setMicError(null);
-      } catch (err) {
+      })
+      .catch((err: unknown) => {
         console.error('Error accessing microphone:', err);
         setMicError(micErrorMessage(err));
         setIsVoiceActive(false);
         masterStreamRef.current = null;
-      }
-    }
+      });
   };
 
   return {

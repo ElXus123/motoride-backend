@@ -7,6 +7,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { parseGPX, parseRouteData } from '../lib/gpx';
 import { calculateLevel } from '../lib/utils';
 import { requestJson } from '../lib/network';
+import { LEAFLET_TRANSPARENT_ERROR_TILE } from '../lib/leafletTiles';
 import { Users, Plus, LogOut, User as UserIcon, Activity, Trash2, Trophy, Calendar, MapPin, Search, Clock, ChevronRight, Upload, X, Map as MapIcon, Play, HeartHandshake, CircleDollarSign, Shield, CheckCircle2, AlertCircle, Mail } from 'lucide-react';
 import FriendsModal from './FriendsModal';
 import AdminPointsPanel from './AdminPointsPanel';
@@ -1499,10 +1500,18 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                 zoom={6} 
                 className="w-full h-full"
                 zoomControl={true}
+                fadeAnimation={false}
               >
                 <TileLayer 
                   url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" 
                   attribution='&copy; OpenStreetMap'
+                  subdomains="abcd"
+                  keepBuffer={160}
+                  updateWhenIdle={false}
+                  updateWhenZooming={false}
+                  crossOrigin
+                  className="motoride-base-tiles"
+                  errorTileUrl={LEAFLET_TRANSPARENT_ERROR_TILE}
                 />
                 {showPreviewModal.routeGeoJSON && parseRouteData(showPreviewModal.routeGeoJSON) && (
                   <GeoJSON 

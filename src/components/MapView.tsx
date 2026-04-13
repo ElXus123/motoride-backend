@@ -1,5 +1,5 @@
-import { useEffect, useState, useRef, useMemo } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, GeoJSON, useMap } from 'react-leaflet';
+import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, GeoJSON, useMap, Pane } from 'react-leaflet';
 import L from 'leaflet';
 import { doc, onSnapshot, updateDoc, collection, query, where, addDoc, getDoc, setDoc, arrayRemove } from 'firebase/firestore';
 import { db, logOut, handleFirestoreError, OperationType } from '../firebase';
@@ -16,10 +16,11 @@ import { getDistance } from '../lib/geoUtils';
 import { requestJson } from '../lib/network';
 import { getActivePointsConfig } from '../lib/pointsConfig';
 import { fetchRainViewerTileUrl } from '../lib/rainviewer';
+import { LEAFLET_TRANSPARENT_ERROR_TILE } from '../lib/leafletTiles';
 import socket from '../lib/socket';
 import { useVoiceChat } from '../hooks/useVoiceChat';
 import PremiumBadge from './PremiumBadge';
-import { Upload, ArrowLeft, Copy, Check, Navigation, AlertTriangle, Play, Square, ArrowUp, MapPin, Trophy, Bell, AlertCircle, Wrench, Fuel, X, Maximize, Minimize, Search, Share2, Menu, Moon, Sun, Target, LogOut, Users, Mic, MicOff, ShieldAlert, Activity, Layers, Lock, LockOpen, Smartphone, RotateCw, Crown } from 'lucide-react';
+import { Upload, ArrowLeft, Copy, Check, Navigation, AlertTriangle, Play, Square, ArrowUp, MapPin, Trophy, Bell, AlertCircle, Wrench, Fuel, X, Maximize, Minimize, Search, Share2, Menu, Moon, Sun, Target, LogOut, Users, Mic, MicOff, ShieldAlert, Activity, Layers, Lock, LockOpen, Smartphone, RotateCw, Crown, WifiOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 // Tile prefetching helpers
@@ -194,13 +195,13 @@ const MotorcycleIcon = ({ angle }: { angle: number }) => (
   </div>
 );
 
-// Re-tile after CSS transform / layout shifts (avoids black rectangles on some mobile GPUs).
+// Solo invalidar cuando cambia el modo “mapa rotado” o tema; no en cada grado de rumbo (eso recargaba teselas y dejaba cuadrados negros).
 const MapInvalidateHelper = ({ layoutKey }: { layoutKey: string }) => {
   const map = useMap();
   useEffect(() => {
     const id = window.setTimeout(() => {
       map.invalidateSize({ animate: false });
-    }, 60);
+    }, 120);
     return () => clearTimeout(id);
   }, [map, layoutKey]);
   return null;
@@ -240,7 +241,17 @@ const MapController = ({ location, heading, isFollowing, showRanking, isRecordin
   return null;
 };
 
-export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId: string, onLeave: () => void, preloadedRoute?: string | null }) {
+export default function MapView({
+  groupId,
+  onLeave,
+  preloadedRoute,
+  prepareHistoryLeave,
+}: {
+  groupId: string;
+  onLeave: () => void;
+  preloadedRoute?: string | null;
+  prepareHistoryLeave?: () => void;
+}) {
   const LOCAL_RIDE_DRAFT_KEY = `motoride_ride_draft_${groupId}`;
   const { user } = useAuth();
   const [customName, setCustomName] = useState<string | null>(null);
@@ -338,6 +349,7 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
   const hasExplicitlyLeftRef = useRef(false);
   const leaveInProgressRef = useRef(false);
   const wakeLockRef = useRef<any>(null);
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
 
   // Ensure score is always an integer, rounding up if necessary
   useEffect(() => {
@@ -345,6 +357,14 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
       setScore(Math.ceil(score));
     }
   }, [score]);
+
+  useEffect(() => {
+    const onRouteBack = () => {
+      setShowExitConfirm((wasOpen) => (wasOpen ? false : true));
+    };
+    window.addEventListener('motoride:route-back', onRouteBack);
+    return () => window.removeEventListener('motoride:route-back', onRouteBack);
+  }, []);
 
   // Rain Viewer: load real tile path from API (paths are hashed; /v2/radar/0 is invalid). Refresh every 10 min.
   useEffect(() => {
@@ -561,6 +581,41 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
       window.removeEventListener('offline', handleOffline);
     };
   }, [groupId]);
+
+  const [weakMapTilesNotice, setWeakMapTilesNotice] = useState(false);
+  const baseMapTileErrorTsRef = useRef<number[]>([]);
+  const weakMapNoticeDismissedRef = useRef(false);
+
+  const WEAK_MAP_WINDOW_MS = 12_000;
+  const WEAK_MAP_ERROR_THRESHOLD = 6;
+
+  const recordBaseMapTileError = useCallback(() => {
+    const now = Date.now();
+    baseMapTileErrorTsRef.current = baseMapTileErrorTsRef.current.filter((t) => now - t < WEAK_MAP_WINDOW_MS);
+    baseMapTileErrorTsRef.current.push(now);
+    if (weakMapNoticeDismissedRef.current) return;
+    if (baseMapTileErrorTsRef.current.length >= WEAK_MAP_ERROR_THRESHOLD) {
+      setWeakMapTilesNotice(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const now = Date.now();
+      const next = baseMapTileErrorTsRef.current.filter((t) => now - t < WEAK_MAP_WINDOW_MS);
+      baseMapTileErrorTsRef.current = next;
+      if (next.length === 0 && weakMapNoticeDismissedRef.current) {
+        weakMapNoticeDismissedRef.current = false;
+      }
+    }, 3000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    baseMapTileErrorTsRef.current = [];
+    weakMapNoticeDismissedRef.current = false;
+    setWeakMapTilesNotice(false);
+  }, [groupId, isDarkMode]);
 
   const [isLandscape, setIsLandscape] = useState(window.innerWidth > window.innerHeight);
   const [isCompactUI, setIsCompactUI] = useState(window.innerWidth < 420 || window.innerHeight < 760);
@@ -824,8 +879,7 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
     socket.on('alert-triggered', handleAlertTriggered);
 
     const unsubs: Array<() => void> = [];
-    // Firestore en paralelo al socket: cuando alguien entra tarde, el host sigue viendo su doc locations/
-    // aunque falle un paquete o el socket estuviera ya en modo "solo tiempo real".
+    // Firestore: posición reciente como respaldo del socket. Los avisos no se leen ni escriben en Firestore (solo tiempo real).
     if (group?.members?.length) {
       const chunks = [];
       for (let i = 0; i < group.members.length; i += 10) {
@@ -838,17 +892,16 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
           setLocations(prev => {
             const newLocs = [...prev];
             snap.docs.forEach(d => {
-              const data = d.data();
-              // Only use Firestore for recent alerts or initial state
-              if (Date.now() - data.timestamp < 10 * 60 * 1000) {
+              const raw = d.data();
+              const { alert: _dropAlert, ...data } = raw;
+              if (Date.now() - (data.timestamp as number) < 10 * 60 * 1000) {
                 const idx = newLocs.findIndex(l => l.uid === d.id);
                 if (idx >= 0) {
-                  // Only update if Firestore has an alert or if socket data is older
-                  if (data.alert || data.timestamp > (newLocs[idx].timestamp || 0)) {
+                  if ((data.timestamp as number) > (newLocs[idx].timestamp || 0)) {
                     newLocs[idx] = { ...newLocs[idx], ...data };
                   }
                 } else {
-                  newLocs.push(data);
+                  newLocs.push(data as any);
                 }
               }
             });
@@ -901,6 +954,17 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
       handleFirestoreError(error, OperationType.UPDATE, `groups/${groupId}`);
     } finally {
       leaveInProgressRef.current = false;
+    }
+  };
+
+  const confirmLeaveRoute = async () => {
+    setShowExitConfirm(false);
+    hasExplicitlyLeftRef.current = true;
+    await deleteGroupIfHost('leave-route');
+    prepareHistoryLeave?.();
+    onLeave();
+    if (window.history.state && (window.history.state as { motorideRoute?: boolean }).motorideRoute) {
+      window.history.back();
     }
   };
 
@@ -1800,12 +1864,13 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
   const headerOverlayHeight = parsedRoute ? 220 : (!isMoving ? 98 : 0);
   const headerTopOffset = !isOnline ? topInset + 56 : 0;
   const gpsErrorTop = topInset + connectionBannerHeight + hostBannerHeight + (!isMoving ? 86 : 8);
+  const weakTilesBannerTop = gpsErrorTop + (gpsError ? 58 : 0) + 6;
   const topStack = topInset + connectionBannerHeight + hostBannerHeight;
   // Sin navegación paso a paso: avisos lo más arriba posible (solo bajo bandas/barras). Con ruta: bajo el panel azul.
   const screenFreeForAlerts = !parsedRoute;
   const headerBlockForAlerts = screenFreeForAlerts ? 56 : headerOverlayHeight;
   const activeAlertsTop = topStack + headerBlockForAlerts + 10;
-  const rankingTop = Math.max(activeAlertsTop + (activeAlerts.length > 0 ? 88 : 0), gpsErrorTop + (gpsError ? 72 : 0), topInset + 68);
+  const rankingTop = Math.max(activeAlertsTop, gpsErrorTop + (gpsError ? 72 : 0), topInset + 68);
 
   return (
     <div ref={containerRef} className="relative w-full min-h-dvh h-dvh flex flex-col bg-zinc-900 overflow-hidden" style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
@@ -1850,11 +1915,8 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
              animate={{ paddingRight: isMoving ? '8px' : '16px' }}
            >
             <button
-              onClick={async () => {
-                hasExplicitlyLeftRef.current = true;
-                await deleteGroupIfHost('leave-route');
-                onLeave();
-              }}
+              type="button"
+              onClick={() => setShowExitConfirm(true)}
               className="p-2 bg-zinc-800 hover:bg-zinc-700 rounded-full transition-colors text-white shrink-0"
             >
                <ArrowLeft size={18}/>
@@ -2143,12 +2205,45 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
         </div>
       )}
 
-      {/* Active Alerts (z por encima del mapa; parte superior cuando no hay panel de navegación) */}
+      {isOnline && weakMapTilesNotice && (
+        <div
+          className="absolute left-4 right-4 z-[1000] bg-amber-600/95 text-black p-3 rounded-xl shadow-xl text-xs sm:text-sm font-semibold flex items-start gap-3 border border-amber-400/40"
+          style={{ top: `${weakTilesBannerTop}px` }}
+          role="status"
+        >
+          <WifiOff size={18} className="shrink-0 mt-0.5" />
+          <div className="min-w-0 flex-1 leading-snug">
+            <p className="font-black text-[11px] sm:text-xs uppercase tracking-wide text-black/80 mb-1">Conexión débil al mapa</p>
+            <p className="text-black/90">
+              Muchas teselas del mapa no llegan a tiempo. Comprueba la cobertura o el Wi‑Fi; el mapa puede tardar en verse completo.
+            </p>
+            <button
+              type="button"
+              className="mt-2 text-black font-black underline underline-offset-2 text-left"
+              onClick={() => {
+                weakMapNoticeDismissedRef.current = true;
+                setWeakMapTilesNotice(false);
+              }}
+            >
+              Entendido, ocultar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Avisos de otros: abajo, encima del HUD velocidad — no tapa cabecera ni menús (z por debajo de z-[1001]). */}
       {activeAlerts.length > 0 && (
-        <div className="absolute left-1/2 -translate-x-1/2 z-[1100] flex flex-col gap-2 w-full max-w-sm px-4 pointer-events-none" style={{ top: `${activeAlertsTop}px` }}>
-          {activeAlerts.map(loc => {
+        <div
+          className="absolute left-1/2 -translate-x-1/2 z-[990] flex flex-col-reverse gap-2 w-full max-w-sm px-4 pointer-events-none"
+          style={{
+            bottom: isLandscape
+              ? 'calc(10rem + env(safe-area-inset-bottom, 0px))'
+              : 'calc(12.5rem + env(safe-area-inset-bottom, 0px))',
+          }}
+        >
+          {activeAlerts.map((loc) => {
             const dist = currentLocation ? getDistance(currentLocation.lat, currentLocation.lng, loc.lat, loc.lng) : null;
-            const distStr = dist ? (dist > 1000 ? `${(dist/1000).toFixed(1)}km` : `${Math.round(dist)}m`) : '';
+            const distStr = dist ? (dist > 1000 ? `${(dist / 1000).toFixed(1)}km` : `${Math.round(dist)}m`) : '';
             const alertUi = getAlertUi(loc.alert?.type);
             return (
               <div key={loc.uid} className={`${alertUi.card} text-white p-3 rounded-2xl shadow-2xl border flex items-center gap-3`}>
@@ -2166,6 +2261,40 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
               </div>
             );
           })}
+        </div>
+      )}
+
+      {showExitConfirm && (
+        <div
+          className="fixed inset-0 z-[6000] flex items-center justify-center p-6 bg-black/75 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="exit-route-title"
+        >
+          <div className="bg-zinc-900 border border-zinc-700 rounded-3xl p-6 max-w-sm w-full shadow-2xl">
+            <h2 id="exit-route-title" className="text-lg font-black text-white mb-2">
+              ¿Salir de la ruta?
+            </h2>
+            <p className="text-sm text-zinc-400 mb-6 leading-relaxed">
+              Dejarás de compartir posición con el grupo en esta sesión. Puedes volver a unirte con el código.
+            </p>
+            <div className="flex flex-col-reverse sm:flex-row gap-3 sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setShowExitConfirm(false)}
+                className="w-full sm:w-auto px-4 py-3 rounded-2xl font-bold text-white bg-zinc-800 hover:bg-zinc-700 transition-colors"
+              >
+                Seguir en ruta
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmLeaveRoute()}
+                className="w-full sm:w-auto px-4 py-3 rounded-2xl font-bold text-white bg-orange-600 hover:bg-orange-500 transition-colors"
+              >
+                Salir
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -2469,9 +2598,17 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
             willChange: isRecording && currentSpeedKmh > 5 ? 'transform' : 'auto',
           }}
         >
-          <MapContainer center={[40.4168, -3.7038]} zoom={6} className="w-full h-full z-0" zoomControl={false} attributionControl={false}>
+          <MapContainer
+            center={[40.4168, -3.7038]}
+            zoom={6}
+            className="w-full h-full z-0"
+            zoomControl={false}
+            attributionControl={false}
+            fadeAnimation={false}
+            zoomAnimation
+          >
         <MapInvalidateHelper
-          layoutKey={`${isRecording ? 1 : 0}_${currentSpeedKmh > 3 ? 1 : 0}_${Math.round(navigationHeading / 8)}_${isDarkMode ? 1 : 0}`}
+          layoutKey={`${isRecording && currentSpeedKmh > 3 && localDistance >= 0.05 ? 1 : 0}_${isDarkMode ? 1 : 0}`}
         />
         <TileLayer 
           url={isDarkMode 
@@ -2479,11 +2616,17 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
             : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
           } 
           subdomains="abcd"
-          keepBuffer={96}
+          keepBuffer={280}
           updateWhenIdle={false}
-          updateWhenZooming
+          updateWhenZooming={false}
           maxZoom={20}
           maxNativeZoom={19}
+          crossOrigin
+          className="motoride-base-tiles"
+          errorTileUrl={LEAFLET_TRANSPARENT_ERROR_TILE}
+          eventHandlers={{
+            tileerror: recordBaseMapTileError,
+          }}
         />
         
         {showTraffic && false && (
@@ -2494,25 +2637,25 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
           />
         )}
         {showWeather && rainRadar && (
-          <TileLayer
-            key={rainRadar.url}
-            url={rainRadar.url}
-            opacity={0.52}
-            zIndex={20}
-            tileSize={512}
-            maxNativeZoom={rainRadar.maxNativeZoom}
-            maxZoom={20}
-            crossOrigin
-            className="leaflet-radar-overlay"
-            keepBuffer={24}
-            noWrap={false}
-            eventHandlers={{
-              tileload: () => setWeatherTilesLoaded(true),
-              tileerror: () => setWeatherTileErrors((e) => e + 1),
-            }}
-            updateWhenIdle={false}
-            updateWhenZooming
-          />
+          <Pane name="rainRadarPane" style={{ zIndex: 350 }}>
+            <TileLayer
+              key={rainRadar.url}
+              url={rainRadar.url}
+              opacity={0.62}
+              maxNativeZoom={rainRadar.maxNativeZoom}
+              maxZoom={20}
+              className="leaflet-radar-overlay"
+              keepBuffer={96}
+              noWrap={false}
+              errorTileUrl={LEAFLET_TRANSPARENT_ERROR_TILE}
+              eventHandlers={{
+                tileload: () => setWeatherTilesLoaded(true),
+                tileerror: () => setWeatherTileErrors((e) => e + 1),
+              }}
+              updateWhenIdle={false}
+              updateWhenZooming={false}
+            />
+          </Pane>
         )}
         
         {/* Draw GPX Route */}

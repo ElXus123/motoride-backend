@@ -35,7 +35,21 @@ html, body, #root {
 /* Custom Leaflet overrides */
 .leaflet-container {
   font-family: inherit;
-  background: #09090b !important;
+  /* Mismo tono que el “relleno” de teselas: si falla la imagen, no se ve negro puro */
+  background: #222228 !important;
+}
+
+/* Teselas: hasta que el PNG llega (o si hay error + errorTileUrl transparente), color sólido tipo Carto oscuro */
+.leaflet-tile-pane img.leaflet-tile {
+  background-color: #2e2e38 !important;
+  background-image: none;
+}
+.leaflet-tile-pane img.leaflet-tile.leaflet-tile-loaded {
+  background-color: transparent !important;
+}
+
+.leaflet-tile-container.leaflet-zoom-animated {
+  will-change: transform;
 }
 
 /* Modo bolsillo: anillo de cuenta atrás continuo (evita saltos de Framer + recortes del trazo) */

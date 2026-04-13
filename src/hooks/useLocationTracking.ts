@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { doc, setDoc } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../firebase';
+import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { getDistance, getBearing } from '../lib/geoUtils';
 import socket from '../lib/socket';
@@ -54,28 +54,7 @@ export const useLocationTracking = (isActive: boolean, groupId: string, extraDat
     };
   }, [groupId, user]);
 
-  // Force update when alert changes - only if it's a new alert
-  const lastAlertRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (user && groupId !== 'REPEATED' && extraData?.alert && extraData.alert.type !== lastAlertRef.current) {
-      lastAlertRef.current = extraData.alert.type;
-      // Alerts still go to Firestore for persistence/reliability
-      setDoc(doc(db, 'locations', user.uid), { alert: extraData.alert, timestamp: Date.now() }, { merge: true }).catch(err => {
-        console.error(err);
-        handleFirestoreError(err, OperationType.WRITE, `locations/${user.uid}`);
-      });
-      
-      // Also broadcast via socket for instant delivery
-      socket.emit('update-location', {
-        groupId,
-        uid: user.uid,
-        alert: extraData.alert,
-        timestamp: Date.now(),
-        photoURL: extraDataRef.current?.photoURL || '',
-        displayName: extraDataRef.current?.displayName || 'Motero'
-      });
-    }
-  }, [extraData?.alert, user, groupId]);
+  // Avisos: solo socket (trigger-alert / update-location). No escrituras en Firestore.
 
   useEffect(() => {
     if (!isActive || !user || !groupId) return;
@@ -150,8 +129,7 @@ export const useLocationTracking = (isActive: boolean, groupId: string, extraDat
               const movedSincePersist = prevPersist
                 ? getDistance(latitude, longitude, prevPersist.lat, prevPersist.lng)
                 : Number.POSITIVE_INFINITY;
-              const hasActiveAlert = !!extraDataRef.current?.alert;
-              if (movedSincePersist < 20 && !hasActiveAlert) {
+              if (movedSincePersist < 20) {
                 return;
               }
               lastPersistRef.current = now;
@@ -168,7 +146,6 @@ export const useLocationTracking = (isActive: boolean, groupId: string, extraDat
                   timestamp: now,
                   photoURL: extraDataRef.current?.photoURL || '',
                   displayName: extraDataRef.current?.displayName || 'Motero',
-                  alert: extraDataRef.current?.alert || null,
                   level: extraDataRef.current?.level || 1
                 },
                 { merge: true }

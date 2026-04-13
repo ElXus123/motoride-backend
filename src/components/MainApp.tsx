@@ -13,6 +13,10 @@ export default function MainApp() {
   const [showProfile, setShowProfile] = useState(false);
   const [autoJoining, setAutoJoining] = useState(false);
   const lastBackHandledAtRef = useRef(0);
+  /** Una sola entrada `pushState` al entrar en ruta (evita doble capa con Strict Mode o re-renders). */
+  const routeHistoryInsertedRef = useRef(false);
+  /** Tras confirmar salida: el siguiente popstate no debe volver a interceptar. */
+  const bypassRoutePopRef = useRef(false);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -43,21 +47,43 @@ export default function MainApp() {
     }
   }, [user, activeGroupId, autoJoining]);
 
-  // Browser back by layers: profile -> route -> dashboard
+  // Al entrar en ruta: una sola entrada en el historial (atrás = confirmar salida, no varias capas).
+  useEffect(() => {
+    if (!activeGroupId && !repeatedRoute) {
+      routeHistoryInsertedRef.current = false;
+      return;
+    }
+    if (routeHistoryInsertedRef.current) return;
+    routeHistoryInsertedRef.current = true;
+    window.history.pushState({ layer: 'route', motorideRoute: true }, '');
+  }, [activeGroupId, repeatedRoute]);
+
+  // Browser back: perfil primero; en ruta se pide confirmación (MapView escucha el evento).
   useEffect(() => {
     const onPopState = () => {
       const now = Date.now();
-      if (now - lastBackHandledAtRef.current < 300) return;
-      lastBackHandledAtRef.current = now;
+      if (now - lastBackHandledAtRef.current < 320) return;
+
+      if (bypassRoutePopRef.current) {
+        bypassRoutePopRef.current = false;
+        lastBackHandledAtRef.current = now;
+        return;
+      }
 
       if (showProfile) {
+        lastBackHandledAtRef.current = now;
         setShowProfile(false);
         return;
       }
+
       if (activeGroupId || repeatedRoute) {
-        setActiveGroupId(null);
-        setRepeatedRoute(null);
+        lastBackHandledAtRef.current = now;
+        window.history.pushState({ layer: 'route', motorideRoute: true }, '');
+        window.dispatchEvent(new CustomEvent('motoride:route-back'));
+        return;
       }
+
+      lastBackHandledAtRef.current = now;
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
@@ -66,12 +92,6 @@ export default function MainApp() {
   useEffect(() => {
     if (showProfile) window.history.pushState({ layer: 'profile' }, '');
   }, [showProfile]);
-
-  useEffect(() => {
-    if (activeGroupId || repeatedRoute) {
-      window.history.pushState({ layer: 'route' }, '');
-    }
-  }, [activeGroupId, repeatedRoute]);
 
   if (autoJoining) {
     return (
@@ -91,7 +111,11 @@ export default function MainApp() {
       <MapView 
         groupId={activeGroupId || 'REPEATED'} 
         preloadedRoute={repeatedRoute}
+        prepareHistoryLeave={() => {
+          bypassRoutePopRef.current = true;
+        }}
         onLeave={() => {
+          routeHistoryInsertedRef.current = false;
           setActiveGroupId(null);
           setRepeatedRoute(null);
         }} 

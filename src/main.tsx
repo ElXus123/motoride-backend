@@ -56,6 +56,28 @@ const setupMobileViewportHeight = () => {
 
 setupMobileViewportHeight();
 
+/** Safari / iOS antiguos: sin esto `navigator.mediaDevices` es undefined y no sale el diálogo de permiso. */
+function shimNavigatorMediaDevices() {
+  if (typeof navigator === 'undefined') return;
+  const n = navigator as any;
+  if (n.mediaDevices?.getUserMedia) return;
+
+  if (n.mediaDevices === undefined) {
+    n.mediaDevices = {};
+  }
+
+  const legacy = n.getUserMedia || n.webkitGetUserMedia || n.mozGetUserMedia;
+  if (legacy && !n.mediaDevices.getUserMedia) {
+    n.mediaDevices.getUserMedia = function (constraints: MediaStreamConstraints) {
+      return new Promise<MediaStream>((resolve, reject) => {
+        legacy.call(n, constraints, resolve, reject);
+      });
+    };
+  }
+}
+
+shimNavigatorMediaDevices();
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />
