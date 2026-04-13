@@ -1,17 +1,23 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, getDocs, doc, updateDoc, arrayUnion, arrayRemove, onSnapshot, orderBy, limit } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, updateDoc, arrayUnion, arrayRemove, onSnapshot, orderBy, limit, startAt, endAt } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { X, Search, UserPlus, UserMinus, User as UserIcon, MapIcon, Play } from 'lucide-react';
+import { X, Search, UserPlus, UserMinus, User as UserIcon, Play, Check, Clock, Ban } from 'lucide-react';
 
 export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () => void, onRepeatRoute: (route: string) => void }) {
   const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [friends, setFriends] = useState<any[]>([]);
+  const [incomingUsers, setIncomingUsers] = useState<any[]>([]);
   const [userData, setUserData] = useState<any>(null);
   const [selectedUser, setSelectedUser] = useState<any>(null);
   const [selectedUserHistory, setSelectedUserHistory] = useState<any[]>([]);
+  const [historyBlockedMessage, setHistoryBlockedMessage] = useState<string | null>(null);
+
+  const friendsIds: string[] = userData?.friends || [];
+  const incomingIds: string[] = userData?.friendRequestsIncoming || [];
+  const outgoingIds: string[] = userData?.friendRequestsOutgoing || [];
 
   useEffect(() => {
     if (!user) return;
@@ -51,31 +57,122 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
     fetchFriends();
   }, [userData?.friends]);
 
+  useEffect(() => {
+    if (!incomingIds.length) {
+      setIncomingUsers([]);
+      return;
+    }
+    const fetchIncoming = async () => {
+      const chunks = [];
+      for (let i = 0; i < incomingIds.length; i += 10) chunks.push(incomingIds.slice(i, i + 10));
+      let all: any[] = [];
+      for (const chunk of chunks) {
+        const q = query(collection(db, 'users'), where('uid', 'in', chunk));
+        const snap = await getDocs(q);
+        all = [...all, ...snap.docs.map((d) => ({ id: d.id, ...d.data() }))];
+      }
+      setIncomingUsers(all);
+    };
+    fetchIncoming().catch(() => setIncomingUsers([]));
+  }, [incomingIds.join(',')]);
+
   const handleSearch = async () => {
     if (!searchQuery.trim()) return;
     try {
-      // Simple search by exact displayName (case sensitive for now, as Firestore doesn't support native full-text search easily without extensions)
-      // We will fetch all users and filter locally for simplicity in this prototype
-      const q = query(collection(db, 'users'), limit(50));
+      const normalize = (txt: string) =>
+        txt
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .trim();
+      const qText = normalize(searchQuery);
+      const q = query(
+        collection(db, 'users'),
+        orderBy('displayNameLower'),
+        startAt(qText),
+        endAt(`${qText}\uf8ff`),
+        limit(20)
+      );
       const snap = await getDocs(q);
-      const results = snap.docs
-        .map(d => ({ id: d.id, ...d.data() } as any))
-        .filter(u => u.id !== user?.uid && u.displayName?.toLowerCase().includes(searchQuery.toLowerCase()));
+      let results = snap.docs.map(d => ({ id: d.id, ...d.data() } as any)).filter(u => u.id !== user?.uid);
+      if (results.length < 5) {
+        // Fallback: wider search for contains (still capped).
+        const wide = await getDocs(query(collection(db, 'users'), limit(120)));
+        const merged = wide.docs
+          .map(d => ({ id: d.id, ...d.data() } as any))
+          .filter(u => u.id !== user?.uid && normalize(u.displayName || '').includes(qText));
+        const map = new Map<string, any>();
+        [...results, ...merged].forEach((u) => map.set(u.uid || u.id, u));
+        results = Array.from(map.values()).slice(0, 30);
+      }
       setSearchResults(results);
     } catch (error) {
       console.error("Error searching users:", error);
     }
   };
 
-  const toggleFriend = async (friendId: string, isFriend: boolean) => {
+  useEffect(() => {
+    if (searchQuery.trim().length < 2) {
+      setSearchResults([]);
+      return;
+    }
+    const t = setTimeout(() => {
+      handleSearch();
+    }, 300);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+
+  const removeFriend = async (friendId: string) => {
     if (!user) return;
     try {
-      const userRef = doc(db, 'users', user.uid);
-      if (isFriend) {
-        await updateDoc(userRef, { friends: arrayRemove(friendId) });
-      } else {
-        await updateDoc(userRef, { friends: arrayUnion(friendId) });
-      }
+      await updateDoc(doc(db, 'users', user.uid), { friends: arrayRemove(friendId) });
+      await updateDoc(doc(db, 'users', friendId), { friends: arrayRemove(user.uid) });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
+    }
+  };
+
+  const sendFriendRequest = async (targetId: string) => {
+    if (!user || targetId === user.uid) return;
+    try {
+      await updateDoc(doc(db, 'users', user.uid), { friendRequestsOutgoing: arrayUnion(targetId) });
+      await updateDoc(doc(db, 'users', targetId), { friendRequestsIncoming: arrayUnion(user.uid) });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
+    }
+  };
+
+  const cancelFriendRequest = async (targetId: string) => {
+    if (!user) return;
+    try {
+      await updateDoc(doc(db, 'users', user.uid), { friendRequestsOutgoing: arrayRemove(targetId) });
+      await updateDoc(doc(db, 'users', targetId), { friendRequestsIncoming: arrayRemove(user.uid) });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
+    }
+  };
+
+  const acceptFriendRequest = async (requesterId: string) => {
+    if (!user) return;
+    try {
+      await updateDoc(doc(db, 'users', user.uid), {
+        friendRequestsIncoming: arrayRemove(requesterId),
+        friends: arrayUnion(requesterId)
+      });
+      await updateDoc(doc(db, 'users', requesterId), {
+        friendRequestsOutgoing: arrayRemove(user.uid),
+        friends: arrayUnion(user.uid)
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
+    }
+  };
+
+  const rejectFriendRequest = async (requesterId: string) => {
+    if (!user) return;
+    try {
+      await updateDoc(doc(db, 'users', user.uid), { friendRequestsIncoming: arrayRemove(requesterId) });
+      await updateDoc(doc(db, 'users', requesterId), { friendRequestsOutgoing: arrayRemove(user.uid) });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
     }
@@ -83,6 +180,13 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
 
   const viewProfile = async (friendUser: any) => {
     setSelectedUser(friendUser);
+    setHistoryBlockedMessage(null);
+    const canViewHistory = friendsIds.includes(friendUser.uid);
+    if (!canViewHistory) {
+      setSelectedUserHistory([]);
+      setHistoryBlockedMessage('Debes ser amigo aceptado para ver su historial.');
+      return;
+    }
     try {
       const q = query(collection(db, 'rideHistory'), where('uid', '==', friendUser.uid), orderBy('endTime', 'desc'), limit(10));
       const snap = await getDocs(q);
@@ -146,6 +250,11 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
 
               <div>
                 <h4 className="font-bold text-lg mb-4">Historial de Rutas</h4>
+                {historyBlockedMessage && (
+                  <div className="mb-3 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-400">
+                    {historyBlockedMessage}
+                  </div>
+                )}
                 <div className="space-y-3">
                   {selectedUserHistory.length > 0 ? (
                     selectedUserHistory.map(ride => (
@@ -199,8 +308,10 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                 {searchResults.length > 0 && (
                   <div className="space-y-2 mb-8">
                     <h3 className="text-sm font-bold text-zinc-500 uppercase mb-3">Resultados</h3>
-                    {searchResults.map(res => {
-                      const isFriend = userData?.friends?.includes(res.uid);
+                  {searchResults.map(res => {
+                      const isFriend = friendsIds.includes(res.uid);
+                      const isIncoming = incomingIds.includes(res.uid);
+                      const isOutgoing = outgoingIds.includes(res.uid);
                       return (
                         <div key={res.id} className="flex items-center justify-between bg-zinc-950 border border-zinc-800 p-3 rounded-xl">
                           <div className="flex items-center gap-3 cursor-pointer" onClick={() => viewProfile(res)}>
@@ -212,18 +323,59 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                               <p className="text-xs text-zinc-500">Nivel {res.level || 1}</p>
                             </div>
                           </div>
-                          <button 
-                            onClick={() => toggleFriend(res.uid, isFriend)}
-                            className={`p-2 rounded-lg transition-colors ${isFriend ? 'bg-red-500/10 text-red-500 hover:bg-red-500/20' : 'bg-blue-500/10 text-blue-500 hover:bg-blue-500/20'}`}
-                          >
-                            {isFriend ? <UserMinus size={18} /> : <UserPlus size={18} />}
-                          </button>
+                          <div className="flex items-center gap-2">
+                            {isIncoming ? (
+                              <>
+                                <button onClick={() => acceptFriendRequest(res.uid)} className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"><Check size={18} /></button>
+                                <button onClick={() => rejectFriendRequest(res.uid)} className="p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20"><Ban size={18} /></button>
+                              </>
+                            ) : isFriend ? (
+                              <button 
+                                onClick={() => removeFriend(res.uid)}
+                                className="p-2 rounded-lg transition-colors bg-red-500/10 text-red-500 hover:bg-red-500/20"
+                              >
+                                <UserMinus size={18} />
+                              </button>
+                            ) : isOutgoing ? (
+                              <button
+                                onClick={() => cancelFriendRequest(res.uid)}
+                                className="p-2 rounded-lg transition-colors bg-amber-500/10 text-amber-400 hover:bg-amber-500/20"
+                                title="Solicitud pendiente"
+                              >
+                                <Clock size={18} />
+                              </button>
+                            ) : (
+                              <button 
+                                onClick={() => sendFriendRequest(res.uid)}
+                                className="p-2 rounded-lg transition-colors bg-blue-500/10 text-blue-500 hover:bg-blue-500/20"
+                              >
+                                <UserPlus size={18} />
+                              </button>
+                            )}
+                          </div>
                         </div>
                       );
                     })}
                   </div>
                 )}
               </div>
+
+              {incomingIds.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-bold text-zinc-500 uppercase mb-3">Solicitudes recibidas</h3>
+                  <div className="space-y-2">
+                    {incomingUsers.map((u) => (
+                        <div key={`incoming-${u.uid}`} className="flex items-center justify-between bg-zinc-950 border border-zinc-800 p-3 rounded-xl">
+                          <p className="text-sm font-semibold">{u.displayName}</p>
+                          <div className="flex gap-2">
+                            <button onClick={() => acceptFriendRequest(u.uid)} className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"><Check size={18} /></button>
+                            <button onClick={() => rejectFriendRequest(u.uid)} className="p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20"><Ban size={18} /></button>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
 
               {/* Friends List */}
               <div>
@@ -245,7 +397,7 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                           </div>
                         </div>
                         <button 
-                          onClick={() => toggleFriend(friend.uid, true)}
+                          onClick={() => removeFriend(friend.uid)}
                           className="p-2 text-zinc-600 hover:text-red-500 transition-colors shrink-0"
                           title="Eliminar amigo"
                         >

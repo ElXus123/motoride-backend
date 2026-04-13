@@ -1,6 +1,6 @@
 {
-  "name": "MotoBikeSocial",
-  "short_name": "MotoBike",
+  "name": "MotoRide",
+  "short_name": "MotoRide",
   "description": "Navegador y telemetria para moteros con inclinometro y radares.",
   "id": "/",
   "scope": "/",

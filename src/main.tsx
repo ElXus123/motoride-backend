@@ -40,6 +40,22 @@ const setupPWAAssets = () => {
 
 setupPWAAssets();
 
+const setupMobileViewportHeight = () => {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+
+  const setVh = () => {
+    const vh = window.visualViewport?.height ?? window.innerHeight;
+    document.documentElement.style.setProperty('--app-vh', `${vh * 0.01}px`);
+  };
+
+  setVh();
+  window.addEventListener('resize', setVh);
+  window.addEventListener('orientationchange', setVh);
+  window.visualViewport?.addEventListener('resize', setVh);
+};
+
+setupMobileViewportHeight();
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />

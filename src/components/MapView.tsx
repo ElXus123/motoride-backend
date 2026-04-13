@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useMemo } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, GeoJSON, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { doc, onSnapshot, updateDoc, collection, query, where, addDoc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc, collection, query, where, addDoc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
 import { db, logOut, handleFirestoreError, OperationType } from '../firebase';
 import { calculateLevel } from '../lib/utils';
 import { useAuth } from '../contexts/AuthContext';
@@ -11,6 +11,8 @@ import { useNavigation } from '../hooks/useNavigation';
 import { useRoadData } from '../hooks/useRoadData';
 import { parseGPX, parseRouteData } from '../lib/gpx';
 import { getDistance } from '../lib/geoUtils';
+import { requestJson } from '../lib/network';
+import { getActivePointsConfig } from '../lib/pointsConfig';
 import socket from '../lib/socket';
 import { useVoiceChat } from '../hooks/useVoiceChat';
 import { Upload, ArrowLeft, Copy, Check, Navigation, AlertTriangle, Play, Square, ArrowUp, MapPin, Trophy, Bell, AlertCircle, Wrench, Fuel, X, Maximize, Minimize, Search, Share2, Menu, Moon, Sun, Target, LogOut, Users, Mic, MicOff, ShieldAlert, Activity, Layers, Lock, LockOpen } from 'lucide-react';
@@ -98,6 +100,49 @@ const getDirectionIcon = (type?: string, modifier?: string) => {
   return <ArrowUp size={28} style={{ transform: `rotate(${rotation}deg)`, transition: 'transform 0.3s ease-out' }} />;
 };
 
+const getLineCoordinates = (geo: any): [number, number][] => {
+  if (!geo) return [];
+  if (geo.type === 'LineString' && Array.isArray(geo.coordinates)) return geo.coordinates;
+  if (geo.type === 'Feature' && geo.geometry?.type === 'LineString') return geo.geometry.coordinates || [];
+  if (geo.type === 'FeatureCollection' && Array.isArray(geo.features)) {
+    const line = geo.features.find((f: any) => f?.geometry?.type === 'LineString');
+    return line?.geometry?.coordinates || [];
+  }
+  return [];
+};
+
+const snapPointToRoute = (lat: number, lng: number, routeGeo: any) => {
+  const coords = getLineCoordinates(routeGeo);
+  if (coords.length < 2) return { lat, lng, distanceMeters: Number.POSITIVE_INFINITY };
+
+  let best = { lat, lng, distanceMeters: Number.POSITIVE_INFINITY };
+  const cosLat = Math.cos((lat * Math.PI) / 180) || 1;
+  const toXY = (pLat: number, pLng: number) => ({ x: pLng * cosLat, y: pLat });
+
+  const p = toXY(lat, lng);
+  for (let i = 0; i < coords.length - 1; i++) {
+    const a = toXY(coords[i][1], coords[i][0]);
+    const b = toXY(coords[i + 1][1], coords[i + 1][0]);
+    const abx = b.x - a.x;
+    const aby = b.y - a.y;
+    const ab2 = abx * abx + aby * aby;
+    if (ab2 === 0) continue;
+    const apx = p.x - a.x;
+    const apy = p.y - a.y;
+    const t = Math.max(0, Math.min(1, (apx * abx + apy * aby) / ab2));
+    const projX = a.x + abx * t;
+    const projY = a.y + aby * t;
+    const projLat = projY;
+    const projLng = projX / cosLat;
+    const d = getDistance(lat, lng, projLat, projLng);
+    if (d < best.distanceMeters) {
+      best = { lat: projLat, lng: projLng, distanceMeters: d };
+    }
+  }
+
+  return best;
+};
+
 const MotorcycleIcon = ({ angle }: { angle: number }) => (
   <div style={{ transform: `rotate(${angle}deg)`, transformOrigin: 'bottom center', transition: 'transform 0.1s ease-out' }} className="w-24 h-24 flex items-center justify-center">
     <svg viewBox="0 0 100 100" className="w-full h-full drop-shadow-[0_10px_10px_rgba(0,0,0,0.5)]">
@@ -179,6 +224,7 @@ const MapController = ({ location, heading, isFollowing, showRanking, isRecordin
 };
 
 export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId: string, onLeave: () => void, preloadedRoute?: string | null }) {
+  const LOCAL_RIDE_DRAFT_KEY = `motoride_ride_draft_${groupId}`;
   const { user } = useAuth();
   const [customName, setCustomName] = useState<string | null>(null);
   const [customPhotoURL, setCustomPhotoURL] = useState<string | null>(null);
@@ -206,6 +252,8 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
   const lastHeadingRef = useRef<number | null>(null);
   const lastHeadingTimeRef = useRef<number>(Date.now());
   const [showTraffic, setShowTraffic] = useState(false);
+  const [showWeather, setShowWeather] = useState(false);
+  const [useFirestoreFallback, setUseFirestoreFallback] = useState(true);
   const [distance, setDistance] = useState(0); // in km
   const [localDistance, setLocalDistance] = useState(0); // for auto-start and save check
   const lastLocRef = useRef<{lat: number, lng: number} | null>(null);
@@ -383,6 +431,7 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
     }
   };
   const [searchDestination, setSearchDestination] = useState('');
+  const [searchSuggestions, setSearchSuggestions] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [shared, setShared] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
@@ -413,6 +462,7 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
 
   const [isLandscape, setIsLandscape] = useState(window.innerWidth > window.innerHeight);
   const [isCompactUI, setIsCompactUI] = useState(window.innerWidth < 420 || window.innerHeight < 760);
+  const [viewportTopInset, setViewportTopInset] = useState(0);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const alertsMenuContainerRef = useRef<HTMLDivElement>(null);
@@ -426,6 +476,23 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
+    const updateViewportInset = () => {
+      const offsetTop = window.visualViewport?.offsetTop || 0;
+      setViewportTopInset(Math.max(0, Math.round(offsetTop)));
+    };
+
+    updateViewportInset();
+    window.visualViewport?.addEventListener('resize', updateViewportInset);
+    window.visualViewport?.addEventListener('scroll', updateViewportInset);
+    window.addEventListener('orientationchange', updateViewportInset);
+    return () => {
+      window.visualViewport?.removeEventListener('resize', updateViewportInset);
+      window.visualViewport?.removeEventListener('scroll', updateViewportInset);
+      window.removeEventListener('orientationchange', updateViewportInset);
+    };
   }, []);
 
   useEffect(() => {
@@ -552,6 +619,29 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
   }, [group?.routeGeoJSON]);
 
   const navState = useNavigation(currentLocation, parsedRoute);
+  const displayLocation = useMemo(() => {
+    if (!currentLocation) return null;
+    const snapCandidate = navState.routeGeometry || parsedRoute;
+    if (!snapCandidate) return currentLocation;
+
+    const snapped = snapPointToRoute(currentLocation.lat, currentLocation.lng, snapCandidate);
+    // Prevent aggressive jumps when GPS is clearly off-route; keep reasonable correction only.
+    if (snapped.distanceMeters <= 35) {
+      return { lat: snapped.lat, lng: snapped.lng };
+    }
+    return currentLocation;
+  }, [currentLocation, navState.routeGeometry, parsedRoute]);
+
+  useEffect(() => {
+    if (isRecording || summaryData) return;
+    const draft = readRideDraft();
+    if (draft?.summaryData) {
+      setSummaryData(draft.summaryData);
+      setRecordedPath(Array.isArray(draft.path) ? draft.path : []);
+      setShowSummary(true);
+    }
+  }, [isRecording, summaryData]);
+
   const { nearbyRadar, radars } = useRoadData(currentLocation);
   const { isVoiceActive, toggleVoice, peersCount } = useVoiceChat(groupId);
 
@@ -575,15 +665,47 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
     return unsub;
   }, [groupId, preloadedRoute]);
 
+  useEffect(() => {
+    let connectTimer: any;
+    const onConnect = () => {
+      if (connectTimer) clearTimeout(connectTimer);
+      // Keep fallback briefly for bootstrap/late packets, then turn it off.
+      connectTimer = setTimeout(() => setUseFirestoreFallback(false), 8000);
+    };
+    const onDisconnect = () => {
+      setUseFirestoreFallback(true);
+    };
+
+    socket.on('connect', onConnect);
+    socket.on('disconnect', onDisconnect);
+    if (socket.connected) {
+      onConnect();
+    } else {
+      setUseFirestoreFallback(true);
+    }
+
+    return () => {
+      if (connectTimer) clearTimeout(connectTimer);
+      socket.off('connect', onConnect);
+      socket.off('disconnect', onDisconnect);
+    };
+  }, [groupId]);
+
   // Listen to locations of group members via Socket.io
   useEffect(() => {
     const handleLocationUpdate = (data: any) => {
       setLocations(prev => {
-        const newLocs = [...prev];
-        const idx = newLocs.findIndex(l => l.uid === data.uid);
-        if (idx >= 0) newLocs[idx] = data;
-        else newLocs.push(data);
-        return newLocs;
+        const idx = prev.findIndex(l => l.uid === data.uid);
+        if (idx >= 0) {
+          const existing = prev[idx];
+          const nextTs = data?.timestamp || 0;
+          const prevTs = existing?.timestamp || 0;
+          if (nextTs <= prevTs && !data?.alert) return prev;
+          const newLocs = [...prev];
+          newLocs[idx] = { ...existing, ...data };
+          return newLocs;
+        }
+        return [...prev, data];
       });
     };
     const handleUserLeft = (data: { uid: string }) => {
@@ -600,40 +722,42 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
     socket.on('user-left', handleUserLeft);
     socket.on('alert-triggered', handleAlertTriggered);
 
-    // Also keep the Firestore listener for initial state and alerts
-    if (!group?.members?.length) return;
-    
-    const chunks = [];
-    for (let i = 0; i < group.members.length; i += 10) {
-      chunks.push(group.members.slice(i, i + 10));
-    }
-    
-    const unsubs = chunks.map(chunk => {
-      const q = query(collection(db, 'locations'), where('uid', 'in', chunk));
-      return onSnapshot(q, (snap) => {
-        setLocations(prev => {
-          const newLocs = [...prev];
-          snap.docs.forEach(d => {
-            const data = d.data();
-            // Only use Firestore for recent alerts or initial state
-            if (Date.now() - data.timestamp < 10 * 60 * 1000) {
-              const idx = newLocs.findIndex(l => l.uid === d.id);
-              if (idx >= 0) {
-                // Only update if Firestore has an alert or if socket data is older
-                if (data.alert || data.timestamp > (newLocs[idx].timestamp || 0)) {
-                  newLocs[idx] = { ...newLocs[idx], ...data };
+    const unsubs: Array<() => void> = [];
+    // Keep Firestore listener only as fallback (socket unhealthy / bootstrap).
+    if (useFirestoreFallback && group?.members?.length) {
+      const chunks = [];
+      for (let i = 0; i < group.members.length; i += 10) {
+        chunks.push(group.members.slice(i, i + 10));
+      }
+
+      chunks.forEach(chunk => {
+        const q = query(collection(db, 'locations'), where('uid', 'in', chunk));
+        const unsub = onSnapshot(q, (snap) => {
+          setLocations(prev => {
+            const newLocs = [...prev];
+            snap.docs.forEach(d => {
+              const data = d.data();
+              // Only use Firestore for recent alerts or initial state
+              if (Date.now() - data.timestamp < 10 * 60 * 1000) {
+                const idx = newLocs.findIndex(l => l.uid === d.id);
+                if (idx >= 0) {
+                  // Only update if Firestore has an alert or if socket data is older
+                  if (data.alert || data.timestamp > (newLocs[idx].timestamp || 0)) {
+                    newLocs[idx] = { ...newLocs[idx], ...data };
+                  }
+                } else {
+                  newLocs.push(data);
                 }
-              } else {
-                newLocs.push(data);
               }
-            }
+            });
+            return newLocs;
           });
-          return newLocs;
+        }, (error) => {
+          handleFirestoreError(error, OperationType.LIST, 'locations');
         });
-      }, (error) => {
-        handleFirestoreError(error, OperationType.LIST, 'locations');
+        unsubs.push(unsub);
       });
-    });
+    }
 
     return () => {
       socket.off('location-updated', handleLocationUpdate);
@@ -641,10 +765,83 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
       socket.off('alert-triggered', handleAlertTriggered);
       unsubs.forEach(u => u());
     };
-  }, [group?.members]);
+  }, [group?.members, useFirestoreFallback]);
 
   const isHost = group?.createdBy === user?.uid;
   const isRecording = group?.isRecording || false;
+
+  const deleteGroupIfHost = async (reason: string) => {
+    if (!isHost || !groupId || groupId === 'REPEATED' || groupDeletedRef.current) return;
+    groupDeletedRef.current = true;
+    try {
+      await deleteDoc(doc(db, 'groups', groupId));
+    } catch (error) {
+      groupDeletedRef.current = false;
+      console.error(`Error deleting group (${reason}):`, error);
+      handleFirestoreError(error, OperationType.DELETE, `groups/${groupId}`);
+    }
+  };
+
+  // Keep screen awake while recording route or in pocket mode.
+  useEffect(() => {
+    let cancelled = false;
+    const shouldKeepAwake = isRecording || isPocketMode;
+
+    const requestWakeLock = async () => {
+      if (!shouldKeepAwake || !(navigator as any).wakeLock?.request) return;
+      try {
+        wakeLockRef.current = await (navigator as any).wakeLock.request('screen');
+        wakeLockRef.current?.addEventListener?.('release', () => {
+          wakeLockRef.current = null;
+        });
+      } catch {
+        // Best-effort only.
+      }
+    };
+
+    if (shouldKeepAwake) {
+      requestWakeLock();
+    } else if (wakeLockRef.current) {
+      wakeLockRef.current.release().catch(() => {});
+      wakeLockRef.current = null;
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && shouldKeepAwake && !wakeLockRef.current && !cancelled) {
+        requestWakeLock();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (wakeLockRef.current && !shouldKeepAwake) {
+        wakeLockRef.current.release().catch(() => {});
+        wakeLockRef.current = null;
+      }
+    };
+  }, [isRecording, isPocketMode]);
+
+  // Cleanup group when route view is closed/app is backgrounded or closed.
+  useEffect(() => {
+    if (!isHost || !groupId || groupId === 'REPEATED') return;
+
+    const handleBeforeUnload = () => {
+      deleteGroupIfHost('beforeunload');
+    };
+    const handlePageHide = () => {
+      deleteGroupIfHost('pagehide');
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('pagehide', handlePageHide);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('pagehide', handlePageHide);
+      deleteGroupIfHost('unmount');
+    };
+  }, [isHost, groupId]);
 
   // GPS-based lean angle estimation (fallback for when phone is in pocket/screen off)
   useEffect(() => {
@@ -783,8 +980,33 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
   const [showSummary, setShowSummary] = useState(false);
   const [summaryData, setSummaryData] = useState<any>(null);
   const [isSharingSummary, setIsSharingSummary] = useState(false);
-  const [currentSpeedLimit, setCurrentSpeedLimit] = useState<number | null>(null);
-  const lastSpeedLimitFetchRef = useRef<{ lat: number; lng: number; time: number } | null>(null);
+  const groupDeletedRef = useRef(false);
+  const wakeLockRef = useRef<any>(null);
+
+  const persistRideDraft = (payload: any) => {
+    try {
+      localStorage.setItem(LOCAL_RIDE_DRAFT_KEY, JSON.stringify(payload));
+    } catch {
+      // Ignore storage quota/private mode errors.
+    }
+  };
+
+  const readRideDraft = () => {
+    try {
+      const raw = localStorage.getItem(LOCAL_RIDE_DRAFT_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const clearRideDraft = () => {
+    try {
+      localStorage.removeItem(LOCAL_RIDE_DRAFT_KEY);
+    } catch {
+      // Ignore storage errors.
+    }
+  };
 
   const createSummaryImage = async () => {
     if (!summaryData) return null;
@@ -898,17 +1120,21 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
         // Stopped - Always update profile stats regardless of history save
         const rideDuration = Date.now() - group.startTime;
         const distanceBonus = Math.floor(localDistance / 100) * 20;
-        const finalScore = score + distanceBonus;
+        const pointsConfig = await getActivePointsConfig();
+        const adjustedBaseScore = Math.round(score * pointsConfig.baseMultiplier);
+        const adjustedDistanceBonus = Math.round(distanceBonus * pointsConfig.distanceMultiplier);
+        const finalScore = Math.round((adjustedBaseScore + adjustedDistanceBonus) * pointsConfig.eventMultiplier);
         const currentRideStats = {
           distance: Number(localDistance.toFixed(2)),
           score: finalScore,
-          baseScore: score,
-          distanceBonus,
+          baseScore: adjustedBaseScore,
+          distanceBonus: adjustedDistanceBonus,
           leftTurns: leftTurnsRef.current,
           rightTurns: rightTurnsRef.current,
           maxLeanLeft,
           maxLeanRight,
-          duration: rideDuration
+          duration: rideDuration,
+          multipliers: pointsConfig
         };
 
         try {
@@ -941,6 +1167,11 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
           // Show summary modal
           setSummaryData(currentRideStats);
           setShowSummary(true);
+          persistRideDraft({
+            createdAt: Date.now(),
+            summaryData: currentRideStats,
+            path: recordedPath
+          });
 
           // Reset local stats
           setRecordedPath([]);
@@ -960,6 +1191,7 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
 
     if (!prevRecordingRef.current && isRecording) {
       // Started
+      clearRideDraft();
       resetMaxLean();
       setLocalDistance(0);
       setScore(0);
@@ -1035,7 +1267,8 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
     try {
       const text = await file.text();
       const geojson = parseGPX(text);
-      if (geojson) {
+      const routeCoords = (geojson as any)?.features?.find((f: any) => f?.geometry?.type === 'LineString')?.geometry?.coordinates;
+      if (geojson && routeCoords && routeCoords.length >= 2) {
         try {
           await updateDoc(doc(db, 'groups', groupId), {
             routeGeoJSON: JSON.stringify(geojson)
@@ -1045,7 +1278,7 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
           handleFirestoreError(error, OperationType.UPDATE, `groups/${groupId}`);
         }
       } else {
-        alert("No se pudo analizar el archivo GPX.");
+        alert("No se pudo analizar el archivo GPX o no contiene una ruta válida.");
       }
     } catch (err) {
       console.error("Error reading file:", err);
@@ -1058,13 +1291,14 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
     setIsSearching(true);
     try {
       const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchDestination)}&limit=1&countrycodes=es&addressdetails=1`;
-      const geoRes = await fetch(geocodeUrl, {
+      const geoData = await requestJson<any[]>(geocodeUrl, {
+        timeoutMs: 10000,
+        retries: 1,
+        backoffMs: 600,
         headers: {
           'User-Agent': 'MoteroApp/1.0 (contact: juarp123@gmail.com)'
         }
       });
-      if (!geoRes.ok) throw new Error('Geocoding failed');
-      const geoData = await geoRes.json();
       
       let destCoords = "";
       if (geoData && geoData.length > 0) {
@@ -1080,16 +1314,19 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
       const start = `${currentLocation?.lng || -3.7038},${currentLocation?.lat || 40.4168}`;
       const url = `https://router.project-osrm.org/route/v1/driving/${start};${destCoords}?overview=full&geometries=geojson`;
       
-      const res = await fetch(url);
-      if (!res.ok) throw new Error('Routing failed');
-      const data = await res.json();
+      const data = await requestJson<any>(url, { timeoutMs: 12000, retries: 1, backoffMs: 700 });
       if (data.code === 'Ok') {
+        if (!data.routes?.[0]?.geometry?.coordinates?.length) {
+          alert('No se pudo generar una ruta válida para ese destino.');
+          return;
+        }
         try {
           await updateDoc(doc(db, 'groups', groupId), {
             routeGeoJSON: JSON.stringify(data.routes[0].geometry)
           });
           setShowSearchModal(false);
           setSearchDestination('');
+          setSearchSuggestions([]);
         } catch (error) {
           handleFirestoreError(error, OperationType.UPDATE, `groups/${groupId}`);
         }
@@ -1103,6 +1340,23 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
       setIsSearching(false);
     }
   };
+
+  useEffect(() => {
+    if (!showSearchModal || searchDestination.trim().length < 3) {
+      setSearchSuggestions([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchDestination)}&limit=5&countrycodes=es&addressdetails=1`;
+        const geoData = await requestJson<any[]>(geocodeUrl, { timeoutMs: 9000, retries: 1, backoffMs: 500 });
+        setSearchSuggestions(Array.isArray(geoData) ? geoData : []);
+      } catch {
+        setSearchSuggestions([]);
+      }
+    }, 450);
+    return () => clearTimeout(timer);
+  }, [showSearchModal, searchDestination]);
 
   const copyCode = () => {
     navigator.clipboard.writeText(groupId);
@@ -1142,6 +1396,7 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
     } else {
       try {
         await updateDoc(doc(db, 'groups', groupId), { isRecording: false });
+        await deleteGroupIfHost('stop-recording');
       } catch (error) {
         handleFirestoreError(error, OperationType.UPDATE, `groups/${groupId}`);
       }
@@ -1168,73 +1423,26 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
   const currentSpeedKmh = speed ? Math.round(speed * 3.6) : 0;
   const isMoving = currentSpeedKmh > 2;
 
-  // Fetch current road speed limit (OSM/Overpass, best-effort)
-  useEffect(() => {
-    if (!currentLocation) return;
-
-    const now = Date.now();
-    const last = lastSpeedLimitFetchRef.current;
-    if (last) {
-      const movedMeters = getDistance(currentLocation.lat, currentLocation.lng, last.lat, last.lng);
-      const elapsedMs = now - last.time;
-      if (movedMeters < 150 && elapsedMs < 15000) return;
-    }
-
-    lastSpeedLimitFetchRef.current = { lat: currentLocation.lat, lng: currentLocation.lng, time: now };
-
-    const parseMaxSpeed = (value: string | undefined): number | null => {
-      if (!value) return null;
-      const numeric = value.match(/\d+/);
-      return numeric ? Number(numeric[0]) : null;
-    };
-
-    const controller = new AbortController();
-    const query = `
-      [out:json][timeout:8];
-      way(around:80,${currentLocation.lat},${currentLocation.lng})["highway"]["maxspeed"];
-      out tags center 20;
-    `;
-
-    fetch('https://overpass-api.de/api/interpreter', {
-      method: 'POST',
-      body: query,
-      signal: controller.signal
-    })
-      .then(res => res.json())
-      .then(data => {
-        const elements = Array.isArray(data?.elements) ? data.elements : [];
-        let bestLimit: number | null = null;
-        let bestDist = Number.POSITIVE_INFINITY;
-
-        for (const el of elements) {
-          const limit = parseMaxSpeed(el?.tags?.maxspeed);
-          const lat = el?.center?.lat;
-          const lng = el?.center?.lon;
-          if (!limit || typeof lat !== 'number' || typeof lng !== 'number') continue;
-          const dist = getDistance(currentLocation.lat, currentLocation.lng, lat, lng);
-          if (dist < bestDist) {
-            bestDist = dist;
-            bestLimit = limit;
-          }
-        }
-
-        setCurrentSpeedLimit(bestLimit);
-      })
-      .catch(() => {
-        // Keep previous value on network/API failure.
-      });
-
-    return () => controller.abort();
-  }, [currentLocation]);
-
   // Fall detection
   useEffect(() => {
-    if (currentSpeedKmh < 5 && Math.abs(leanAngle) > 45) {
+    const leanThreshold = Math.max(45, maxLeanLeft, maxLeanRight);
+    if (isRecording && currentSpeedKmh < 5 && Math.abs(leanAngle) >= leanThreshold) {
       if (alertType !== 'Caída') {
         sendAlert('Caída');
       }
     }
-  }, [currentSpeedKmh, leanAngle, alertType]);
+  }, [currentSpeedKmh, leanAngle, alertType, isRecording, maxLeanLeft, maxLeanRight]);
+
+  useEffect(() => {
+    if (!gpsError || !isHost) return;
+    const normalized = gpsError.toLowerCase();
+    if (
+      normalized.includes('denied') ||
+      normalized.includes('permission')
+    ) {
+      deleteGroupIfHost('gps-error');
+    }
+  }, [gpsError, isHost]);
 
   const toggleLandscape = async () => {
     try {
@@ -1364,11 +1572,27 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
     alert("Para calibrar mejor: hazlo parado o en una recta estable durante unos segundos.");
   };
 
+  const otherLocations = useMemo(
+    () => locations.filter(loc => loc.uid !== user?.uid),
+    [locations, user?.uid]
+  );
+
+  const markerLocations = useMemo(
+    () => otherLocations.filter(loc => typeof loc.lat === 'number' && typeof loc.lng === 'number'),
+    [otherLocations]
+  );
+
   // Find active alerts from other users
-  const activeAlerts = locations.filter(loc => 
-    loc.uid !== user?.uid && 
-    loc.alert && 
-    Date.now() - loc.alert.timestamp < 60000
+  const activeAlerts = useMemo(
+    () => otherLocations.filter(loc => loc.alert && Date.now() - loc.alert.timestamp < 60000),
+    [otherLocations]
+  );
+
+  const rankingLocations = useMemo(
+    () =>
+      [...otherLocations, { uid: user?.uid, displayName: user?.displayName || 'Tú', score: score, photoURL: user?.photoURL, level: userLevel }]
+        .sort((a, b) => (b.score || 0) - (a.score || 0)),
+    [otherLocations, user?.uid, user?.displayName, user?.photoURL, score, userLevel]
   );
 
   // Real participant count: unique UIDs, counting current user once.
@@ -1380,12 +1604,13 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
   const participantCount = (user ? 1 : 0) + uniqueOtherUsersCount;
 
   // Dynamic spacing so top overlays never overlap each other.
-  const topInset = 16;
+  const isiOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+  const topInset = (isiOS ? 28 : 16) + viewportTopInset;
   const connectionBannerHeight = !isOnline ? 58 : 0;
-  const headerOverlayHeight = parsedRoute ? 168 : (!isMoving ? 88 : 0);
+  const headerOverlayHeight = parsedRoute ? 220 : (!isMoving ? 98 : 0);
   const headerTopOffset = !isOnline ? topInset + 56 : 0;
   const gpsErrorTop = topInset + connectionBannerHeight + (!isMoving ? 86 : 8);
-  const activeAlertsTop = topInset + connectionBannerHeight + headerOverlayHeight + 12;
+  const activeAlertsTop = topInset + connectionBannerHeight + headerOverlayHeight + 20;
   const rankingTop = Math.max(activeAlertsTop + (activeAlerts.length > 0 ? 88 : 0), gpsErrorTop + (gpsError ? 72 : 0), topInset + 68);
 
   return (
@@ -1419,7 +1644,13 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
              className="flex items-center gap-2 sm:gap-3 bg-zinc-950/80 backdrop-blur-md p-2 rounded-2xl sm:rounded-full border border-zinc-800 shadow-xl overflow-hidden min-w-0"
              animate={{ paddingRight: isMoving ? '8px' : '16px' }}
            >
-             <button onClick={onLeave} className="p-2 bg-zinc-800 hover:bg-zinc-700 rounded-full transition-colors text-white shrink-0">
+            <button
+              onClick={async () => {
+                await deleteGroupIfHost('leave-route');
+                onLeave();
+              }}
+              className="p-2 bg-zinc-800 hover:bg-zinc-700 rounded-full transition-colors text-white shrink-0"
+            >
                <ArrowLeft size={18}/>
              </button>
              
@@ -1567,6 +1798,16 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
                  </button>
 
                 <button 
+                  onClick={() => { setShowWeather(!showWeather); setShowSettings(false); }}
+                  className="flex items-center gap-3 text-white hover:bg-zinc-800 p-3 rounded-2xl text-sm font-bold transition-colors"
+                >
+                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${showWeather ? 'bg-cyan-500/20 text-cyan-400' : 'bg-zinc-800 text-zinc-400'}`}>
+                    <Layers size={18} />
+                  </div>
+                  Capa Lluvia {showWeather ? 'ON' : 'OFF'}
+                </button>
+
+                <button 
                   onClick={() => {
                     setShowSettings(false);
                     handleSmartCalibration();
@@ -1636,7 +1877,7 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
       {gpsError && (
         <div className="absolute left-4 right-4 z-[1000] bg-red-500 text-white p-3 rounded-xl shadow-xl text-sm font-medium flex items-center gap-2" style={{ top: `${gpsErrorTop}px` }}>
           <AlertTriangle size={18} className="shrink-0" />
-          <span>Error de GPS: {gpsError}. Asegúrate de dar permisos y, si estás en la vista previa, abre la app en una nueva pestaña.</span>
+          <span>Sin señal GPS, reconectando...</span>
         </div>
       )}
 
@@ -1791,8 +2032,7 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
               </button>
             </div>
             <div className="flex flex-col gap-2 max-h-[40vh] landscape:max-h-none landscape:flex-1 overflow-y-auto pr-1 custom-scrollbar">
-              {[...locations.filter(l => l.uid !== user?.uid), { uid: user?.uid, displayName: user?.displayName || 'Tú', score: score, photoURL: user?.photoURL, level: userLevel }]
-                .sort((a, b) => (b.score || 0) - (a.score || 0))
+              {rankingLocations
                 .map((loc, index) => (
                   <div key={loc.uid} className={`flex items-center gap-3 p-2 rounded-xl border ${loc.uid === user?.uid ? 'bg-orange-500/10 border-orange-500/30' : 'bg-zinc-900 border-zinc-800'}`}>
                     <div className="w-6 text-xs font-black text-zinc-500">#{index + 1}</div>
@@ -1821,9 +2061,6 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
           <div className="flex flex-col items-center justify-center min-w-[80px] sm:min-w-[120px] py-2 sm:py-3 px-3 sm:px-6 bg-white/5 rounded-[1.5rem] sm:rounded-[2rem] border border-white/5 shrink-0 landscape:min-w-[80px] landscape:px-3">
             <span className="text-3xl sm:text-5xl font-black leading-none tracking-tighter text-white tabular-nums">{currentSpeedKmh}</span>
             <span className="text-[8px] sm:text-[9px] font-black uppercase tracking-[0.1em] sm:tracking-[0.2em] text-blue-400 mt-0.5 sm:mt-1">km/h</span>
-            <span className={`text-[9px] sm:text-[10px] font-bold mt-1 ${currentSpeedLimit !== null && currentSpeedKmh > currentSpeedLimit ? 'text-red-400' : 'text-zinc-400'}`}>
-              Límite: {currentSpeedLimit ? `${currentSpeedLimit} km/h` : '--'}
-            </span>
           </div>
 
           {/* Lean Angle & Stats Section */}
@@ -1912,6 +2149,22 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
                       {isSearching ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Search size={20} />}
                     </button>
                   </div>
+                  {searchSuggestions.length > 0 && (
+                    <div className="mt-2 max-h-40 overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-950/80">
+                      {searchSuggestions.map((item, idx) => (
+                        <button
+                          key={`${item.place_id || idx}`}
+                          onClick={() => {
+                            setSearchDestination(item.display_name || '');
+                            setSearchSuggestions([]);
+                          }}
+                          className="w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800 transition-colors"
+                        >
+                          {item.display_name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div className="relative">
@@ -1964,6 +2217,13 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
             zIndex={10}
           />
         )}
+        {showWeather && (
+          <TileLayer
+            url="https://tilecache.rainviewer.com/v2/radar/nowcast_0/256/{z}/{x}/{y}/6/1_1.png"
+            opacity={0.5}
+            zIndex={20}
+          />
+        )}
         
         {/* Draw GPX Route */}
         {parsedRoute && (
@@ -1977,7 +2237,7 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
         {/* Draw OSRM Navigation Route to GPX */}
         {navState.routeGeometry && (
           <GeoJSON 
-            key={JSON.stringify(navState.routeGeometry)}
+            key={`${navState.instruction}-${navState.distanceToNext ?? 0}`}
             data={navState.routeGeometry} 
             style={{ color: '#3b82f6', weight: 5, opacity: 0.8, dashArray: '10, 10' }} 
           />
@@ -2004,7 +2264,7 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
         ))}
 
         {/* Other Users' Markers */}
-        {locations.filter(loc => loc.uid !== user?.uid && typeof loc.lat === 'number' && typeof loc.lng === 'number').map(loc => (
+        {markerLocations.map(loc => (
           <Marker key={loc.uid} position={[loc.lat, loc.lng]} icon={createAvatarIcon(loc.photoURL, loc.level)} zIndexOffset={100}>
             <Popup className="custom-popup">
               <div className="font-semibold text-center">{loc.displayName}</div>
@@ -2016,9 +2276,9 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
         ))}
 
         {/* Current User Marker (Navigation Arrow) */}
-        {currentLocation && typeof currentLocation.lat === 'number' && typeof currentLocation.lng === 'number' && (
+        {displayLocation && typeof displayLocation.lat === 'number' && typeof displayLocation.lng === 'number' && (
           <CurrentUserMarker 
-            position={[currentLocation.lat, currentLocation.lng]}
+            position={[displayLocation.lat, displayLocation.lng]}
             heading={currentSpeedKmh > 5 ? (heading || 0) : 0}
             displayNameToUse={displayNameToUse}
             userLevel={userLevel}
@@ -2026,7 +2286,7 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
           />
         )}
 
-        <MapController location={currentLocation} heading={currentSpeedKmh > 5 ? heading : 0} isFollowing={isFollowing} showRanking={showRanking} isRecording={isRecording} speedKmh={currentSpeedKmh} />
+        <MapController location={displayLocation} heading={currentSpeedKmh > 5 ? heading : 0} isFollowing={isFollowing} showRanking={showRanking} isRecording={isRecording} speedKmh={currentSpeedKmh} />
           </MapContainer>
         </div>
       </div>
@@ -2115,6 +2375,7 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
                         score: summaryData.score,
                         path: recordedPath
                       });
+                      clearRideDraft();
                       setShowSummary(false);
                       alert("Ruta guardada en tu historial.");
                     } catch (e) {
@@ -2127,7 +2388,10 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
                   Guardar en Historial
                 </button>
                 <button 
-                  onClick={() => setShowSummary(false)}
+                  onClick={() => {
+                    clearRideDraft();
+                    setShowSummary(false);
+                  }}
                   className="w-full bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-4 rounded-2xl transition-all"
                 >
                   No guardar (solo estadísticas)

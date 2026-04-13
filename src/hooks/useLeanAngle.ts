@@ -30,6 +30,7 @@ export const useLeanAngle = () => {
   };
 
   const [rawAngle, setRawAngle] = useState(0);
+  const lastOrientationUpdateRef = useRef(0);
 
   useEffect(() => {
     try {
@@ -57,6 +58,7 @@ export const useLeanAngle = () => {
     if (!permissionGranted) return;
 
     const handleOrientation = (event: DeviceOrientationEvent) => {
+      lastOrientationUpdateRef.current = Date.now();
       let angle = 0;
       const isLandscape = window.innerWidth > window.innerHeight;
       const orientation = window.orientation || 0;
@@ -109,8 +111,39 @@ export const useLeanAngle = () => {
       }
     };
 
+    const handleMotion = (event: DeviceMotionEvent) => {
+      // iOS fallback: some devices return poor/empty orientation values.
+      if (Date.now() - lastOrientationUpdateRef.current < 1500) return;
+      const acc = event.accelerationIncludingGravity;
+      if (!acc) return;
+      const x = acc.x ?? 0;
+      const y = acc.y ?? 0;
+      const z = acc.z ?? 0;
+      const norm = Math.sqrt(x * x + y * y + z * z);
+      if (!norm) return;
+      const roll = Math.max(-60, Math.min(60, (Math.asin(x / norm) * 180) / Math.PI));
+
+      setRawAngle(roll);
+      const alpha = 0.1;
+      smoothedAngleRef.current = smoothedAngleRef.current + alpha * (roll - smoothedAngleRef.current);
+      let finalAngle = smoothedAngleRef.current - calibrationOffset;
+      if (Math.abs(finalAngle) < 1) finalAngle = 0;
+      const roundedAngle = Math.round(finalAngle);
+      setLeanAngle(roundedAngle);
+
+      if (roundedAngle < 0 && Math.abs(roundedAngle) > maxLeanLeft) {
+        setMaxLeanLeft(Math.abs(roundedAngle));
+      } else if (roundedAngle > 0 && roundedAngle > maxLeanRight) {
+        setMaxLeanRight(roundedAngle);
+      }
+    };
+
     window.addEventListener('deviceorientation', handleOrientation);
-    return () => window.removeEventListener('deviceorientation', handleOrientation);
+    window.addEventListener('devicemotion', handleMotion);
+    return () => {
+      window.removeEventListener('deviceorientation', handleOrientation);
+      window.removeEventListener('devicemotion', handleMotion);
+    };
   }, [permissionGranted, maxLeanLeft, maxLeanRight, calibrationOffset]);
 
   const resetMaxLean = () => {

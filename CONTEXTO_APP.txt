@@ -1,0 +1,275 @@
+MotoRide app - Contexto y registro de cambios
+Ultima actualizacion: 2026-04-13
+
+Objetivo del archivo
+- Mantener el contexto funcional y tecnico de la app.
+- Registrar los cambios importantes que se hagan en cada sesion.
+- Facilitar migrar el proyecto a otro PC sin perder conocimiento.
+
+Resumen funcional de la app
+- App para salidas grupales en moto.
+- Permite crear o unirse a rutas de grupo.
+- Muestra la ubicacion de usuarios en tiempo real durante la ruta.
+- Permite comunicacion por voz entre participantes (chat de voz).
+- Incluye alertas rapidas (averia, repostar, parado, etc.).
+
+Stack y arquitectura general
+- Frontend: React + TypeScript + Vite.
+- UI: Tailwind CSS + iconos/librerias de interfaz.
+- Realtime: Socket.IO (cliente/servidor).
+- Auth y datos: Firebase Auth + Firestore.
+- Mapa: Leaflet / React-Leaflet.
+- Voz: WebRTC (simple-peer) con senalizacion via Socket.IO.
+- PWA/offline parcial: service worker y manifest.
+
+Modulos principales identificados
+- Autenticacion:
+  - src/components/Login.tsx
+  - src/contexts/AuthContext.tsx
+  - src/firebase.ts
+- Lobby / grupos / rutas:
+  - src/components/Dashboard.tsx
+  - src/components/MainApp.tsx
+- Mapa y sesion de ruta:
+  - src/components/MapView.tsx
+- Tracking de ubicacion:
+  - src/hooks/useLocationTracking.ts
+- Voz grupal:
+  - src/hooks/useVoiceChat.ts
+- Backend realtime:
+  - server.ts
+
+Flujo principal actual
+1) Usuario inicia sesion con Google.
+2) Crea ruta o se une por codigo/enlace.
+3) Entra a la vista de mapa del grupo.
+4) Se activa geolocalizacion y envio de posicion en tiempo real.
+5) El servidor redistribuye posiciones/alertas a la sala del grupo.
+6) Participantes pueden hablar por voz via WebRTC.
+7) Al finalizar, se actualizan puntos/estadisticas segun logica de app.
+
+Observaciones tecnicas importantes (estado actual)
+- No existe chat de texto dedicado; hay voz + alertas.
+- Existen server.ts y server.js (posible duplicidad de backend).
+- Hay posibles inconsistencias entre groupId y code segun modulo.
+- No se detectaron tests automatizados para modulos criticos.
+- README podria no reflejar completamente la implementacion actual.
+
+Registro de cambios de sesiones
+- 2026-04-13:
+  - Se crea este archivo CONTEXTO_APP.txt en la raiz.
+  - Acuerdo de trabajo: mantener este documento actualizado con
+    conocimiento del proyecto y cambios relevantes en adelante.
+  - Ajustes funcionales aplicados en app de ruta:
+    - Se elimina visualmente el limite de velocidad del HUD.
+    - Se agrega bloqueo anti-suspension de pantalla (Wake Lock) durante
+      grabacion de ruta y modo bolsillo.
+    - Se mejora aviso de instalacion PWA para que no aparezca cuando la
+      app ya fue instalada/aceptada.
+    - Se simplifica aviso GPS a: "Sin señal GPS, reconectando...".
+    - Se mejora posicionado superior para iPhone/notch y se baja la capa
+      de avisos para evitar solape con indicador de direccion.
+    - Se refuerza inclinacion en Apple con fallback por devicemotion.
+    - Aviso de caida ahora solo salta grabando ruta + parado + inclinacion
+      maxima detectada.
+    - Se implementa borrado del grupo en Firestore al salir/cerrar/finalizar
+      (si el usuario es host).
+    - Sistema de puntos/nivel actualizado: cada 1000 pts sube 1 nivel y
+      los puntos en BD vuelven a 0 (acumulando niveles correctamente).
+  - Archivos tocados:
+    - src/components/MapView.tsx
+    - src/hooks/useLeanAngle.ts
+    - src/App.tsx
+    - src/components/Dashboard.tsx
+    - src/lib/utils.ts
+  - Ajuste de estabilidad extra (bug reportado en ruta espontanea):
+    - Se evita borrar el grupo por errores transitorios de GPS ("unavailable"),
+      para que no se rompa la entrada a ruta espontanea.
+    - El borrado por GPS solo ocurre en denegacion real de permisos.
+    - Se mejoran mensajes de geolocalizacion por codigo de error:
+      permiso denegado, sin senal/reconectando y timeout/reintentando.
+    - Se limpia el error de GPS al recuperar posicion valida.
+  - Archivos tocados:
+    - src/components/MapView.tsx
+    - src/hooks/useLocationTracking.ts
+  - Ajuste UI + puntos en Dashboard:
+    - Se elimina el bloque duplicado de estado (online/nivel/puntos)
+      encima de "Apoyar proyecto" para limpiar la interfaz.
+    - Se agrega autocorreccion de puntos/nivel en tiempo real:
+      si points >= 1000, sube nivel automaticamente y resetea
+      points a 0..999 en Firestore.
+    - Se agrega manejo de errores para normalizacion de puntos con
+      aviso en interfaz y registro en handler de Firestore.
+  - Archivos tocados:
+    - src/components/Dashboard.tsx
+  - Ajuste de sistema de niveles por requerimiento:
+    - Regla aplicada: para nivel N se requieren N*1000 puntos totales
+      (ejemplo: nivel 2 => 2000, nivel 10 => 10000).
+    - Se revierte el modelo de puntos con reseteo por nivel y se vuelve a
+      puntos acumulados en base de datos.
+    - Se sincroniza nivel desde puntos acumulados en Dashboard para evitar
+      inconsistencias en datos antiguos/corruptos.
+    - Se ajusta barra de progreso de perfil para mostrar avance por tramo
+      de nivel y cabecera de puntos totales vs objetivo del siguiente nivel.
+  - Archivos tocados:
+    - src/lib/utils.ts
+    - src/components/MapView.tsx
+    - src/components/Dashboard.tsx
+    - src/components/Profile.tsx
+  - Depuracion multiplataforma (Android/iPhone):
+    - Se agrega Error Boundary global para evitar pantalla blanca en
+      errores de render y mostrar recuperacion con recarga.
+    - Se mejora gestion de altura de viewport movil con variable CSS
+      dinamica basada en visualViewport para evitar cortes por barra
+      del navegador en distintos moviles.
+    - Se ajusta el top inset en MapView sumando offset del visualViewport
+      para evitar solapes en notch/isla dinamica y cambios de orientacion.
+    - Se aplica overscroll-behavior para reducir comportamientos raros de
+      scroll/elasticidad que desplazan capas UI en moviles.
+  - Archivos tocados:
+    - src/App.tsx
+    - src/main.tsx
+    - src/index.css
+    - src/components/MapView.tsx
+  - Optimizaciones de fluidez antes de redeploy:
+    - Tracking GPS: se reemplaza heuristica temporal de escritura en
+      Firestore por throttle real cada 10s para evitar rafagas y carga.
+    - Mapa realtime: se evita sobrescribir ubicaciones con paquetes
+      antiguos de socket y se hace merge inteligente por timestamp.
+    - Render UI: se memoizan listas derivadas (marcadores, ranking,
+      alertas activas) para reducir renderizados caros por tick.
+    - Ruta de navegacion OSRM: se elimina key con JSON.stringify enorme
+      para evitar trabajo excesivo del reconciler en moviles.
+    - Voz WebRTC: mejora compatibilidad iOS Safari forzando playsInline
+      y play controlado en streams remotos.
+  - Archivos tocados:
+    - src/hooks/useLocationTracking.ts
+    - src/components/MapView.tsx
+    - src/hooks/useVoiceChat.ts
+  - Optimizacion de coste BD + navegacion GPS:
+    - Firestore locations fallback ahora escribe solo cada 10s Y solo si
+      hubo movimiento relevante (>=20m) o alerta activa.
+    - Se reduce carga de OSRM en navegacion: umbral de refresco mayor,
+      cooldown entre requests y cancelacion de request previo en curso.
+    - Indicaciones simplificadas y mas claras (giro/salida/rotonda/
+      incorporacion) manteniendo precision.
+    - La flecha del usuario ahora se ajusta visualmente a la carretera/
+      trazado (snap to route) para minimizar desviaciones por jitter GPS.
+      Solo aplica si la correccion es razonable para evitar saltos.
+  - Archivos tocados:
+    - src/hooks/useLocationTracking.ts
+    - src/hooks/useNavigation.ts
+    - src/components/MapView.tsx
+  - Guardado local de ruta (ahorro de BD en historial):
+    - Al finalizar grabacion se guarda un borrador local del resumen y
+      trazado en localStorage.
+    - Solo se escribe en Firestore (rideHistory) si el usuario pulsa
+      "Guardar en Historial".
+    - Si la app se cierra tras finalizar y se reabre, se recupera el
+      resumen/borrador local para decidir guardar o descartar.
+    - Al iniciar una nueva grabacion o descartar/guardar, se limpia el
+      borrador local.
+  - Archivos tocados:
+    - src/components/MapView.tsx
+  - Recuperacion rapida ante error bloqueante + lecturas optimizadas:
+    - Se agrega auto-recuperacion unica por sesion para errores fatales
+      (error/unhandledrejection/render crash).
+    - La recuperacion limpia cache storage y service workers, luego recarga
+      con cache-busting para intentar restaurar la app.
+    - Se limita a 1 intento por sesion para no generar bucles ni carga extra.
+    - Lecturas de Firestore en "locations" pasan a modo fallback:
+      se usan solo al inicio o cuando socket se desconecta.
+      Con socket sano, se corta ese listener para ahorrar cuota.
+  - Archivos tocados:
+    - src/App.tsx
+    - src/components/MapView.tsx
+  - Rebranding de nombre de app:
+    - Nombre unificado a "MotoRide" en manifest, titulo HTML y textos
+      visibles para que en instalacion de Chrome aparezca correctamente.
+    - Se eliminan referencias residuales a "MotoBikeSocial/MotoBike".
+  - Archivos tocados:
+    - public/manifest.webmanifest
+    - public/manifest.json
+    - index.html
+    - src/components/Dashboard.tsx
+    - server.ts
+  - Mejoras estructurales adicionales (sin tests automaticos):
+    - Se crea capa de red comun `src/lib/network.ts` con timeout,
+      reintentos y backoff para llamadas HTTP externas.
+    - Navegacion, rutas y radares pasan a usar la capa de red comun:
+      menos fallos transitorios y mayor fluidez en conexiones inestables.
+    - Se mejora limpieza de caches en service worker manteniendo cache de
+      tiles y shell actual para evitar recargas pesadas innecesarias.
+    - Se reduce duplicacion de logica de fetch y se unifica manejo de
+      errores/rate-limit en modulos criticos.
+  - Archivos tocados:
+    - src/lib/network.ts
+    - src/hooks/useNavigation.ts
+    - src/hooks/useRoadData.ts
+    - src/components/Dashboard.tsx
+    - src/components/MapView.tsx
+    - public/sw.js
+  - Admin, comunidad y navegacion avanzada:
+    - Panel admin solo para juarp123@gmail.com (Dashboard) para:
+      - modificar multiplicador base y de distancia,
+      - crear/activar/desactivar eventos globales de puntos.
+    - Sistema de puntuacion conectado a config/eventos:
+      - aplica multiplicadores activos al cierre de ruta en calculo final.
+    - Comunidad con solicitudes de amistad:
+      - enviar/cancelar/aceptar/rechazar solicitud,
+      - historial bloqueado si no hay amistad aceptada.
+    - Se agregan campos de soporte de amistad en bootstrap de usuario:
+      displayNameLower, friends, friendRequestsIncoming/Outgoing.
+    - Mejora de buscadores de destino:
+      - sugerencias de Nominatim en creador de rutas y lupa de GPS,
+      - seleccion rapida desde lista.
+    - Endurecimiento GPX:
+      - validacion de geometria de ruta antes de guardar.
+    - Reglas Firestore ampliadas:
+      - colecciones appConfig y pointsEvents (escritura solo admin),
+      - lectura de rideHistory permitida a amigos aceptados.
+  - Archivos tocados:
+    - src/components/AdminPointsPanel.tsx
+    - src/components/Dashboard.tsx
+    - src/components/FriendsModal.tsx
+    - src/components/MapView.tsx
+    - src/contexts/AuthContext.tsx
+    - src/lib/pointsConfig.ts
+    - firestore.rules
+  - Meteo + reset BD + buscador amigos:
+    - Se añade capa de lluvia superpuesta al mapa (toggle en ajustes GPS).
+    - Buscador de amigos mejorado con normalizacion (acentos/case) y
+      fallback de coincidencia parcial para que no requiera nombre exacto.
+    - En panel admin se añade accion de reset global para:
+      - limpiar amigos y solicitudes de todos los usuarios,
+      - eliminar todos los grupos.
+    - Reglas actualizadas para permitir a admin modificar users y borrar
+      groups en este contexto de mantenimiento.
+  - Archivos tocados:
+    - src/components/MapView.tsx
+    - src/components/FriendsModal.tsx
+    - src/components/AdminPointsPanel.tsx
+    - firestore.rules
+  - Ajuste de panel admin:
+    - El boton de reset global se cambia para que solo elimine
+      documentos de `groups` (sin tocar amigos/solicitudes).
+  - Archivos tocados:
+    - src/components/AdminPointsPanel.tsx
+  - Hardening final pre-deploy:
+    - Perfil guarda `displayNameLower` para mantener buscador de amigos
+      consistente cuando el usuario cambia su nombre.
+    - Panel admin se autocierra si quien lo abre no es la cuenta admin.
+    - Buscador de amigos mejorado con busqueda reactiva (debounce) para
+      hacerlo mas intuitivo sin depender de boton manual.
+  - Archivos tocados:
+    - src/components/Profile.tsx
+    - src/components/AdminPointsPanel.tsx
+    - src/components/FriendsModal.tsx
+
+Plantilla para futuras entradas
+- [AAAA-MM-DD]:
+  - Cambio realizado:
+  - Archivos afectados:
+  - Motivo:
+  - Impacto:
+  - Notas de verificacion:

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { getDistance } from '../lib/geoUtils';
+import { requestJson } from '../lib/network';
 
 export const useRoadData = (currentLocation: {lat: number, lng: number} | null) => {
   const [radars, setRadars] = useState<any[]>([]);
@@ -20,20 +21,20 @@ export const useRoadData = (currentLocation: {lat: number, lng: number} | null) 
         node(around:5000,${currentLocation.lat},${currentLocation.lng})[highway=speed_camera];
         out;
       `;
-      fetch(`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`)
-        .then(res => {
-          if (!res.ok) {
-            console.warn('Overpass API rate limited or unavailable:', res.status);
-            return { elements: [] }; // Return empty data instead of throwing
-          }
-          return res.json();
-        })
+      requestJson<any>(`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`, {
+        timeoutMs: 12000,
+        retries: 1,
+        backoffMs: 800
+      })
         .then(data => {
           if (data.elements) {
             setRadars(data.elements.map((e: any) => ({ lat: e.lat, lng: e.lon })));
           }
         })
-        .catch(console.error);
+        .catch((error) => {
+          console.warn('Overpass API unavailable:', error);
+          setRadars([]);
+        });
     }
 
     // Check nearby radars (within 2km)

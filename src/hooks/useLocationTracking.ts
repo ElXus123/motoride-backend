@@ -13,6 +13,8 @@ export const useLocationTracking = (isActive: boolean, groupId: string, extraDat
   const [currentLocation, setCurrentLocation] = useState<{lat: number, lng: number} | null>(null);
 
   const extraDataRef = useRef(extraData);
+  const lastPersistRef = useRef(0);
+  const lastPersistedLocRef = useRef<{ lat: number; lng: number } | null>(null);
   useEffect(() => {
     extraDataRef.current = extraData;
   }, [extraData]);
@@ -77,6 +79,7 @@ export const useLocationTracking = (isActive: boolean, groupId: string, extraDat
       watchId = navigator.geolocation.watchPosition(
         (position) => {
           const { latitude, longitude, speed: gpsSpeed, heading: gpsHeading } = position.coords;
+          setError(null);
           
           lastLat = latitude;
           lastLng = longitude;
@@ -108,7 +111,18 @@ export const useLocationTracking = (isActive: boolean, groupId: string, extraDat
             });
 
             // Fallback persistence for cross-client visibility if socket packets are missed.
-            if (now % 10000 < 1200) {
+            // Use a real elapsed-time throttle to avoid burst writes on some devices.
+            if (now - lastPersistRef.current >= 10000) {
+              const prevPersist = lastPersistedLocRef.current;
+              const movedSincePersist = prevPersist
+                ? getDistance(latitude, longitude, prevPersist.lat, prevPersist.lng)
+                : Number.POSITIVE_INFINITY;
+              const hasActiveAlert = !!extraDataRef.current?.alert;
+              if (movedSincePersist < 20 && !hasActiveAlert) {
+                return;
+              }
+              lastPersistRef.current = now;
+              lastPersistedLocRef.current = { lat: latitude, lng: longitude };
               setDoc(
                 doc(db, 'locations', user.uid),
                 {
@@ -133,7 +147,15 @@ export const useLocationTracking = (isActive: boolean, groupId: string, extraDat
         },
         (err) => {
           console.error('Geolocation error:', err);
-          setError(err.message);
+          if (err.code === 1) {
+            setError('Permiso de GPS denegado');
+          } else if (err.code === 2) {
+            setError('Sin señal GPS, reconectando');
+          } else if (err.code === 3) {
+            setError('GPS tardando en responder, reintentando');
+          } else {
+            setError(err.message);
+          }
         },
         {
           enableHighAccuracy: true,

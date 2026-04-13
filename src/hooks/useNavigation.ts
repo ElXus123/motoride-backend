@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { getDistance, getBearing } from '../lib/geoUtils';
 import { parseRouteData } from '../lib/gpx';
+import { requestJson } from '../lib/network';
 
 interface NavState {
   distanceToNext: number | null;
@@ -25,6 +26,37 @@ export const useNavigation = (currentLocation: {lat: number, lng: number} | null
 
   const lastFetchLoc = useRef<{lat: number, lng: number} | null>(null);
   const currentTarget = useRef<{lat: number, lng: number} | null>(null);
+  const lastFetchAtRef = useRef(0);
+  const activeRequestRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      activeRequestRef.current?.abort();
+    };
+  }, []);
+
+  const buildInstruction = (type?: string, modifier?: string, roadName?: string, isOnRouteNow?: boolean) => {
+    let base = 'Sigue recto';
+    if (type === 'turn') {
+      if (modifier?.includes('right')) base = 'Gira a la derecha';
+      else if (modifier?.includes('left')) base = 'Gira a la izquierda';
+    } else if (type === 'off ramp') {
+      base = modifier?.includes('left') ? 'Toma la salida izquierda' : 'Toma la salida derecha';
+    } else if (type === 'roundabout') {
+      base = 'En la rotonda, toma tu salida';
+    } else if (type === 'merge') {
+      base = 'Incorpórate a la vía';
+    } else if (type === 'fork') {
+      base = modifier?.includes('left') ? 'Mantente a la izquierda' : 'Mantente a la derecha';
+    } else if (type === 'arrive') {
+      base = isOnRouteNow ? 'Continúa por la ruta' : 'Incorpórate a la ruta';
+    }
+
+    if (roadName && roadName.trim().length > 0) {
+      return `${base} hacia ${roadName}`;
+    }
+    return base;
+  };
 
   useEffect(() => {
     if (!routeGeoJSON) {
@@ -80,21 +112,29 @@ export const useNavigation = (currentLocation: {lat: number, lng: number} | null
         targetPoint = { lat: coords[targetIndex][1], lng: coords[targetIndex][0] };
       }
 
-      // 3. Call OSRM if we moved enough (>30m) or target changed significantly
+      // 3. Call OSRM if we moved enough (>40m), target changed, and a small cooldown passed.
+      const now = Date.now();
       const shouldFetch = !lastFetchLoc.current ||
-        getDistance(currentLocation.lat, currentLocation.lng, lastFetchLoc.current.lat, lastFetchLoc.current.lng) > 30 ||
+        getDistance(currentLocation.lat, currentLocation.lng, lastFetchLoc.current.lat, lastFetchLoc.current.lng) > 40 ||
         !currentTarget.current ||
         getDistance(targetPoint.lat, targetPoint.lng, currentTarget.current.lat, currentTarget.current.lng) > 100;
+      const fetchCooldownPassed = now - lastFetchAtRef.current > 3500;
 
-      if (shouldFetch) {
+      if (shouldFetch && fetchCooldownPassed) {
         lastFetchLoc.current = currentLocation;
         currentTarget.current = targetPoint;
+        lastFetchAtRef.current = now;
 
-        fetch(`https://router.project-osrm.org/route/v1/driving/${currentLocation.lng},${currentLocation.lat};${targetPoint.lng},${targetPoint.lat}?steps=true&overview=full&geometries=geojson`)
-          .then(res => {
-            if (!res.ok) throw new Error('Routing failed');
-            return res.json();
-          })
+        if (activeRequestRef.current) {
+          activeRequestRef.current.abort();
+        }
+        const controller = new AbortController();
+        activeRequestRef.current = controller;
+
+        requestJson<any>(
+          `https://router.project-osrm.org/route/v1/driving/${currentLocation.lng},${currentLocation.lat};${targetPoint.lng},${targetPoint.lat}?steps=true&overview=full&geometries=geojson`,
+          { signal: controller.signal, timeoutMs: 9000, retries: 1, backoffMs: 400 }
+        )
           .then(data => {
             if (data.code === 'Ok' && data.routes.length > 0) {
               const route = data.routes[0];
@@ -112,30 +152,7 @@ export const useNavigation = (currentLocation: {lat: number, lng: number} | null
               const modifier = maneuver.modifier || '';
               const name = nextStep.name || '';
 
-              let action = "Sigue recto";
-              if (type === 'turn') {
-                if (modifier.includes('right')) action = "Gira a la derecha";
-                else if (modifier.includes('left')) action = "Gira a la izquierda";
-              } else if (type === 'off ramp') {
-                action = "Toma la salida";
-                if (modifier.includes('right')) action += " a la derecha";
-                else if (modifier.includes('left')) action += " a la izquierda";
-              } else if (type === 'roundabout') {
-                action = "En la rotonda, toma la salida";
-              } else if (type === 'arrive') {
-                action = isOnRoute ? "Sigue la ruta" : "Llegando a la ruta";
-              } else if (type === 'merge') {
-                action = "Incorpórate";
-              } else if (type === 'fork') {
-                action = "En la bifurcación, mantente a la " + (modifier.includes('right') ? 'derecha' : 'izquierda');
-              } else if (type === 'end of road') {
-                action = "Al final de la calle, gira a la " + (modifier.includes('right') ? 'derecha' : 'izquierda');
-              }
-
-              let instruction = name ? `${action} hacia ${name}` : action;
-              if (!isOnRoute && type === 'arrive') {
-                 instruction = "Incorpórate a la ruta trazada";
-              }
+              const instruction = buildInstruction(type, modifier, name, isOnRoute);
 
               const maneuverLoc = { lat: maneuver.location[1], lng: maneuver.location[0] };
 
@@ -152,6 +169,7 @@ export const useNavigation = (currentLocation: {lat: number, lng: number} | null
             }
           })
           .catch(err => {
+            if (err?.name === 'AbortError') return;
             console.error("OSRM error", err);
             // Fallback
             setNavState(prev => ({

@@ -4,9 +4,12 @@ import L from 'leaflet';
 import { doc, setDoc, getDoc, updateDoc, arrayUnion, arrayRemove, collection, query, where, onSnapshot, deleteDoc, orderBy, limit } from 'firebase/firestore';
 import { db, logOut, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { parseRouteData } from '../lib/gpx';
-import { Users, Plus, LogOut, User as UserIcon, Activity, Trash2, Trophy, Calendar, MapPin, Search, Clock, ChevronRight, Upload, X, Map as MapIcon, Play, HeartHandshake, CircleDollarSign } from 'lucide-react';
+import { parseGPX, parseRouteData } from '../lib/gpx';
+import { calculateLevel } from '../lib/utils';
+import { requestJson } from '../lib/network';
+import { Users, Plus, LogOut, User as UserIcon, Activity, Trash2, Trophy, Calendar, MapPin, Search, Clock, ChevronRight, Upload, X, Map as MapIcon, Play, HeartHandshake, CircleDollarSign, Shield } from 'lucide-react';
 import FriendsModal from './FriendsModal';
+import AdminPointsPanel from './AdminPointsPanel';
 
 interface DashboardProps {
   onJoinGroup: (id: string) => void;
@@ -29,6 +32,7 @@ const PROVINCE_MAPPING: {[key: string]: string} = {
 export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }: DashboardProps) {
   const { user } = useAuth();
   const [userData, setUserData] = useState<any>(null);
+  const [pointsFixError, setPointsFixError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -38,11 +42,50 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     return unsub;
   }, [user]);
 
-  const points = userData?.points || 0;
-  const level = userData?.level || 1;
-  const nextLevelPoints = level * 1000;
-  const prevLevelPoints = (level - 1) * 1000;
-  const progress = ((points - prevLevelPoints) / (nextLevelPoints - prevLevelPoints)) * 100;
+  useEffect(() => {
+    if (!user || !userData) return;
+    let cancelled = false;
+
+    const normalizePointsLevelFields = async () => {
+      try {
+        setPointsFixError(null);
+        const rawPoints = Number(userData.points ?? 0);
+        const rawLevel = Number(userData.level ?? 1);
+
+        if (!Number.isFinite(rawPoints)) {
+          await updateDoc(doc(db, 'users', user.uid), { points: 0, level: 1 });
+          return;
+        }
+
+        const safePoints = Math.max(0, Math.floor(rawPoints));
+        const calculatedLevel = calculateLevel(safePoints).level;
+        const safeLevel = Number.isFinite(rawLevel) ? Math.max(1, Math.floor(rawLevel)) : calculatedLevel;
+
+        if (safePoints !== rawPoints || safeLevel !== calculatedLevel) {
+          await updateDoc(doc(db, 'users', user.uid), {
+            points: safePoints,
+            level: calculatedLevel
+          });
+        }
+      } catch (error) {
+        if (cancelled) return;
+        console.error('Error normalizando puntos/nivel:', error);
+        setPointsFixError('Error corrigiendo puntos. Se reintentara automaticamente.');
+        handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
+      }
+    };
+
+    normalizePointsLevelFields();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, userData?.points, userData?.level]);
+
+  const points = Math.max(0, Number(userData?.points || 0));
+  const levelData = calculateLevel(points);
+  const level = levelData.level;
+  const levelRange = levelData.pointsForNextLevel - levelData.prevLevelPoints;
+  const progress = levelRange > 0 ? (levelData.remainingPoints / levelRange) * 100 : 0;
 
   const [joinCode, setJoinCode] = useState('');
   const [loading, setLoading] = useState(false);
@@ -52,6 +95,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showFriendsModal, setShowFriendsModal] = useState(false);
   const [showSupportModal, setShowSupportModal] = useState(false);
+  const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [showPreviewModal, setShowPreviewModal] = useState<any>(null);
   const supportPopupRef = useRef<Window | null>(null);
   const lastBackHandledAtRef = useRef(0);
@@ -78,6 +122,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   const [gpxData, setGpxData] = useState<string | null>(null);
   const [destination, setDestination] = useState('');
   const [destinationPreview, setDestinationPreview] = useState<string | null>(null);
+  const [destinationSuggestions, setDestinationSuggestions] = useState<any[]>([]);
   const [routeOptions, setRouteOptions] = useState({
     curves: true,
     secondary: true,
@@ -88,6 +133,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   useEffect(() => {
     if (destination.length < 3) {
       setDestinationPreview(null);
+      setDestinationSuggestions([]);
       return;
     }
     // Only fetch if it's not already previewed
@@ -95,23 +141,25 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       return;
     }
     const timer = setTimeout(async () => {
-      const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(destination)}&limit=1&countrycodes=es`;
+      const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(destination)}&limit=5&countrycodes=es`;
       try {
-        const geoRes = await fetch(geocodeUrl);
-        if (geoRes.status === 429) {
+        const geoData = await requestJson<any[]>(geocodeUrl, { timeoutMs: 9000, retries: 1, backoffMs: 500 });
+        if (geoData && geoData.length > 0) {
+          setDestinationPreview(geoData[0].display_name);
+          setDestinationSuggestions(geoData.slice(0, 5));
+        } else {
+          setDestinationPreview('No encontrado');
+          setDestinationSuggestions([]);
+        }
+      } catch (e) {
+        const status = (e as any)?.status;
+        if (status === 429) {
           setDestinationPreview('Demasiadas peticiones, espera un poco...');
           return;
         }
-        if (!geoRes.ok) throw new Error('Geocoding failed');
-        const geoData = await geoRes.json();
-        if (geoData && geoData.length > 0) {
-          setDestinationPreview(geoData[0].display_name);
-        } else {
-          setDestinationPreview('No encontrado');
-        }
-      } catch (e) {
         console.error(e);
         setDestinationPreview('Error al buscar');
+        setDestinationSuggestions([]);
       }
     }, 1500);
     return () => clearTimeout(timer);
@@ -136,6 +184,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
 
   const [searchMunis, setSearchMunis] = useState<string[]>([]);
   const [createMunis, setCreateMunis] = useState<string[]>([]);
+  const isAdmin = user?.email?.toLowerCase() === 'juarp123@gmail.com';
 
   useEffect(() => {
     const handleOnline = () => setIsOffline(false);
@@ -273,7 +322,15 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (event) => {
-      setGpxData(event.target?.result as string);
+      const raw = event.target?.result as string;
+      const parsed = parseGPX(raw);
+      const routeCoords = (parsed as any)?.features?.find((f: any) => f?.geometry?.type === 'LineString')?.geometry?.coordinates;
+      if (!routeCoords || routeCoords.length < 2) {
+        alert('El archivo GPX no contiene una ruta válida.');
+        return;
+      }
+      setGpxData(JSON.stringify(parsed));
+      setRouteGenerated(true);
     };
     reader.readAsText(file);
   };
@@ -329,9 +386,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     try {
       // Use Nominatim with addressdetails to get province/municipality
       const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(destination)}&limit=1&countrycodes=es&addressdetails=1`;
-      const geoRes = await fetch(geocodeUrl);
-      if (!geoRes.ok) throw new Error('Geocoding failed');
-      const geoData = await geoRes.json();
+      const geoData = await requestJson<any[]>(geocodeUrl, { timeoutMs: 10000, retries: 1, backoffMs: 600 });
       
       let destCoords = "";
       if (geoData && geoData.length > 0) {
@@ -357,9 +412,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
         // Actually, some OSRM instances support 'continue_straight' or other hints.
         const url = `https://router.project-osrm.org/route/v1/${profile}/${start};${destCoords}?overview=full&geometries=geojson&steps=true`;
         
-        const res = await fetch(url);
-        if (!res.ok) throw new Error('Routing failed');
-        const data = await res.json();
+        const data = await requestJson<any>(url, { timeoutMs: 12000, retries: 1, backoffMs: 700 });
         if (data.code === 'Ok') {
           const route = data.routes[0];
           setGpxData(JSON.stringify(route.geometry));
@@ -511,6 +564,15 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           </div>
 
           <div className="flex items-center gap-2">
+            {isAdmin && (
+              <button 
+                onClick={() => setShowAdminPanel(true)}
+                className="p-2 bg-zinc-900 border border-zinc-800 rounded-full hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-orange-400"
+                title="Panel Admin"
+              >
+                <Shield size={20} />
+              </button>
+            )}
             <button 
               onClick={() => setShowFriendsModal(true)}
               className="p-2 bg-zinc-900 border border-zinc-800 rounded-full hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-white"
@@ -523,20 +585,9 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       </header>
 
       <main className="max-w-5xl mx-auto p-6 space-y-8">
-        {/* App Status + Support */}
+        {/* Support */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="md:col-span-2 bg-zinc-900/50 border border-zinc-800 rounded-2xl px-4 py-3 flex flex-wrap items-center gap-2">
-            <span className={`text-[11px] font-black px-2.5 py-1 rounded-full ${isOffline ? 'bg-red-500/20 text-red-300' : 'bg-emerald-500/20 text-emerald-300'}`}>
-              {isOffline ? 'Offline' : 'Online'}
-            </span>
-            <span className="text-[11px] font-black px-2.5 py-1 rounded-full bg-blue-500/20 text-blue-300">
-              Nivel {level}
-            </span>
-            <span className="text-[11px] font-black px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-300">
-              {points} pts
-            </span>
-            <span className="text-xs text-zinc-400 ml-1">Todo listo para ruta, comunidad y navegación.</span>
-          </div>
+          <div className="md:col-span-2" />
 
           <button
             onClick={() => setShowSupportModal(true)}
@@ -551,6 +602,12 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
             </div>
           </button>
         </div>
+
+        {pointsFixError && (
+          <div className="bg-red-500/10 border border-red-500/30 rounded-2xl px-4 py-3 text-sm text-red-200">
+            {pointsFixError}
+          </div>
+        )}
 
         {/* Quick Actions */}
         <div className="grid grid-cols-1 gap-6">
@@ -880,6 +937,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
 
       {/* Friends Modal */}
       {showFriendsModal && <FriendsModal onClose={() => setShowFriendsModal(false)} onRepeatRoute={onRepeatRoute} />}
+      {showAdminPanel && isAdmin && <AdminPointsPanel onClose={() => setShowAdminPanel(false)} />}
 
       {/* Support Modal */}
       {showSupportModal && (
@@ -888,7 +946,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
             <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
               <h2 className="text-xl font-bold text-white flex items-center gap-2">
                 <HeartHandshake size={20} className="text-orange-400" />
-                Apoyar MotoBikeSocial
+                Apoyar MotoRide
               </h2>
               <button onClick={() => setShowSupportModal(false)} className="p-2 hover:bg-zinc-800 rounded-full transition-colors text-zinc-400">
                 <X size={20} />
@@ -988,6 +1046,23 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                         />
                         {destinationPreview && (
                           <p className="text-[10px] text-zinc-500 mt-1 ml-1 truncate">{destinationPreview}</p>
+                        )}
+                        {destinationSuggestions.length > 0 && (
+                          <div className="mt-2 max-h-40 overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-950/80">
+                            {destinationSuggestions.map((item, idx) => (
+                              <button
+                                key={`${item.place_id || idx}`}
+                                onClick={() => {
+                                  setDestination(item.display_name || '');
+                                  setDestinationPreview(item.display_name || null);
+                                  setDestinationSuggestions([]);
+                                }}
+                                className="w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800 transition-colors"
+                              >
+                                {item.display_name}
+                              </button>
+                            ))}
+                          </div>
                         )}
                       </div>
                       <div className="grid grid-cols-3 gap-2">

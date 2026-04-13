@@ -10,9 +10,14 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
+  const allowlist = new Set([CACHE_NAME, TILE_CACHE]);
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)))
+      Promise.all(
+        keys
+          .filter((key) => !allowlist.has(key))
+          .map((key) => caches.delete(key))
+      )
     )
   );
   self.clients.claim();

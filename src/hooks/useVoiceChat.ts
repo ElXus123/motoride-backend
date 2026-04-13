@@ -96,6 +96,11 @@ export function useVoiceChat(groupId: string | null) {
       const audio = new Audio();
       audio.srcObject = stream;
       audio.autoplay = true;
+      // iOS Safari compatibility.
+      (audio as any).playsInline = true;
+      audio.play().catch(() => {
+        // Playback can require a user gesture on some devices.
+      });
       audioRefs.current[peerId] = audio;
     }
   };

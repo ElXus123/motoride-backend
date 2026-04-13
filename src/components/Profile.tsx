@@ -72,6 +72,7 @@ export default function Profile({ onBack }: { onBack: () => void }) {
       });
       await updateDoc(doc(db, 'users', user.uid), {
         displayName,
+        displayNameLower: displayName.toLowerCase(),
         photoURL
       });
       alert('Perfil actualizado');
@@ -110,17 +111,20 @@ export default function Profile({ onBack }: { onBack: () => void }) {
 
           {/* Experience Bar */}
           {userData && (() => {
-            const { level, pointsForNextLevel, remainingPoints } = calculateLevel(userData.points || 0);
+            const totalPoints = Math.max(0, Number(userData.points || 0));
+            const { level, pointsForNextLevel, prevLevelPoints } = calculateLevel(totalPoints);
+            const levelProgress = totalPoints - prevLevelPoints;
+            const levelRequired = pointsForNextLevel - prevLevelPoints;
             return (
               <div className="w-full mb-6">
                 <div className="flex justify-between items-center text-xs font-bold text-zinc-400 mb-2">
                   <span className="text-orange-500 font-black tracking-wider">NIVEL {level}</span>
-                  <span className="text-zinc-500">{remainingPoints} / {pointsForNextLevel} pts</span>
+                  <span className="text-zinc-500">{totalPoints} / {pointsForNextLevel} pts</span>
                 </div>
                 <div className="h-3 bg-zinc-950 rounded-full overflow-hidden border border-zinc-800">
                   <div 
                     className="h-full bg-gradient-to-r from-orange-500 to-orange-400 transition-all duration-1000 ease-out" 
-                    style={{ width: `${Math.min((remainingPoints / pointsForNextLevel) * 100, 100)}%` }} 
+                    style={{ width: `${Math.min((levelProgress / levelRequired) * 100, 100)}%` }} 
                   />
                 </div>
               </div>

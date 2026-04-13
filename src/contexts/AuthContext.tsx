@@ -46,6 +46,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             uid: currentUser.uid,
             displayName: currentUser.displayName || 'Motero',
             email: currentUser.email || '',
+            displayNameLower: (currentUser.displayName || 'Motero').toLowerCase(),
+            friends: [],
+            friendRequestsIncoming: [],
+            friendRequestsOutgoing: [],
           }, { merge: true });
         } catch (err: any) {
           console.error("Error saving user to Firestore:", err);

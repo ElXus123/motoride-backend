@@ -104,7 +104,7 @@ async function startServer() {
         res.status(200).json({ ok: true, service: "socket-backend" });
       });
       app.get('/', (_req, res) => {
-        res.status(200).send('MotoBikeSocial socket backend is running.');
+        res.status(200).send('MotoRide socket backend is running.');
       });
     }
   }

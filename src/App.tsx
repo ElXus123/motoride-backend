@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Login from './components/Login';
 import MainApp from './components/MainApp';
@@ -8,6 +8,70 @@ type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
 };
+
+const RECOVERY_FLAG_KEY = 'motoride_recovery_attempted_once';
+
+const runOneShotRecoveryReload = async () => {
+  try {
+    if (sessionStorage.getItem(RECOVERY_FLAG_KEY) === 'true') return false;
+    sessionStorage.setItem(RECOVERY_FLAG_KEY, 'true');
+
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.unregister().catch(() => false)));
+    }
+
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k).catch(() => false)));
+    }
+
+    const cacheBust = `recovery=${Date.now()}`;
+    const nextUrl = window.location.href.includes('?')
+      ? `${window.location.href}&${cacheBust}`
+      : `${window.location.href}?${cacheBust}`;
+    window.location.replace(nextUrl);
+    return true;
+  } catch (error) {
+    console.error('Recovery reload failed:', error);
+    window.location.reload();
+    return true;
+  }
+};
+
+class AppErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error('Render crash captured by AppErrorBoundary:', error);
+    runOneShotRecoveryReload();
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center p-6 text-center text-white">
+          <h1 className="text-xl font-bold mb-2">Se produjo un error en la interfaz</h1>
+          <p className="text-zinc-400 mb-6">La app intentará recuperarse al recargar.</p>
+          <button
+            onClick={() => runOneShotRecoveryReload()}
+            className="bg-orange-500 hover:bg-orange-600 text-white px-5 py-3 rounded-xl font-semibold transition-colors"
+          >
+            Recargar app
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const AppContent = () => {
   const { user, loading, error } = useAuth();
@@ -25,9 +89,10 @@ const AppContent = () => {
     setIsIOS(iosDetected);
 
     const alreadyDismissed = window.localStorage.getItem('motoride_install_notice_dismissed') === 'true';
+    const alreadyInstalled = window.localStorage.getItem('motoride_app_installed') === 'true';
     const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
 
-    if (!alreadyDismissed && !isStandalone) {
+    if (!alreadyDismissed && !alreadyInstalled && !isStandalone) {
       setShowInstallNotice(true);
     }
 
@@ -36,8 +101,31 @@ const AppContent = () => {
       setDeferredPrompt(event as BeforeInstallPromptEvent);
     };
 
+    const handleAppInstalled = () => {
+      window.localStorage.setItem('motoride_app_installed', 'true');
+      setShowInstallNotice(false);
+      setDeferredPrompt(null);
+    };
+
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleFatalError = () => {
+      runOneShotRecoveryReload();
+    };
+
+    window.addEventListener('error', handleFatalError);
+    window.addEventListener('unhandledrejection', handleFatalError);
+    return () => {
+      window.removeEventListener('error', handleFatalError);
+      window.removeEventListener('unhandledrejection', handleFatalError);
+    };
   }, []);
 
   const dismissInstallNotice = () => {
@@ -50,6 +138,7 @@ const AppContent = () => {
     await deferredPrompt.prompt();
     const choice = await deferredPrompt.userChoice;
     if (choice.outcome === 'accepted') {
+      window.localStorage.setItem('motoride_app_installed', 'true');
       setShowInstallNotice(false);
     }
     setDeferredPrompt(null);
@@ -190,7 +279,9 @@ const AppContent = () => {
 export default function App() {
   return (
     <AuthProvider>
-      <AppContent />
+      <AppErrorBoundary>
+        <AppContent />
+      </AppErrorBoundary>
     </AuthProvider>
   );
 }
