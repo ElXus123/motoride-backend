@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, getDocs, doc, getDoc, updateDoc, arrayUnion, arrayRemove, onSnapshot, orderBy, limit, startAt, endAt } from 'firebase/firestore';
+import { collection, query, getDocs, doc, getDoc, updateDoc, arrayUnion, arrayRemove, onSnapshot, orderBy, limit, startAt, endAt, where } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { X, Search, UserPlus, UserMinus, User as UserIcon, Play, Check, Clock, Ban } from 'lucide-react';

@@ -116,7 +116,8 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
         }
       });
       peersRef.current = {};
-      Object.values(peerStreamsRef.current).forEach((s) => {
+      Object.keys(peerStreamsRef.current).forEach((key) => {
+        const s = peerStreamsRef.current[key];
         try {
           s.getTracks().forEach((t) => t.stop());
         } catch {
@@ -124,7 +125,8 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
         }
       });
       peerStreamsRef.current = {};
-      Object.values(audioRefs.current).forEach((a) => {
+      Object.keys(audioRefs.current).forEach((key) => {
+        const a = audioRefs.current[key];
         try {
           a.pause();
           a.srcObject = null;

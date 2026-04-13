@@ -25,6 +25,20 @@ import { motion, AnimatePresence } from 'motion/react';
 const lon2tile = (lon: number, zoom: number) => Math.floor((lon + 180) / 360 * Math.pow(2, zoom));
 const lat2tile = (lat: number, zoom: number) => Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, zoom));
 
+/**
+ * Valores válidos para `screen.orientation.lock()` (Screen Orientation API).
+ * Algunos `lib.dom` no incluyen `lock` en `ScreenOrientation`; evitamos depender de ellos.
+ */
+type ScreenOrientationLockArg =
+  | 'any'
+  | 'natural'
+  | 'landscape'
+  | 'portrait'
+  | 'portrait-primary'
+  | 'portrait-secondary'
+  | 'landscape-primary'
+  | 'landscape-secondary';
+
 // Custom icon creator for avatars with level
 const createAvatarIcon = (url: string, level: number = 1) => {
   return L.divIcon({
@@ -1562,7 +1576,7 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
 
   const toggleRotationLock = async () => {
     const so = screen.orientation as ScreenOrientation & {
-      lock?: (orientation: OrientationLockType) => Promise<void>;
+      lock?: (orientation: ScreenOrientationLockArg) => Promise<void>;
       unlock?: () => void;
     };
 
@@ -1578,7 +1592,7 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
     }
 
     const lockToCurrent = async () => {
-      const t = so.type as OrientationLockType;
+      const t = so.type as ScreenOrientationLockArg;
       await so.lock(t);
     };
 
