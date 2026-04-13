@@ -7,7 +7,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { parseGPX, parseRouteData } from '../lib/gpx';
 import { calculateLevel } from '../lib/utils';
 import { requestJson } from '../lib/network';
-import { Users, Plus, LogOut, User as UserIcon, Activity, Trash2, Trophy, Calendar, MapPin, Search, Clock, ChevronRight, Upload, X, Map as MapIcon, Play, HeartHandshake, CircleDollarSign, Shield } from 'lucide-react';
+import { Users, Plus, LogOut, User as UserIcon, Activity, Trash2, Trophy, Calendar, MapPin, Search, Clock, ChevronRight, Upload, X, Map as MapIcon, Play, HeartHandshake, CircleDollarSign, Shield, RectangleVertical, CheckCircle2, AlertCircle } from 'lucide-react';
 import FriendsModal from './FriendsModal';
 import AdminPointsPanel from './AdminPointsPanel';
 
@@ -93,6 +93,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   const [scheduledRoutes, setScheduledRoutes] = useState<any[]>([]);
   const [nearbyRoutes, setNearbyRoutes] = useState<any[]>([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [routeGenFeedback, setRouteGenFeedback] = useState<null | { kind: 'success' | 'error'; title: string; detail?: string }>(null);
   const [showFriendsModal, setShowFriendsModal] = useState(false);
   const [showSupportModal, setShowSupportModal] = useState(false);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
@@ -107,6 +108,8 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   });
   const [indexBuilding, setIndexBuilding] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  const DASHBOARD_PORTRAIT_KEY = 'motoride_dashboard_portrait';
+  const [portraitDashboard, setPortraitDashboard] = useState(() => localStorage.getItem(DASHBOARD_PORTRAIT_KEY) === '1');
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deletingType, setDeletingType] = useState<'history' | 'scheduled' | null>(null);
   
@@ -197,6 +200,39 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     };
   }, []);
 
+  useEffect(() => {
+    localStorage.setItem(DASHBOARD_PORTRAIT_KEY, portraitDashboard ? '1' : '0');
+  }, [portraitDashboard]);
+
+  const releasePortraitOrientation = () => {
+    try {
+      (screen.orientation as ScreenOrientation & { unlock?: () => void })?.unlock?.();
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const togglePortraitDashboard = () => {
+    setPortraitDashboard((prev) => {
+      const next = !prev;
+      if (next) {
+        try {
+          const o = screen.orientation as ScreenOrientation & { lock?: (m: string) => Promise<void> };
+          void o?.lock?.('portrait-primary');
+        } catch {
+          /* iOS / desktop often block lock without fullscreen */
+        }
+      } else {
+        releasePortraitOrientation();
+      }
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    return () => releasePortraitOrientation();
+  }, []);
+
   const openSupportLink = (url: string) => {
     const popup = window.open(
       url,
@@ -238,6 +274,10 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
         supportPopupRef.current = null;
         return;
       }
+      if (routeGenFeedback) {
+        setRouteGenFeedback(null);
+        return;
+      }
       if (showPreviewModal) {
         setShowPreviewModal(null);
         return;
@@ -256,7 +296,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, [showCreateModal, showFriendsModal, showSupportModal, showPreviewModal]);
+  }, [showCreateModal, showFriendsModal, showSupportModal, showPreviewModal, routeGenFeedback]);
 
   useEffect(() => {
     if (!user) return;
@@ -394,7 +434,11 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       } else if (destination.includes(',')) {
         destCoords = destination;
       } else {
-        alert('No se ha podido encontrar el destino. Intenta ser más específico (Ej: Salou, Tarragona)');
+        setRouteGenFeedback({
+          kind: 'error',
+          title: 'Destino no encontrado',
+          detail: 'Prueba con una ciudad más concreta (por ejemplo: Salou, Tarragona).'
+        });
         setLoading(false);
         return;
       }
@@ -445,13 +489,25 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
             console.log("Route generated with OSRM. Note: OSRM public API defaults to fastest route.");
           }
 
-          alert(`Ruta generada hacia ${geoData[0]?.display_name || destination} con éxito.`);
+          setRouteGenFeedback({
+            kind: 'success',
+            title: '¡Ruta lista!',
+            detail: geoData[0]?.display_name || destination
+          });
         } else {
-          alert('Error al generar la ruta. Intenta con otro destino.');
+          setRouteGenFeedback({
+            kind: 'error',
+            title: 'No se pudo calcular la ruta',
+            detail: 'Prueba con otro destino o inténtalo de nuevo en unos segundos.'
+          });
         }
         setLoading(false);
-      }, (err) => {
-        alert('Error al obtener tu ubicación. Asegúrate de permitir el acceso al GPS.');
+      }, () => {
+        setRouteGenFeedback({
+          kind: 'error',
+          title: 'Sin posición GPS',
+          detail: 'Permite el acceso a la ubicación en el navegador y vuelve a generar la ruta.'
+        });
         setLoading(false);
       });
     } catch (e) {
@@ -532,10 +588,10 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   };
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-white overflow-x-hidden">
+    <div className={`min-h-screen bg-zinc-950 text-white overflow-x-hidden ${portraitDashboard ? 'max-w-md mx-auto w-full shadow-[0_0_0_1px_rgba(39,39,42,0.6)]' : ''}`}>
       {/* Header */}
       <header className="sticky top-0 z-30 bg-zinc-950/80 backdrop-blur-md border-b border-zinc-900 px-6 py-4">
-        <div className="max-w-5xl mx-auto grid grid-cols-[auto_1fr_auto] items-center gap-3">
+        <div className={`${portraitDashboard ? 'max-w-md' : 'max-w-5xl'} mx-auto grid grid-cols-[auto_1fr_auto] items-center gap-3`}>
           <div className="flex items-center gap-3 min-w-0">
             <button 
               onClick={onOpenProfile}
@@ -564,6 +620,18 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={togglePortraitDashboard}
+              className={`p-2 border rounded-full transition-colors ${
+                portraitDashboard
+                  ? 'bg-orange-500/20 border-orange-500/50 text-orange-400'
+                  : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:bg-zinc-800 hover:text-white'
+              }`}
+              title={portraitDashboard ? 'Salir de modo vertical' : 'Modo vertical (fijar retrato)'}
+            >
+              <RectangleVertical size={20} />
+            </button>
             {isAdmin && (
               <button 
                 onClick={() => setShowAdminPanel(true)}
@@ -584,7 +652,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto p-6 space-y-8">
+      <main className={`${portraitDashboard ? 'max-w-md' : 'max-w-5xl'} mx-auto p-6 space-y-8`}>
         {/* Support */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="md:col-span-2" />
@@ -938,6 +1006,71 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       {/* Friends Modal */}
       {showFriendsModal && <FriendsModal onClose={() => setShowFriendsModal(false)} onRepeatRoute={onRepeatRoute} />}
       {showAdminPanel && isAdmin && <AdminPointsPanel onClose={() => setShowAdminPanel(false)} />}
+
+      {/* Resultado generar ruta (sustituye alert nativo) */}
+      {routeGenFeedback && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/75 backdrop-blur-md"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="route-gen-feedback-title"
+          onClick={() => setRouteGenFeedback(null)}
+        >
+          <div
+            className={`w-full max-w-sm rounded-3xl border shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 ${
+              routeGenFeedback.kind === 'success'
+                ? 'bg-zinc-900 border-orange-500/35 ring-1 ring-orange-500/20'
+                : 'bg-zinc-900 border-red-500/30 ring-1 ring-red-500/15'
+            }`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className={`relative px-6 pt-8 pb-6 ${routeGenFeedback.kind === 'success' ? 'bg-gradient-to-b from-orange-500/10 to-transparent' : 'bg-gradient-to-b from-red-500/10 to-transparent'}`}>
+              <div className="flex justify-center mb-4">
+                <div
+                  className={`w-16 h-16 rounded-2xl flex items-center justify-center ${
+                    routeGenFeedback.kind === 'success' ? 'bg-orange-500/20 text-orange-400' : 'bg-red-500/20 text-red-400'
+                  }`}
+                >
+                  {routeGenFeedback.kind === 'success' ? <CheckCircle2 size={36} strokeWidth={2} /> : <AlertCircle size={36} strokeWidth={2} />}
+                </div>
+              </div>
+              <h2 id="route-gen-feedback-title" className="text-center text-xl font-black text-white tracking-tight">
+                {routeGenFeedback.title}
+              </h2>
+              {routeGenFeedback.detail && (
+                <p className="mt-3 text-center text-sm text-zinc-400 leading-relaxed break-words">
+                  {routeGenFeedback.kind === 'success' ? (
+                    <>
+                      <span className="text-zinc-500 block text-xs font-bold uppercase tracking-wider mb-1">Destino</span>
+                      <span className="text-zinc-100 font-semibold">{routeGenFeedback.detail}</span>
+                    </>
+                  ) : (
+                    routeGenFeedback.detail
+                  )}
+                </p>
+              )}
+              {routeGenFeedback.kind === 'success' && (
+                <p className="mt-4 text-center text-xs text-zinc-500">
+                  Revisa distancia y duración abajo y pulsa crear cuando quieras guardar la ruta.
+                </p>
+              )}
+            </div>
+            <div className="px-6 pb-6 pt-0">
+              <button
+                type="button"
+                onClick={() => setRouteGenFeedback(null)}
+                className={`w-full py-3.5 rounded-2xl text-sm font-black transition-all ${
+                  routeGenFeedback.kind === 'success'
+                    ? 'bg-orange-500 hover:bg-orange-400 text-zinc-950 shadow-lg shadow-orange-500/25'
+                    : 'bg-zinc-800 hover:bg-zinc-700 text-white border border-zinc-700'
+                }`}
+              >
+                Entendido
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Support Modal */}
       {showSupportModal && (

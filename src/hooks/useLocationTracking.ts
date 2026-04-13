@@ -22,12 +22,12 @@ export const useLocationTracking = (isActive: boolean, groupId: string, extraDat
   // Join group room on socket
   useEffect(() => {
     if (groupId && groupId !== 'REPEATED' && user) {
-      socket.emit('join-group', { groupId, uid: user.uid });
+      socket.emit('join-group', { groupId, uid: user.uid, isHost: !!extraDataRef.current?.isHost });
     }
 
     const rejoinOnConnect = () => {
       if (groupId && groupId !== 'REPEATED' && user) {
-        socket.emit('join-group', { groupId, uid: user.uid });
+        socket.emit('join-group', { groupId, uid: user.uid, isHost: !!extraDataRef.current?.isHost });
       }
     };
     socket.on('connect', rejoinOnConnect);

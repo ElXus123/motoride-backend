@@ -1,5 +1,5 @@
 MotoRide app - Contexto y registro de cambios
-Ultima actualizacion: 2026-04-13
+Ultima actualizacion: 2026-04-13 (radar lluvia + avisos + wake lock)
 
 Objetivo del archivo
 - Mantener el contexto funcional y tecnico de la app.
@@ -283,6 +283,35 @@ Registro de cambios de sesiones
     - Build local confirmado OK (`npm run build`) sin errores.
   - Archivos tocados:
     - src/App.tsx
+
+- [2026-04-13] Voz WebRTC, radar lluvia y dashboard vertical:
+  - Voz: cada conexion simple-peer usa un MediaStream local clonado para no
+    compartir el mismo stream entre peers; al cerrar un peer ya no se cortan
+    tracks compartidos (evita efectos secundarios en GPS/audio en otros).
+    Orden de limpieza: listeners socket antes de destruir peers.
+  - Lluvia: URL de teselas desde API oficial Rain Viewer (weather-maps.json);
+    teselas 512px, maxNativeZoom 7 (limite API), blend CSS suave en mapa oscuro.
+  - Dashboard: boton modo vertical (columna estrecha + preferencia en
+    localStorage); intento de screen.orientation.lock('portrait-primary') al
+    activar (puede fallar en iOS/Safari sin pantalla completa).
+  - Archivos: src/hooks/useVoiceChat.ts, src/lib/rainviewer.ts,
+    src/components/MapView.tsx, src/components/Dashboard.tsx, src/index.css
+
+- [2026-04-13] Radar lluvia fiable, avisos arriba, Wake Lock iOS:
+  - Lluvia (Rain Viewer): se elimina el fallback roto `/v2/radar/0` (la API
+    devuelve 400; los paths son hashes en weather-maps.json). Si falla la
+    capa, no se muestran teselas invalidas; reintento con fetch directo,
+    estado `weatherFetchFailed` y mensaje en ajustes. TileLayer con
+    `crossOrigin` para mezcla CSS en mapa oscuro.
+  - Avisos de otros usuarios: si no hay navegacion paso a paso (sin panel
+    azul OSRM), se suben a la parte superior (solo por debajo de bandas
+    offline/host); con ruta activa siguen bajo el panel de maniobras.
+    z-index 1100. GPS error respeta banda del aviso de host.
+  - Wake Lock: reintento tras toque (touch/pointer), pageshow (bfcache),
+    visibilidad; liberacion correcta al salir del efecto. Nota: en iPhone
+    el API existe desde Safari/iOS 16.4+ y suele ir mejor en PWA instalada;
+    orientacion fullscreen sigue limitada por el sistema sin fullscreen.
+  - Archivos: src/lib/rainviewer.ts, src/components/MapView.tsx
 
 Plantilla para futuras entradas
 - [AAAA-MM-DD]:

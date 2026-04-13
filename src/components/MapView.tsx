@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useMemo } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, GeoJSON, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { doc, onSnapshot, updateDoc, collection, query, where, addDoc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc, collection, query, where, addDoc, getDoc, setDoc, arrayRemove } from 'firebase/firestore';
 import { db, logOut, handleFirestoreError, OperationType } from '../firebase';
 import { calculateLevel } from '../lib/utils';
 import { useAuth } from '../contexts/AuthContext';
@@ -13,6 +13,7 @@ import { parseGPX, parseRouteData } from '../lib/gpx';
 import { getDistance } from '../lib/geoUtils';
 import { requestJson } from '../lib/network';
 import { getActivePointsConfig } from '../lib/pointsConfig';
+import { fetchRainViewerTileUrl } from '../lib/rainviewer';
 import socket from '../lib/socket';
 import { useVoiceChat } from '../hooks/useVoiceChat';
 import { Upload, ArrowLeft, Copy, Check, Navigation, AlertTriangle, Play, Square, ArrowUp, MapPin, Trophy, Bell, AlertCircle, Wrench, Fuel, X, Maximize, Minimize, Search, Share2, Menu, Moon, Sun, Target, LogOut, Users, Mic, MicOff, ShieldAlert, Activity, Layers, Lock, LockOpen } from 'lucide-react';
@@ -253,6 +254,8 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
   const lastHeadingTimeRef = useRef<number>(Date.now());
   const [showTraffic, setShowTraffic] = useState(false);
   const [showWeather, setShowWeather] = useState(false);
+  const [rainRadar, setRainRadar] = useState<{ url: string; maxNativeZoom: number } | null>(null);
+  const [weatherFetchFailed, setWeatherFetchFailed] = useState(false);
   const [useFirestoreFallback, setUseFirestoreFallback] = useState(true);
   const [distance, setDistance] = useState(0); // in km
   const [localDistance, setLocalDistance] = useState(0); // for auto-start and save check
@@ -264,6 +267,7 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
   const [inCurve, setInCurve] = useState(false);
   const [currentCurveMax, setCurrentCurveMax] = useState(0);
   const [alertType, setAlertType] = useState<string | null>(null);
+  const [hostLeftRoute, setHostLeftRoute] = useState(false);
   const [showRanking, setShowRanking] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showAlertMenu, setShowAlertMenu] = useState(false);
@@ -282,6 +286,9 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
   const longPressTimerRef = useRef<any>(null);
   const tapResetTimerRef = useRef<any>(null);
   const pocketTapsRef = useRef(0);
+  const hasExplicitlyLeftRef = useRef(false);
+  const leaveInProgressRef = useRef(false);
+  const wakeLockRef = useRef<any>(null);
 
   // Ensure score is always an integer, rounding up if necessary
   useEffect(() => {
@@ -289,6 +296,33 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
       setScore(Math.ceil(score));
     }
   }, [score]);
+
+  // Rain Viewer: load real tile path from API (paths are hashed; /v2/radar/0 is invalid). Refresh every 10 min.
+  useEffect(() => {
+    if (!showWeather) {
+      setRainRadar(null);
+      setWeatherFetchFailed(false);
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      const res = await fetchRainViewerTileUrl();
+      if (cancelled) return;
+      if (res) {
+        setRainRadar({ url: res.baseUrl, maxNativeZoom: res.maxNativeZoom });
+        setWeatherFetchFailed(false);
+      } else {
+        setRainRadar(null);
+        setWeatherFetchFailed(true);
+      }
+    };
+    load();
+    const id = window.setInterval(load, 10 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [showWeather]);
 
   // Pocket Mode Countdown
   useEffect(() => {
@@ -539,6 +573,8 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
   }, []);
 
   const { level: userLevel } = calculateLevel(score);
+  const isHost = group?.createdBy === user?.uid;
+  const isRecording = group?.isRecording || false;
   
   const headingHistoryRef = useRef<{heading: number, time: number}[]>([]);
   const angleHistoryRef = useRef<number[]>([]);
@@ -549,7 +585,8 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
     alert: alertType ? { type: alertType, timestamp: Date.now() } : null,
     displayName: displayNameToUse,
     photoURL: photoURLToUse,
-    level: userLevel
+    level: userLevel,
+    isHost
   });
   const { leanAngle: sensorLeanAngle, maxLeanLeft, maxLeanRight, requestPermission, resetMaxLean, calibrate, applyCalibrationStep } = useLeanAngle();
   const [estimatedLeanAngle, setEstimatedLeanAngle] = useState(0);
@@ -701,6 +738,10 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
     const handleUserLeft = (data: { uid: string }) => {
       setLocations(prev => prev.filter(l => l.uid !== data.uid));
     };
+    const handleHostLeftRoute = () => {
+      setHostLeftRoute(true);
+      setGroup((prev: any) => (prev ? { ...prev, isRecording: false, hostLeftAt: Date.now() } : prev));
+    };
     const handleAlertTriggered = (data: { uid: string, displayName: string, type: string }) => {
       setLocations(prev => prev.map(l => l.uid === data.uid ? { ...l, alert: { type: data.type, timestamp: Date.now() } } : l));
       setTimeout(() => {
@@ -710,6 +751,7 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
 
     socket.on('location-updated', handleLocationUpdate);
     socket.on('user-left', handleUserLeft);
+    socket.on('host-left-route', handleHostLeftRoute);
     socket.on('alert-triggered', handleAlertTriggered);
 
     const unsubs: Array<() => void> = [];
@@ -752,75 +794,119 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
     return () => {
       socket.off('location-updated', handleLocationUpdate);
       socket.off('user-left', handleUserLeft);
+      socket.off('host-left-route', handleHostLeftRoute);
       socket.off('alert-triggered', handleAlertTriggered);
       unsubs.forEach(u => u());
     };
   }, [group?.members, useFirestoreFallback]);
 
-  const isHost = group?.createdBy === user?.uid;
-  const isRecording = group?.isRecording || false;
+  useEffect(() => {
+    if (isHost) return;
+    if (group?.hostLeftAt) {
+      setHostLeftRoute(true);
+    }
+  }, [group?.hostLeftAt, isHost]);
 
   const deleteGroupIfHost = async (reason: string) => {
-    if (!isHost || !groupId || groupId === 'REPEATED' || groupDeletedRef.current) return;
-    groupDeletedRef.current = true;
+    if (!groupId || groupId === 'REPEATED' || !user || leaveInProgressRef.current) return;
+    leaveInProgressRef.current = true;
     try {
-      await deleteDoc(doc(db, 'groups', groupId));
+      if (isHost) {
+        const hostLeftAt = Date.now();
+        await updateDoc(doc(db, 'groups', groupId), {
+          isRecording: false,
+          hostLeftAt,
+          hostLeftUid: user.uid,
+          members: arrayRemove(user.uid)
+        });
+        socket.emit('leave-group', { groupId, uid: user.uid, isHost: true, timestamp: hostLeftAt });
+      } else {
+        await updateDoc(doc(db, 'groups', groupId), {
+          members: arrayRemove(user.uid)
+        });
+        socket.emit('leave-group', { groupId, uid: user.uid, isHost: false, timestamp: Date.now() });
+      }
     } catch (error) {
-      groupDeletedRef.current = false;
-      console.error(`Error deleting group (${reason}):`, error);
-      handleFirestoreError(error, OperationType.DELETE, `groups/${groupId}`);
+      console.error(`Error leaving group (${reason}):`, error);
+      handleFirestoreError(error, OperationType.UPDATE, `groups/${groupId}`);
+    } finally {
+      leaveInProgressRef.current = false;
     }
   };
 
-  // Keep screen awake while recording route or in pocket mode.
+  // Keep screen awake while recording route or in pocket mode (Wake Lock API: iOS 16.4+ Safari / PWA; requiere gesto en muchos dispositivos).
   useEffect(() => {
     let cancelled = false;
     const shouldKeepAwake = isRecording || isPocketMode;
+    const nav = navigator as Navigator & { wakeLock?: { request: (type: 'screen') => Promise<any> } };
 
     const requestWakeLock = async () => {
-      if (!shouldKeepAwake || !(navigator as any).wakeLock?.request) return;
+      if (!shouldKeepAwake || !nav.wakeLock?.request) return;
       try {
-        wakeLockRef.current = await (navigator as any).wakeLock.request('screen');
+        if (wakeLockRef.current) {
+          await wakeLockRef.current.release().catch(() => {});
+          wakeLockRef.current = null;
+        }
+        wakeLockRef.current = await nav.wakeLock.request('screen');
         wakeLockRef.current?.addEventListener?.('release', () => {
           wakeLockRef.current = null;
         });
       } catch {
-        // Best-effort only.
+        // iPhone: a menudo hace falta un gesto del usuario; se reintenta al tocar la pantalla.
+      }
+    };
+
+    const onInteract = () => {
+      if (!shouldKeepAwake || cancelled || wakeLockRef.current) return;
+      void requestWakeLock();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && shouldKeepAwake && !cancelled) {
+        void requestWakeLock();
+      }
+    };
+
+    const handlePageShow = (e: PageTransitionEvent) => {
+      if (e.persisted && shouldKeepAwake && !cancelled) {
+        void requestWakeLock();
       }
     };
 
     if (shouldKeepAwake) {
-      requestWakeLock();
+      void requestWakeLock();
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+      window.addEventListener('pageshow', handlePageShow);
+      document.addEventListener('touchstart', onInteract, { capture: true, passive: true });
+      document.addEventListener('pointerdown', onInteract, { capture: true });
     } else if (wakeLockRef.current) {
       wakeLockRef.current.release().catch(() => {});
       wakeLockRef.current = null;
     }
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && shouldKeepAwake && !wakeLockRef.current && !cancelled) {
-        requestWakeLock();
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
     return () => {
       cancelled = true;
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      if (wakeLockRef.current && !shouldKeepAwake) {
+      window.removeEventListener('pageshow', handlePageShow);
+      document.removeEventListener('touchstart', onInteract, true);
+      document.removeEventListener('pointerdown', onInteract, true);
+      if (wakeLockRef.current) {
         wakeLockRef.current.release().catch(() => {});
         wakeLockRef.current = null;
       }
     };
   }, [isRecording, isPocketMode]);
 
-  // Cleanup group when route view is closed/app is backgrounded or closed.
+  // Leave group when route view is closed/app is backgrounded or closed.
   useEffect(() => {
-    if (!isHost || !groupId || groupId === 'REPEATED') return;
+    if (!groupId || groupId === 'REPEATED') return;
 
     const handleBeforeUnload = () => {
+      hasExplicitlyLeftRef.current = true;
       deleteGroupIfHost('beforeunload');
     };
     const handlePageHide = () => {
+      hasExplicitlyLeftRef.current = true;
       deleteGroupIfHost('pagehide');
     };
 
@@ -829,9 +915,11 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       window.removeEventListener('pagehide', handlePageHide);
-      deleteGroupIfHost('unmount');
+      if (!hasExplicitlyLeftRef.current) {
+        deleteGroupIfHost('unmount');
+      }
     };
-  }, [isHost, groupId]);
+  }, [groupId, user?.uid, isHost]);
 
   // GPS-based lean angle estimation (fallback for when phone is in pocket/screen off)
   useEffect(() => {
@@ -970,8 +1058,6 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
   const [showSummary, setShowSummary] = useState(false);
   const [summaryData, setSummaryData] = useState<any>(null);
   const [isSharingSummary, setIsSharingSummary] = useState(false);
-  const groupDeletedRef = useRef(false);
-  const wakeLockRef = useRef<any>(null);
 
   useEffect(() => {
     if (isRecording || summaryData) return;
@@ -1396,7 +1482,6 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
     } else {
       try {
         await updateDoc(doc(db, 'groups', groupId), { isRecording: false });
-        await deleteGroupIfHost('stop-recording');
       } catch (error) {
         handleFirestoreError(error, OperationType.UPDATE, `groups/${groupId}`);
       }
@@ -1607,10 +1692,15 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
   const isiOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
   const topInset = (isiOS ? 28 : 16) + viewportTopInset;
   const connectionBannerHeight = !isOnline ? 58 : 0;
+  const hostBannerHeight = hostLeftRoute && !isHost ? 64 : 0;
   const headerOverlayHeight = parsedRoute ? 220 : (!isMoving ? 98 : 0);
   const headerTopOffset = !isOnline ? topInset + 56 : 0;
-  const gpsErrorTop = topInset + connectionBannerHeight + (!isMoving ? 86 : 8);
-  const activeAlertsTop = topInset + connectionBannerHeight + headerOverlayHeight + 20;
+  const gpsErrorTop = topInset + connectionBannerHeight + hostBannerHeight + (!isMoving ? 86 : 8);
+  const topStack = topInset + connectionBannerHeight + hostBannerHeight;
+  // Sin navegación paso a paso: avisos lo más arriba posible (solo bajo bandas/barras). Con ruta: bajo el panel azul.
+  const screenFreeForAlerts = !parsedRoute;
+  const headerBlockForAlerts = screenFreeForAlerts ? 56 : headerOverlayHeight;
+  const activeAlertsTop = topStack + headerBlockForAlerts + 10;
   const rankingTop = Math.max(activeAlertsTop + (activeAlerts.length > 0 ? 88 : 0), gpsErrorTop + (gpsError ? 72 : 0), topInset + 68);
 
   return (
@@ -1627,6 +1717,17 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
           >
             <ShieldAlert size={20} className="animate-pulse" />
             SIN CONEXIÓN - RECONECTANDO...
+          </motion.div>
+        )}
+        {hostLeftRoute && !isHost && (
+          <motion.div
+            initial={{ y: -100, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -100, opacity: 0 }}
+            className="absolute left-1/2 -translate-x-1/2 z-[3000] bg-amber-500 text-black px-4 py-3 rounded-2xl shadow-2xl font-black text-xs sm:text-sm border-2 border-white/30 backdrop-blur-md max-w-[92vw] text-center"
+            style={{ top: `${topInset + connectionBannerHeight + 8}px` }}
+          >
+            El host ha abandonado la ruta. No se guardará progreso nuevo; se sumarán solo los puntos logrados hasta ese momento.
           </motion.div>
         )}
         {(
@@ -1646,6 +1747,7 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
            >
             <button
               onClick={async () => {
+                hasExplicitlyLeftRef.current = true;
                 await deleteGroupIfHost('leave-route');
                 onLeave();
               }}
@@ -1806,6 +1908,11 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
                   </div>
                   Capa Lluvia {showWeather ? 'ON' : 'OFF'}
                 </button>
+                {showWeather && weatherFetchFailed && (
+                  <p className="text-[11px] text-amber-400/90 px-3 -mt-2 mb-1 leading-snug">
+                    No se pudo cargar el radar ahora. Revisa la conexión; se reintentará al abrir ajustes o cada 10 min.
+                  </p>
+                )}
 
                 <button 
                   onClick={() => {
@@ -1881,9 +1988,9 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
         </div>
       )}
 
-      {/* Active Alerts */}
+      {/* Active Alerts (z por encima del mapa; parte superior cuando no hay panel de navegación) */}
       {activeAlerts.length > 0 && (
-        <div className="absolute left-1/2 -translate-x-1/2 z-[1000] flex flex-col gap-2 w-full max-w-sm px-4 pointer-events-none" style={{ top: `${activeAlertsTop}px` }}>
+        <div className="absolute left-1/2 -translate-x-1/2 z-[1100] flex flex-col gap-2 w-full max-w-sm px-4 pointer-events-none" style={{ top: `${activeAlertsTop}px` }}>
           {activeAlerts.map(loc => {
             const dist = currentLocation ? getDistance(currentLocation.lat, currentLocation.lng, loc.lat, loc.lng) : null;
             const distStr = dist ? (dist > 1000 ? `${(dist/1000).toFixed(1)}km` : `${Math.round(dist)}m`) : '';
@@ -2217,11 +2324,19 @@ export default function MapView({ groupId, onLeave, preloadedRoute }: { groupId:
             zIndex={10}
           />
         )}
-        {showWeather && (
+        {showWeather && rainRadar && (
           <TileLayer
-            url="https://tilecache.rainviewer.com/v2/radar/nowcast_0/256/{z}/{x}/{y}/6/1_1.png"
-            opacity={0.5}
+            key={rainRadar.url}
+            url={rainRadar.url}
+            opacity={0.52}
             zIndex={20}
+            tileSize={512}
+            maxNativeZoom={rainRadar.maxNativeZoom}
+            maxZoom={20}
+            crossOrigin
+            className="leaflet-radar-overlay"
+            updateWhenIdle={false}
+            updateWhenZooming
           />
         )}
         

@@ -12,6 +12,8 @@ const __dirname = path.dirname(__filename);
 async function startServer() {
   const app = express();
   const httpServer = createServer(app);
+  const pendingDisconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const DISCONNECT_GRACE_MS = 20000;
   const allowedOrigins = (process.env.CORS_ORIGIN || "*").split(",").map((o) => o.trim());
   const io = new Server(httpServer, {
     cors: {
@@ -28,10 +30,35 @@ async function startServer() {
 
     socket.on("join-group", (data: { groupId: string, uid: string }) => {
       if (!data?.groupId || !data?.uid) return;
+      const disconnectKey = `${data.groupId}:${data.uid}`;
+      const pendingTimer = pendingDisconnectTimers.get(disconnectKey);
+      if (pendingTimer) {
+        clearTimeout(pendingTimer);
+        pendingDisconnectTimers.delete(disconnectKey);
+      }
       socket.join(data.groupId);
       (socket as any).groupId = data.groupId;
       (socket as any).uid = data.uid;
       console.log(`User ${socket.id} (uid: ${data.uid}) joined group: ${data.groupId}`);
+    });
+
+    socket.on("leave-group", (data: { groupId: string, uid: string, isHost?: boolean, timestamp?: number }) => {
+      if (!data?.groupId || !data?.uid) return;
+      const disconnectKey = `${data.groupId}:${data.uid}`;
+      const pendingTimer = pendingDisconnectTimers.get(disconnectKey);
+      if (pendingTimer) {
+        clearTimeout(pendingTimer);
+        pendingDisconnectTimers.delete(disconnectKey);
+      }
+      socket.leave(data.groupId);
+      socket.to(data.groupId).emit("user-left", { uid: data.uid, reason: "explicit-leave" });
+      if (data.isHost) {
+        socket.to(data.groupId).emit("host-left-route", {
+          uid: data.uid,
+          timestamp: data.timestamp || Date.now()
+        });
+      }
+      console.log(`User ${socket.id} (uid: ${data.uid}) explicitly left group: ${data.groupId}`);
     });
 
     socket.on("update-location", (data) => {
@@ -73,9 +100,18 @@ async function startServer() {
     socket.on("disconnect", () => {
       const groupId = (socket as any).groupId;
       const uid = (socket as any).uid; // Assuming I can store uid too
-      if (groupId) {
-        console.log(`User ${socket.id} (uid: ${uid}) left group: ${groupId}`);
-        socket.to(groupId).emit("user-left", { uid });
+      if (groupId && uid) {
+        const disconnectKey = `${groupId}:${uid}`;
+        const existingTimer = pendingDisconnectTimers.get(disconnectKey);
+        if (existingTimer) {
+          clearTimeout(existingTimer);
+        }
+        const timer = setTimeout(() => {
+          pendingDisconnectTimers.delete(disconnectKey);
+          console.log(`User ${uid} timed out after disconnect in group: ${groupId}`);
+          socket.to(groupId).emit("user-left", { uid, reason: "disconnect-timeout" });
+        }, DISCONNECT_GRACE_MS);
+        pendingDisconnectTimers.set(disconnectKey, timer);
       }
       console.log("User disconnected:", socket.id);
     });

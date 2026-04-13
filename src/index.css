@@ -38,6 +38,13 @@ html, body, #root {
   background: #09090b !important;
 }
 
+/* Rain Viewer radar: smooth blend (API max zoom is 7; tiles scale above that) */
+.leaflet-radar-overlay img.leaflet-tile {
+  image-rendering: auto;
+  filter: saturate(1.1) contrast(1.06);
+  mix-blend-mode: screen;
+}
+
 .custom-popup .leaflet-popup-content-wrapper {
   background: #18181b !important;
   color: white !important;
