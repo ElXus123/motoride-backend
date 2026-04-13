@@ -135,7 +135,7 @@ const AppContent = () => {
                 <>
                   <p className="text-zinc-300">1) Abrela en Chrome.</p>
                   <p className="text-zinc-300">2) Pulsa Instalar app (si aparece abajo).</p>
-                  <p className="text-zinc-300">3) Si no aparece, usa el menu (tres puntos) -> Instalar aplicacion.</p>
+                  <p className="text-zinc-300">3) Si no aparece, usa el menu (tres puntos) → Instalar aplicacion.</p>
                 </>
               )}
             </div>
