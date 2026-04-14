@@ -366,7 +366,7 @@ export default function MapView({
     return () => window.removeEventListener('motoride:route-back', onRouteBack);
   }, []);
 
-  // Rain Viewer: load real tile path from API (paths are hashed; /v2/radar/0 is invalid). Refresh every 10 min.
+  // Rain Viewer: load real tile path from API (paths are hashed; /v2/radar/0 is invalid). Refresh cada 5 min.
   useEffect(() => {
     if (!showWeather) {
       setRainRadar(null);
@@ -388,7 +388,7 @@ export default function MapView({
       }
     };
     load();
-    const id = window.setInterval(load, 10 * 60 * 1000);
+    const id = window.setInterval(load, 5 * 60 * 1000);
     return () => {
       cancelled = true;
       window.clearInterval(id);
@@ -866,10 +866,44 @@ export default function MapView({
       setHostLeftRoute(true);
       setGroup((prev: any) => (prev ? { ...prev, isRecording: false, hostLeftAt: Date.now() } : prev));
     };
-    const handleAlertTriggered = (data: { uid: string, displayName: string, type: string }) => {
-      setLocations(prev => prev.map(l => l.uid === data.uid ? { ...l, alert: { type: data.type, timestamp: Date.now() } } : l));
+    const handleAlertTriggered = (data: {
+      uid: string;
+      displayName: string;
+      type: string;
+      lat?: number;
+      lng?: number;
+    }) => {
+      const ts = Date.now();
+      const alertPayload = { type: data.type, timestamp: ts };
+      const latOk = typeof data.lat === 'number' && Number.isFinite(data.lat);
+      const lngOk = typeof data.lng === 'number' && Number.isFinite(data.lng);
+      setLocations((prev) => {
+        const idx = prev.findIndex((l) => l.uid === data.uid);
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = { ...next[idx], alert: alertPayload };
+          return next;
+        }
+        // Sin entrada previa (p. ej. aún no llegó update-location / Firestore): igual mostrar el aviso.
+        const base: Record<string, unknown> = {
+          uid: data.uid,
+          displayName: data.displayName || 'Motero',
+          timestamp: ts,
+          alert: alertPayload,
+          score: 0,
+          speed: 0,
+          heading: 0,
+          photoURL: '',
+          level: 1,
+        };
+        if (latOk && lngOk) {
+          base.lat = data.lat;
+          base.lng = data.lng;
+        }
+        return [...prev, base as any];
+      });
       setTimeout(() => {
-        setLocations(prev => prev.map(l => l.uid === data.uid ? { ...l, alert: null } : l));
+        setLocations((prev) => prev.map((l) => (l.uid === data.uid ? { ...l, alert: null } : l)));
       }, 60000);
     };
 
@@ -968,10 +1002,10 @@ export default function MapView({
     }
   };
 
-  // Keep screen awake while recording route or in pocket mode (Wake Lock API: iOS 16.4+ Safari / PWA; requiere gesto en muchos dispositivos).
+  // Wake Lock siempre en vista de mapa (GPS/ruta visible); iOS 16.4+ Safari / PWA; a menudo hace falta un gesto.
   useEffect(() => {
     let cancelled = false;
-    const shouldKeepAwake = isRecording || isPocketMode;
+    const shouldKeepAwake = true;
     const nav = navigator as Navigator & { wakeLock?: { request: (type: 'screen') => Promise<any> } };
 
     const requestWakeLock = async () => {
@@ -1029,7 +1063,7 @@ export default function MapView({
         wakeLockRef.current = null;
       }
     };
-  }, [isRecording, isPocketMode]);
+  }, []);
 
   // Leave group when route view is closed/app is backgrounded or closed.
   useEffect(() => {
@@ -1628,12 +1662,15 @@ export default function MapView({
     setShowSettings(false);
     if (navigator.vibrate) navigator.vibrate(120);
     
-    // Broadcast alert via socket
+    // Broadcast alert via socket (lat/lng para que otros te tengan en `locations` aunque aún no hubiera paquete previo)
     socket.emit('trigger-alert', {
       groupId,
       uid: user?.uid,
       displayName: displayNameToUse,
-      type
+      type,
+      ...(currentLocation
+        ? { lat: currentLocation.lat, lng: currentLocation.lng }
+        : {}),
     });
 
     setTimeout(() => setAlertType(null), 60000); // Clear after 1 min
@@ -2242,7 +2279,14 @@ export default function MapView({
           }}
         >
           {activeAlerts.map((loc) => {
-            const dist = currentLocation ? getDistance(currentLocation.lat, currentLocation.lng, loc.lat, loc.lng) : null;
+            const dist =
+              currentLocation &&
+              typeof loc.lat === 'number' &&
+              typeof loc.lng === 'number' &&
+              Number.isFinite(loc.lat) &&
+              Number.isFinite(loc.lng)
+                ? getDistance(currentLocation.lat, currentLocation.lng, loc.lat, loc.lng)
+                : null;
             const distStr = dist ? (dist > 1000 ? `${(dist / 1000).toFixed(1)}km` : `${Math.round(dist)}m`) : '';
             const alertUi = getAlertUi(loc.alert?.type);
             return (

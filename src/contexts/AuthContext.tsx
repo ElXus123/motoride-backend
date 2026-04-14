@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { User, onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '../firebase';
@@ -17,13 +17,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const loadingRef = useRef(true);
+  loadingRef.current = loading;
 
   useEffect(() => {
     let unsubDoc: () => void;
 
     // Safety timeout: if auth doesn't respond in 10s, it's likely a quota/connection issue
     const timeout = setTimeout(() => {
-      if (loading) {
+      if (loadingRef.current) {
         setError('timeout');
         setLoading(false);
       }
