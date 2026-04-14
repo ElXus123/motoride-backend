@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo, useCallback, type MutableRefObject } from 'react';
+import { useEffect, useState, useRef, useMemo, useCallback, type CSSProperties, type MutableRefObject } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, GeoJSON, useMap, useMapEvents, Pane } from 'react-leaflet';
 import L from 'leaflet';
 import { doc, onSnapshot, updateDoc, collection, query, where, addDoc, getDoc, setDoc, arrayRemove } from 'firebase/firestore';
@@ -477,6 +477,7 @@ export default function MapView({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const rotationLockAppliedRef = useRef(false);
   const [rotationLocked, setRotationLocked] = useState(false);
+  const [forceLandscapeUi, setForceLandscapeUi] = useState(false);
   const [pocketRingSession, setPocketRingSession] = useState(0);
   const [showAlertMenu, setShowAlertMenu] = useState(false);
   const [recordedPath, setRecordedPath] = useState<{lat: number, lng: number}[]>([]);
@@ -767,7 +768,16 @@ export default function MapView({
 
   const [isLandscape, setIsLandscape] = useState(window.innerWidth > window.innerHeight);
   const [isCompactUI, setIsCompactUI] = useState(window.innerWidth < 420 || window.innerHeight < 760);
+  const [viewportSize, setViewportSize] = useState({ width: window.innerWidth, height: window.innerHeight });
   const [viewportTopInset, setViewportTopInset] = useState(0);
+  const [forcedLandscapeUiDeg, setForcedLandscapeUiDeg] = useState<90 | -90>(90);
+  const isIphoneDevice = useMemo(
+    () => typeof navigator !== 'undefined' && /iPhone|iPod/i.test(navigator.userAgent),
+    []
+  );
+  const forceLandscapeOnIphone = isIphoneDevice && forceLandscapeUi;
+  const isLandscapeUi = isLandscape || forceLandscapeOnIphone;
+  const shouldRotateUi = forceLandscapeOnIphone && !isLandscape;
 
   const containerRef = useRef<HTMLDivElement>(null);
   const alertsMenuContainerRef = useRef<HTMLDivElement>(null);
@@ -776,12 +786,35 @@ export default function MapView({
 
   useEffect(() => {
     const handleResize = () => {
-      setIsLandscape(window.innerWidth > window.innerHeight);
-      setIsCompactUI(window.innerWidth < 420 || window.innerHeight < 760);
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      setIsLandscape(w > h);
+      setIsCompactUI(w < 420 || h < 760);
+      setViewportSize({ width: w, height: h });
     };
+    handleResize();
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  useEffect(() => {
+    if (!isIphoneDevice || !forceLandscapeUi) return;
+    const updateForcedDeg = () => {
+      const angleRaw =
+        typeof screen !== 'undefined' &&
+        screen.orientation &&
+        typeof screen.orientation.angle === 'number'
+          ? screen.orientation.angle
+          : typeof window !== 'undefined' && typeof (window as any).orientation === 'number'
+            ? Number((window as any).orientation)
+            : 0;
+      const normalized = ((angleRaw % 360) + 360) % 360;
+      setForcedLandscapeUiDeg(normalized === 270 ? -90 : 90);
+    };
+    updateForcedDeg();
+    window.addEventListener('orientationchange', updateForcedDeg);
+    return () => window.removeEventListener('orientationchange', updateForcedDeg);
+  }, [isIphoneDevice, forceLandscapeUi]);
 
   useEffect(() => {
     const updateViewportInset = () => {
@@ -2043,6 +2076,23 @@ export default function MapView({
     }
   }, [gpsError, isHost]);
 
+  const toggleForcedLandscapeUi = useCallback(() => {
+    if (!isIphoneDevice) return;
+    setForceLandscapeUi((prev) => {
+      const next = !prev;
+      if (!next) {
+        setForcedLandscapeUiDeg(90);
+      } else if (!isLandscape) {
+        const vv = window.visualViewport;
+        const w = vv?.width ?? window.innerWidth;
+        const h = vv?.height ?? window.innerHeight;
+        // Elegimos el signo según la geometría para minimizar recortes en el giro visual.
+        setForcedLandscapeUiDeg(w >= h ? 90 : -90);
+      }
+      return next;
+    });
+  }, [isIphoneDevice, isLandscape]);
+
   const toggleRotationLock = async () => {
     const so = screen.orientation as ScreenOrientation & {
       lock?: (orientation: ScreenOrientationLockArg) => Promise<void>;
@@ -2055,8 +2105,7 @@ export default function MapView({
       return;
     }
 
-    const isiPhone =
-      typeof navigator !== 'undefined' && /iPhone|iPod/i.test(navigator.userAgent);
+    const isiPhone = isIphoneDevice;
 
     if (!so?.lock) {
       if (isiPhone) {
@@ -2099,8 +2148,10 @@ export default function MapView({
       if (msg.includes('sandboxed')) {
         alert("⚠️ El bloqueo de orientación no está disponible en esta vista previa. Abre la app en una pestaña normal del navegador.");
       } else if (isiPhone) {
+        // Fallback iPhone: bloqueamos la UI en modo paisaje aunque el lock nativo falle.
+        setForceLandscapeUi(true);
         alert(
-          'iPhone: para bloquear giro, abre MotoRide desde el icono (Añadir a pantalla de inicio), entra en pantalla completa y pon el móvil en horizontal antes de pulsar "Bloquear giro".'
+          'iPhone: el bloqueo nativo ha fallado. Activamos el modo "paisaje forzado" solo para iPhone para mantener la interfaz en horizontal.'
         );
       } else {
         alert('No se pudo bloquear el giro. Prueba en pantalla completa o comprueba que la rotación no esté bloqueada a nivel del sistema.');
@@ -2352,12 +2403,24 @@ export default function MapView({
     edgeGap + 68
   );
   const rankingTop = topBelowSafe(rankingExtra);
+  const rootContainerStyle: CSSProperties = shouldRotateUi
+    ? {
+        paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+        width: `${viewportSize.height}px`,
+        height: `${viewportSize.width}px`,
+        transform: `rotate(${forcedLandscapeUiDeg}deg)`,
+        transformOrigin: 'center center',
+        position: 'absolute',
+        top: `calc(50% - ${viewportSize.width / 2}px)`,
+        left: `calc(50% - ${viewportSize.height / 2}px)`,
+      }
+    : { paddingBottom: 'env(safe-area-inset-bottom, 0px)' };
 
   return (
     <div
       ref={containerRef}
       className="relative w-full min-h-dvh h-dvh flex flex-col bg-zinc-900 overflow-hidden"
-      style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+      style={rootContainerStyle}
     >
       {/* Header overlay */}
       <AnimatePresence>
@@ -2699,6 +2762,24 @@ export default function MapView({
                    </div>
                    {rotationLocked ? 'Desbloquear giro' : 'Bloquear giro'}
                  </button>
+                {isIphoneDevice && (
+                  <button
+                    onClick={() => {
+                      setShowSettings(false);
+                      toggleForcedLandscapeUi();
+                    }}
+                    className="flex items-center gap-3 text-white hover:bg-zinc-800 p-3 rounded-2xl text-sm font-bold transition-colors"
+                  >
+                    <div
+                      className={`w-8 h-8 rounded-xl flex items-center justify-center ${
+                        forceLandscapeUi ? 'bg-emerald-500/20 text-emerald-300' : 'bg-zinc-800 text-zinc-400'
+                      }`}
+                    >
+                      <RotateCw size={18} />
+                    </div>
+                    {forceLandscapeUi ? 'Desactivar paisaje forzado' : 'Bloquear giro (forzado iPhone)'}
+                  </button>
+                )}
 
                 <button 
                   onClick={() => {
@@ -3061,12 +3142,12 @@ export default function MapView({
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -20 }}
             className={`absolute z-[1001] bg-zinc-950/95 backdrop-blur-md border border-zinc-800 rounded-2xl p-4 shadow-2xl w-64 pointer-events-auto transition-all duration-500 ${
-              isLandscape 
+              isLandscapeUi
                 ? 'bottom-40 flex flex-col max-h-[46vh]' 
                 : ''
             }`}
             style={{
-              top: isLandscape ? undefined : rankingTop,
+              top: isLandscapeUi ? undefined : rankingTop,
               left: 'max(1rem, env(safe-area-inset-left, 0px))',
             }}
           >
@@ -3110,7 +3191,7 @@ export default function MapView({
       </AnimatePresence>
 
       {/* HUD Overlay */}
-      <div className={`absolute left-0 right-0 z-[1000] pointer-events-none flex justify-center px-2 sm:px-4 landscape:justify-start landscape:left-4 landscape:right-auto ${isLandscape ? 'landscape:bottom-3' : 'bottom-5'}`}>
+      <div className={`absolute left-0 right-0 z-[1000] pointer-events-none flex justify-center px-2 sm:px-4 landscape:justify-start landscape:left-4 landscape:right-auto ${isLandscapeUi ? 'landscape:bottom-3' : 'bottom-5'}`}>
         <div className="bg-zinc-950/90 backdrop-blur-3xl rounded-[2rem] sm:rounded-[2.5rem] p-1.5 border border-white/10 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.8)] flex items-center gap-0.5 sm:gap-1 pointer-events-auto max-w-full overflow-hidden landscape:scale-90 landscape:origin-bottom-left">
           
           {/* Speed + tiempo en ubicación */}
@@ -3125,7 +3206,7 @@ export default function MapView({
                 <>
                   <DayWeatherIcon
                     className="shrink-0 text-sky-200"
-                    size={isLandscape ? 15 : 19}
+                    size={isLandscapeUi ? 15 : 19}
                     strokeWidth={2.25}
                     aria-hidden
                   />
@@ -3432,7 +3513,7 @@ export default function MapView({
           isRecording={isRecording}
           speedKmh={currentSpeedKmh}
           hasActiveRoute={!!parsedRoute}
-          isLandscapeUi={isLandscape}
+          isLandscapeUi={isLandscapeUi}
         />
           </MapContainer>
         </div>
