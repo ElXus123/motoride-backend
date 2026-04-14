@@ -11,3 +11,8 @@ coverage/
 android-twa/
 *.jks
 *.keystore
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
