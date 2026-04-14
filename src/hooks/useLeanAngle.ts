@@ -177,7 +177,16 @@ export const useLeanAngle = (speedMps?: number | null) => {
       const physicallyStill =
         gpsSaysStopped || imuSaysStill || (!gpsLikelyMoving && jitteryOrientation);
 
-      const alpha = physicallyStill ? 0.02 : speedUnknown ? 0.075 : 0.12;
+      const speedNow = typeof v === 'number' && Number.isFinite(v) ? Math.abs(v) : 0;
+      const alpha = physicallyStill
+        ? 0.02
+        : speedUnknown
+          ? 0.09
+          : speedNow >= 11.2
+            ? 0.22
+            : speedNow >= 7
+              ? 0.17
+              : 0.13;
       smoothedAngleRef.current =
         smoothedAngleRef.current + alpha * (rollStable - smoothedAngleRef.current);
 
@@ -205,11 +214,18 @@ export const useLeanAngle = (speedMps?: number | null) => {
       }
 
       let finalAngle = smoothedAngleRef.current - calibrationOffset - dynamicBiasRef.current;
+      if (!physicallyStill && !speedUnknown && speedNow >= 11.2) {
+        // A >40 km/h hacemos la lectura un poco más sensible.
+        finalAngle *= 1.1;
+      }
+      if (finalAngle > 60) finalAngle = 60;
+      if (finalAngle < -60) finalAngle = -60;
       const deadDeg = physicallyStill ? 4.8 : speedUnknown ? 2.2 : 1.0;
       if (Math.abs(finalAngle) < deadDeg) finalAngle = 0;
 
+      const displayAngle = Number(finalAngle.toFixed(1));
       const roundedAngle = Math.round(finalAngle);
-      setLeanAngle(roundedAngle);
+      setLeanAngle(displayAngle);
 
       const minMaxThreshold = physicallyStill ? 10 : 0;
       if (roundedAngle < 0 && Math.abs(roundedAngle) >= minMaxThreshold) {

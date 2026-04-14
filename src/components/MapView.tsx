@@ -949,6 +949,7 @@ export default function MapView({
     typeof (DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<'granted' | 'denied'> })
       .requestPermission === 'function';
   const [estimatedLeanAngle, setEstimatedLeanAngle] = useState(0);
+  const lastLeanGpsAutoCalibMsRef = useRef(0);
 
   // Auto-calibración en recta: antes era casi imposible (>40 km/h y rumbo ±1,5°). Afinado para uso real.
   useEffect(() => {
@@ -991,6 +992,46 @@ export default function MapView({
     const strength = currentSpeedKmh > 45 ? 0.022 : currentSpeedKmh > 30 ? 0.016 : 0.012;
     applyCalibrationStep(avgAngle, strength);
   }, [currentLocation, headingOrCourseForTelemetry, speed, sensorLeanAngle, applyCalibrationStep]);
+
+  // Auto-calibración también en modo GPS normal (sin bolsillo/mirrorlink): ayuda a centrar en uso real continuado.
+  useEffect(() => {
+    if (!isRecording || isPocketLocked || touchLockKind) return;
+    if (!currentLocation || headingOrCourseForTelemetry === null) return;
+
+    const speedKmh = (speed || 0) * 3.6;
+    if (speedKmh < 18 || headingHistoryRef.current.length < 18) return;
+
+    const headings = headingHistoryRef.current.map((h) => h.heading);
+    const minH = Math.min(...headings);
+    const maxH = Math.max(...headings);
+    let hDiff = maxH - minH;
+    if (hDiff > 180) {
+      const adjusted = headings.map((h) => (h < 180 ? h + 360 : h));
+      hDiff = Math.max(...adjusted) - Math.min(...adjusted);
+    }
+    if (hDiff > 8) return;
+
+    const n = angleHistoryRef.current.length;
+    if (n < 12) return;
+    const avgAngle = angleHistoryRef.current.reduce((a, b) => a + b, 0) / n;
+    const variance = angleHistoryRef.current.reduce((a, b) => a + (b - avgAngle) ** 2, 0) / n;
+    if (variance > 22) return;
+
+    const nowMs = Date.now();
+    if (nowMs - lastLeanGpsAutoCalibMsRef.current < 900) return;
+    lastLeanGpsAutoCalibMsRef.current = nowMs;
+
+    const strength = speedKmh > 40 ? 0.014 : speedKmh > 28 ? 0.01 : 0.008;
+    applyCalibrationStep(avgAngle, strength);
+  }, [
+    isRecording,
+    isPocketLocked,
+    touchLockKind,
+    currentLocation,
+    headingOrCourseForTelemetry,
+    speed,
+    applyCalibrationStep,
+  ]);
 
   const leftTurnsRef = useRef(0);
   const rightTurnsRef = useRef(0);
@@ -1443,7 +1484,7 @@ export default function MapView({
     const CURVE_START_DEG = 15;
     const CURVE_END_DEG = 5;
     const absAngle = Math.abs(leanAngle);
-    if (currentSpeed >= MIN_CURVE_SPEED_KMH && absAngle >= CURVE_START_DEG) {
+    if (currentSpeed >= MIN_CURVE_SPEED_KMH && absAngle > CURVE_START_DEG) {
       if (!inCurve) {
         setInCurve(true);
         if (leanAngle > 0) {
