@@ -1,0 +1,102 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Información del perfil del usuario, incluyendo puntos y nivel.",
+      "type": "object",
+      "properties": {
+        "displayName": { "type": "string", "description": "Nombre visible del usuario" },
+        "photoURL": { "type": "string", "description": "URL de la foto de perfil (Base64 o CDN)" },
+        "points": { "type": "number", "description": "Puntos acumulados" },
+        "level": { "type": "number", "description": "Nivel actual" },
+        "totalDistance": { "type": "number", "description": "Distancia total recorrida en km" },
+        "totalLeftTurns": { "type": "number", "description": "Total de curvas a la izquierda" },
+        "totalRightTurns": { "type": "number", "description": "Total de curvas a la derecha" }
+      },
+      "required": ["displayName"]
+    },
+    "Group": {
+      "title": "Group",
+      "description": "Un grupo de ruta, ya sea instantáneo o programado.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Nombre de la ruta" },
+        "code": { "type": "string", "description": "Código de unión de 6 caracteres" },
+        "createdBy": { "type": "string", "description": "UID del creador" },
+        "members": { "type": "array", "items": { "type": "string" }, "description": "Lista de UIDs de miembros" },
+        "routeGeoJSON": { "type": "string", "description": "Datos de la ruta en formato GeoJSON (stringificado)" },
+        "isScheduled": { "type": "boolean", "description": "Si la ruta es programada" },
+        "scheduledTimestamp": { "type": "number", "description": "Timestamp de la salida programada" },
+        "province": { "type": "string", "description": "Provincia de la ruta" },
+        "municipality": { "type": "string", "description": "Municipio de la ruta" },
+        "description": { "type": "string", "description": "Descripción de la ruta" },
+        "isEsporadica": { "type": "boolean", "description": "Si es una ruta sin trazado fijo" },
+        "isRecording": { "type": "boolean", "description": "Si la ruta está siendo grabada actualmente" },
+        "startTime": { "type": "number", "description": "Timestamp de inicio de grabación" },
+        "createdAt": { "type": "number", "description": "Timestamp de creación" }
+      },
+      "required": ["name", "code", "createdBy", "members"]
+    },
+    "Location": {
+      "title": "Location",
+      "description": "Ubicación en tiempo real de un usuario (usado principalmente para alertas persistentes).",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "speed": { "type": "number" },
+        "heading": { "type": "number" },
+        "score": { "type": "number" },
+        "timestamp": { "type": "number" },
+        "photoURL": { "type": "string" },
+        "displayName": { "type": "string" },
+        "alert": {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string" },
+            "timestamp": { "type": "number" }
+          }
+        }
+      }
+    },
+    "RideHistory": {
+      "title": "RideHistory",
+      "description": "Historial de una ruta completada.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "UID del usuario" },
+        "groupId": { "type": "string", "description": "ID del grupo (código)" },
+        "groupName": { "type": "string", "description": "Nombre del grupo" },
+        "startTime": { "type": "number", "description": "Timestamp de inicio" },
+        "endTime": { "type": "number", "description": "Timestamp de fin" },
+        "distance": { "type": "number", "description": "Distancia recorrida en km" },
+        "maxLeanLeft": { "type": "number", "description": "Máxima inclinación a la izquierda" },
+        "maxLeanRight": { "type": "number", "description": "Máxima inclinación a la derecha" },
+        "leftTurns": { "type": "number", "description": "Curvas a la izquierda en esta ruta" },
+        "rightTurns": { "type": "number", "description": "Curvas a la derecha en esta ruta" },
+        "score": { "type": "number", "description": "Puntos obtenidos" },
+        "path": { "type": "array", "items": { "type": "object" }, "description": "Camino recorrido (lat/lng)" }
+      },
+      "required": ["uid", "startTime", "endTime", "distance"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Perfiles de usuario"
+    },
+    "/groups/{groupId}": {
+      "schema": "Group",
+      "description": "Grupos de rutas"
+    },
+    "/locations/{userId}": {
+      "schema": "Location",
+      "description": "Ubicaciones en tiempo real y alertas"
+    },
+    "/rideHistory/{rideId}": {
+      "schema": "RideHistory",
+      "description": "Historial de rutas"
+    }
+  }
+}
