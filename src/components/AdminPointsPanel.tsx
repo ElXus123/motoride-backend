@@ -29,6 +29,7 @@ import {
   Layers,
   CloudRain,
   Thermometer,
+  Mic,
   Coins,
   CalendarRange,
   Skull,
@@ -273,7 +274,11 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
       },
       { merge: true }
     );
-    showMessage({ variant: 'success', title: 'GPS Premium', message: 'Política guardada. Los cambios se aplican al instante en el mapa.' });
+    showMessage({
+      variant: 'success',
+      title: 'Política Premium',
+      message: 'Guardado. GPS, tiempo y voz se aplican al instante en el mapa.',
+    });
   };
 
   const createEvent = async () => {
@@ -402,7 +407,7 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
             {section === 'gps' && (
               <div className="space-y-4 max-w-xl">
                 <div>
-                  <h3 className="text-white font-bold text-base">GPS y mapa — ventajas Premium</h3>
+                  <h3 className="text-white font-bold text-base">Mapa y Premium</h3>
                   <p className="text-xs text-zinc-500 mt-1 leading-relaxed">
                     Con todo desactivado, el comportamiento es el de siempre (mismas funciones para todos). Si activas una opción,
                     solo los usuarios con <span className="text-amber-400/95">Premium</span> reciben esa ventaja; el resto usa la
@@ -410,6 +415,13 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
                   </p>
                 </div>
                 <div className="space-y-2">
+                  <ToggleRow
+                    checked={premiumGpsDraft.voiceChatRequiresPremium}
+                    onChange={(v) => patchPremiumGps('voiceChatRequiresPremium', v)}
+                    title="Chat de voz solo con Premium (o anfitrión Premium)"
+                    description="Si está activo: solo pueden hablar por el micrófono quienes tengan Premium o se unan a una ruta cuyo anfitrión sea Premium. Si está desactivado, todos pueden usar el chat de voz en el mapa."
+                    icon={<Mic size={16} />}
+                  />
                   <ToggleRow
                     checked={premiumGpsDraft.highAccuracyPremiumOnly}
                     onChange={(v) => patchPremiumGps('highAccuracyPremiumOnly', v)}
@@ -444,7 +456,7 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
                   onClick={() => void savePremiumGps()}
                   className="w-full sm:w-auto bg-orange-500 hover:bg-orange-600 text-white font-bold px-5 py-2.5 rounded-xl inline-flex items-center justify-center gap-2"
                 >
-                  <Save size={16} /> Guardar política GPS
+                  <Save size={16} /> Guardar política
                 </button>
               </div>
             )}

@@ -940,18 +940,18 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     <button
       type="button"
       onClick={onOpenProfile}
-      className="flex w-full min-w-0 flex-col gap-0 py-0 text-center rounded-[1.1rem] focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/70 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 sm:max-w-[min(100%,20rem)] sm:mx-auto"
+      className="flex w-full min-w-0 flex-col gap-0 py-0 text-center rounded-[1rem] sm:rounded-[1.15rem] focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/70 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
       aria-label={`Abrir perfil: nivel ${level} y experiencia hacia el nivel ${level + 1}`}
     >
-      <div className="relative flex flex-col gap-1 rounded-[1.05rem] sm:rounded-[1.25rem] border border-zinc-800 bg-zinc-900/80 px-2.5 py-1.5 sm:px-3 sm:py-2 transition-colors hover:border-zinc-700 hover:bg-zinc-900">
+      <div className="relative flex flex-col gap-1 rounded-[1rem] sm:rounded-[1.15rem] border border-zinc-800 bg-zinc-900/90 px-2 py-1.5 sm:px-2.5 sm:py-1.5 transition-colors hover:border-zinc-700 hover:bg-zinc-900">
         {isOffline && (
           <span
             className="absolute right-1.5 top-1.5 h-1.5 w-1.5 animate-pulse rounded-full bg-red-500 ring-1 ring-red-900/40"
             title="Modo sin conexión"
           />
         )}
-        <div className="flex min-h-0 w-full min-w-0 flex-nowrap items-center justify-center gap-1.5 text-center leading-none">
-          <span className="shrink-0 whitespace-nowrap rounded-full bg-orange-500/15 px-2 py-0.5 text-[11px] font-black text-orange-400">
+        <div className="flex min-h-0 w-full min-w-0 flex-nowrap items-center justify-start gap-1.5 text-left leading-none pl-0.5">
+          <span className="shrink-0 whitespace-nowrap rounded-md bg-orange-500/15 px-1.5 py-0.5 text-[10px] sm:text-[11px] font-black text-orange-400">
             Lv. {level}
           </span>
           {isPremiumUser && (
@@ -959,12 +959,12 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
               <PremiumBadge compact />
             </span>
           )}
-          <p className="min-w-0 flex-1 truncate text-center text-sm font-bold text-white leading-tight sm:max-w-[18rem]">
+          <p className="min-w-0 flex-1 truncate text-left text-xs sm:text-sm font-bold text-white leading-tight">
             {displayName}
           </p>
         </div>
         <div
-          className="h-1 w-full shrink-0 overflow-hidden rounded-full bg-zinc-800/95 ring-1 ring-zinc-700/60 pointer-events-none sm:h-1.5"
+          className="h-1 w-full shrink-0 overflow-hidden rounded-full bg-zinc-800/95 ring-1 ring-zinc-700/50 pointer-events-none sm:h-1.5"
           aria-hidden
         >
           <div
@@ -981,19 +981,19 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       <button
         type="button"
         onClick={() => setShowSupportModal(true)}
-        className="flex items-center justify-center gap-1.5 min-h-[40px] min-w-[40px] sm:min-h-0 sm:min-w-0 px-2 sm:px-3 py-1.5 rounded-full bg-orange-500/15 border border-orange-500/30 text-orange-400 hover:bg-orange-500/25 transition-colors shrink-0"
+        className="flex h-9 w-9 sm:h-10 sm:w-auto sm:min-w-0 items-center justify-center gap-1.5 sm:px-2.5 rounded-full bg-orange-500/15 border border-orange-500/30 text-orange-400 hover:bg-orange-500/25 transition-colors shrink-0"
         title="Apoyar MotoRide (Ko-fi)"
       >
-        <HeartHandshake size={16} className="shrink-0" />
+        <HeartHandshake size={15} className="shrink-0 sm:w-4 sm:h-4" />
         <span className="text-[11px] sm:text-xs font-black uppercase tracking-wide hidden sm:inline">Apoyar</span>
       </button>
       <button
         type="button"
         onClick={() => setShowInvitesMailbox(true)}
-        className="relative flex min-h-[40px] min-w-[40px] items-center justify-center p-0 sm:p-2 bg-zinc-900 border border-zinc-800 rounded-full hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-orange-400 shrink-0"
+        className="relative flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center p-0 bg-zinc-900 border border-zinc-800 rounded-full hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-orange-400 shrink-0"
         title="Invitaciones a rutas"
       >
-        <Inbox size={20} />
+        <Inbox size={18} className="sm:w-5 sm:h-5" />
         {(inviteInboxCount > 0 || user?.rideInvitePending?.groupId) && (
           <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-orange-500 text-[10px] font-black text-white flex items-center justify-center border-2 border-zinc-950">
             {inviteInboxCount > 0 ? (inviteInboxCount > 9 ? '9+' : inviteInboxCount) : '1'}
@@ -1003,7 +1003,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       <button
         type="button"
         onClick={() => setShowFriendsModal(true)}
-        className="relative flex min-h-[40px] min-w-[40px] items-center justify-center p-0 sm:p-2 bg-zinc-900 border border-zinc-800 rounded-full hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-white shrink-0"
+        className="relative flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center p-0 bg-zinc-900 border border-zinc-800 rounded-full hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-white shrink-0"
         aria-label={
           pendingFriendRequestCount > 0
             ? `Amigos, ${pendingFriendRequestCount} solicitud${pendingFriendRequestCount === 1 ? '' : 'es'} pendiente${pendingFriendRequestCount === 1 ? '' : 's'}`
@@ -1015,7 +1015,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
             : 'Amigos y Comunidad'
         }
       >
-        <Users size={20} />
+        <Users size={18} className="sm:w-5 sm:h-5" />
         {pendingFriendRequestCount > 0 && (
           <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-zinc-950" aria-hidden />
         )}
@@ -1025,22 +1025,12 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
 
   return (
     <div className="min-h-dvh bg-zinc-950 text-white overflow-x-hidden pb-[env(safe-area-inset-bottom,0px)]">
-      {/* Header — móvil: fila avatar+acciones y tarjeta a ancho completo; sm+: tres columnas */}
-      <header className="sticky top-0 z-30 bg-zinc-950/80 backdrop-blur-md border-b border-zinc-900 pl-[max(1rem,env(safe-area-inset-left,0px))] pr-[max(1rem,env(safe-area-inset-right,0px))] sm:pl-[max(1.5rem,env(safe-area-inset-left,0px))] sm:pr-[max(1.5rem,env(safe-area-inset-right,0px))] pt-[max(1rem,env(safe-area-inset-top,0px))] pb-3 sm:pb-4">
-        <div className="max-w-5xl mx-auto">
-          <div className="flex flex-col gap-1.5 sm:hidden">
-            <div className="flex items-center justify-between gap-2 min-w-0">
-              {renderHeaderAvatar()}
-              <div className="flex items-center gap-1 shrink-0">{renderHeaderActions()}</div>
-            </div>
-            <div className="min-w-0 w-full">{renderHeaderProfileCard()}</div>
-          </div>
-
-          <div className="hidden sm:grid sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center sm:gap-3">
-            <div className="flex items-center min-w-0">{renderHeaderAvatar()}</div>
-            <div className="flex items-center justify-center min-w-0 px-1">{renderHeaderProfileCard()}</div>
-            <div className="flex items-center gap-2 justify-end shrink-0 flex-nowrap">{renderHeaderActions()}</div>
-          </div>
+      {/* Header — una fila: avatar | nivel/nombre/XP | acciones (como HUD compacto) */}
+      <header className="sticky top-0 z-30 bg-zinc-950/80 backdrop-blur-md border-b border-zinc-900 pl-[max(0.75rem,env(safe-area-inset-left,0px))] pr-[max(0.75rem,env(safe-area-inset-right,0px))] sm:pl-[max(1.5rem,env(safe-area-inset-left,0px))] sm:pr-[max(1.5rem,env(safe-area-inset-right,0px))] pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-2.5 sm:pb-3">
+        <div className="max-w-5xl mx-auto flex flex-nowrap items-center gap-2 sm:gap-3 min-w-0">
+          {renderHeaderAvatar()}
+          <div className="flex-1 min-w-0">{renderHeaderProfileCard()}</div>
+          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">{renderHeaderActions()}</div>
         </div>
       </header>
 

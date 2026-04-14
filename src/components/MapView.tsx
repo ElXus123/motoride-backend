@@ -1285,7 +1285,9 @@ export default function MapView({
     return () => unsub();
   }, [group?.createdBy]);
 
-  const voiceAllowed = selfPremium || hostIsPremium;
+  const voiceAllowed = premiumGpsPolicy.voiceChatRequiresPremium
+    ? selfPremium || hostIsPremium
+    : true;
 
   const { isVoiceActive, toggleVoice, peersCount, micError, clearMicError } = useVoiceChat(groupId, voiceAllowed);
 

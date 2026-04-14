@@ -7,6 +7,11 @@ export type PremiumGpsPolicy = {
   rainRadarPremiumOnly: boolean;
   precipAlertsPremiumOnly: boolean;
   weatherHudPremiumOnly: boolean;
+  /**
+   * Si es `true`, solo pueden usar el chat de voz quienes sean Premium o estén en grupo cuyo anfitrión sea Premium.
+   * Si es `false`, el chat de voz está disponible para todos en el mapa.
+   */
+  voiceChatRequiresPremium: boolean;
 };
 
 export const DEFAULT_PREMIUM_GPS_POLICY: PremiumGpsPolicy = {
@@ -14,6 +19,7 @@ export const DEFAULT_PREMIUM_GPS_POLICY: PremiumGpsPolicy = {
   rainRadarPremiumOnly: false,
   precipAlertsPremiumOnly: false,
   weatherHudPremiumOnly: false,
+  voiceChatRequiresPremium: false,
 };
 
 export function normalizePremiumGpsPolicy(data: Record<string, unknown> | undefined | null): PremiumGpsPolicy {
@@ -23,5 +29,6 @@ export function normalizePremiumGpsPolicy(data: Record<string, unknown> | undefi
     rainRadarPremiumOnly: t('rainRadarPremiumOnly'),
     precipAlertsPremiumOnly: t('precipAlertsPremiumOnly'),
     weatherHudPremiumOnly: t('weatherHudPremiumOnly'),
+    voiceChatRequiresPremium: t('voiceChatRequiresPremium'),
   };
 }
