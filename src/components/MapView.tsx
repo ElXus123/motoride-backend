@@ -711,7 +711,21 @@ export default function MapView({
     level: userLevel,
     isHost
   });
-  const { leanAngle: sensorLeanAngle, maxLeanLeft, maxLeanRight, requestPermission, resetMaxLean, calibrate, applyCalibrationStep } = useLeanAngle();
+  const {
+    leanAngle: sensorLeanAngle,
+    maxLeanLeft,
+    maxLeanRight,
+    permissionGranted: leanPermissionGranted,
+    requestPermission,
+    resetMaxLean,
+    calibrate,
+    applyCalibrationStep,
+  } = useLeanAngle();
+
+  const needsOrientationUserGesture =
+    typeof DeviceOrientationEvent !== 'undefined' &&
+    typeof (DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<'granted' | 'denied'> })
+      .requestPermission === 'function';
   const [estimatedLeanAngle, setEstimatedLeanAngle] = useState(0);
 
   // Dynamic Auto-Calibration Logic
@@ -765,10 +779,12 @@ export default function MapView({
   const rightTurnsRef = useRef(0);
   const [parsedRoute, setParsedRoute] = useState<any>(null);
 
-  // Request lean angle permission on mount
+  // iPhone/Safari: requestPermission() debe ir tras un gesto del usuario; no llamar solo al montar.
   useEffect(() => {
-    requestPermission();
-  }, []);
+    if (!needsOrientationUserGesture) {
+      void requestPermission();
+    }
+  }, [needsOrientationUserGesture, requestPermission]);
 
   useEffect(() => {
     if (group?.routeGeoJSON) {
@@ -1831,7 +1847,8 @@ export default function MapView({
     return hDiff < 2;
   };
 
-  const handleSmartCalibration = () => {
+  const handleSmartCalibration = async () => {
+    await requestPermission();
     const currentSpeedKmh = (speed || 0) * 3.6;
     const canCalibrateStopped = currentSpeedKmh <= 8;
     const canCalibrateOnStraight = currentSpeedKmh >= 30 && isHeadingStableNow();
@@ -2172,7 +2189,7 @@ export default function MapView({
                 <button 
                   onClick={() => {
                     setShowSettings(false);
-                    handleSmartCalibration();
+                    void handleSmartCalibration();
                   }}
                    className="flex items-center gap-3 text-white hover:bg-zinc-800 p-3 rounded-2xl text-sm font-bold transition-colors"
                  >
@@ -2239,6 +2256,25 @@ export default function MapView({
         <div className="absolute left-4 right-4 z-[1000] bg-red-500 text-white p-3 rounded-xl shadow-xl text-sm font-medium flex items-center gap-2" style={{ top: `${gpsErrorTop}px` }}>
           <AlertTriangle size={18} className="shrink-0" />
           <span>Sin señal GPS, reconectando...</span>
+        </div>
+      )}
+
+      {needsOrientationUserGesture && leanPermissionGranted !== true && (
+        <div
+          className="absolute left-4 right-4 z-[1001] bg-indigo-600 text-white p-3 rounded-xl shadow-xl text-sm flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
+          style={{ top: `${gpsErrorTop + (gpsError ? 58 : 0) + 8}px` }}
+          role="status"
+        >
+          <span className="font-medium leading-snug">
+            En iPhone hay que <strong>permitir acceso al movimiento</strong> para el inclinómetro. Pulsa el botón (o usa Calibrar inclinación en ajustes).
+          </span>
+          <button
+            type="button"
+            className="shrink-0 bg-white text-indigo-700 font-bold px-4 py-2 rounded-xl"
+            onClick={() => void requestPermission()}
+          >
+            Permitir inclinómetro
+          </button>
         </div>
       )}
 

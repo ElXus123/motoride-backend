@@ -1,1 +1,1 @@
-Registro completo: CONTEXTO_APP.txt (misma carpeta raiz del proyecto).
+Registro completo: CONTEXTO_APP.txt (raiz del proyecto).

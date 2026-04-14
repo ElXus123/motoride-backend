@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
 export const useLeanAngle = () => {
   const CALIBRATION_STORAGE_KEY = 'motoride_lean_calibration_offset_v1';
@@ -10,24 +10,43 @@ export const useLeanAngle = () => {
   const smoothedAngleRef = useRef(0);
   const angleHistoryRef = useRef<number[]>([]);
 
-  const requestPermission = async () => {
-    if (typeof (DeviceOrientationEvent as any).requestPermission === 'function') {
-      try {
-        const permissionState = await (DeviceOrientationEvent as any).requestPermission();
-        if (permissionState === 'granted') {
-          setPermissionGranted(true);
-        } else {
-          setPermissionGranted(false);
-        }
-      } catch (error) {
-        console.error("Error requesting device orientation permission:", error);
-        setPermissionGranted(false);
-      }
-    } else {
-      // Non-iOS 13+ devices
+  const requestPermission = useCallback(async () => {
+    const DO = DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<'granted' | 'denied'> };
+    const DM = DeviceMotionEvent as unknown as { requestPermission?: () => Promise<'granted' | 'denied'> };
+
+    if (typeof DO.requestPermission !== 'function' && typeof DM.requestPermission !== 'function') {
       setPermissionGranted(true);
+      return;
     }
-  };
+
+    try {
+      if (typeof DO.requestPermission === 'function') {
+        const state = await DO.requestPermission();
+        if (state !== 'granted') {
+          setPermissionGranted(false);
+          return;
+        }
+        if (typeof DM.requestPermission === 'function') {
+          try {
+            await DM.requestPermission();
+          } catch {
+            // WebKit: opcional si el permiso ya quedó cubierto por orientación.
+          }
+        }
+        setPermissionGranted(true);
+        return;
+      }
+      if (typeof DM.requestPermission === 'function') {
+        const ms = await DM.requestPermission();
+        setPermissionGranted(ms === 'granted');
+        return;
+      }
+      setPermissionGranted(true);
+    } catch (error) {
+      console.error('Error requesting device motion/orientation permission:', error);
+      setPermissionGranted(false);
+    }
+  }, []);
 
   const [rawAngle, setRawAngle] = useState(0);
   const lastOrientationUpdateRef = useRef(0);
@@ -70,7 +89,7 @@ export const useLeanAngle = () => {
       
       let roll = 0;
       if (isLandscape) {
-        // In landscape, beta is the lateral tilt
+        // En landscape, beta suele ser el balanceo lateral; el signo depende de window.orientation.
         roll = event.beta || 0;
         if (orientation === -90 || orientation === 270) {
           roll = -roll;
@@ -104,10 +123,10 @@ export const useLeanAngle = () => {
       const roundedAngle = Math.round(finalAngle);
       setLeanAngle(roundedAngle);
 
-      if (roundedAngle < 0 && Math.abs(roundedAngle) > maxLeanLeft) {
-        setMaxLeanLeft(Math.abs(roundedAngle));
-      } else if (roundedAngle > 0 && roundedAngle > maxLeanRight) {
-        setMaxLeanRight(roundedAngle);
+      if (roundedAngle < 0) {
+        setMaxLeanLeft((prev) => Math.max(prev, Math.abs(roundedAngle)));
+      } else if (roundedAngle > 0) {
+        setMaxLeanRight((prev) => Math.max(prev, roundedAngle));
       }
     };
 
@@ -131,10 +150,10 @@ export const useLeanAngle = () => {
       const roundedAngle = Math.round(finalAngle);
       setLeanAngle(roundedAngle);
 
-      if (roundedAngle < 0 && Math.abs(roundedAngle) > maxLeanLeft) {
-        setMaxLeanLeft(Math.abs(roundedAngle));
-      } else if (roundedAngle > 0 && roundedAngle > maxLeanRight) {
-        setMaxLeanRight(roundedAngle);
+      if (roundedAngle < 0) {
+        setMaxLeanLeft((prev) => Math.max(prev, Math.abs(roundedAngle)));
+      } else if (roundedAngle > 0) {
+        setMaxLeanRight((prev) => Math.max(prev, roundedAngle));
       }
     };
 
@@ -144,7 +163,7 @@ export const useLeanAngle = () => {
       window.removeEventListener('deviceorientation', handleOrientation);
       window.removeEventListener('devicemotion', handleMotion);
     };
-  }, [permissionGranted, maxLeanLeft, maxLeanRight, calibrationOffset]);
+  }, [permissionGranted, calibrationOffset]);
 
   const resetMaxLean = () => {
     setMaxLeanLeft(0);
