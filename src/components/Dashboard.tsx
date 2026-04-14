@@ -155,8 +155,10 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       setDestinationSuggestions([]);
       return;
     }
-    // Only fetch if it's not already previewed
-    if (destinationPreview && destinationPreview !== 'Demasiadas peticiones, espera un poco...' && destinationPreview !== 'Error al buscar' && destinationPreview !== 'No encontrado') {
+    const picked = destinationPickedRef.current;
+    if (picked && picked.displayName === destination.trim()) {
+      setDestinationPreview(picked.displayName);
+      setDestinationSuggestions([]);
       return;
     }
     const timer = setTimeout(async () => {
@@ -507,10 +509,12 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           }
         }
 
-        const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(trimmed)}&limit=1&countrycodes=es&addressdetails=1`;
+        const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(trimmed)}&limit=5&countrycodes=es&addressdetails=1`;
         const geoData = await requestJson<any[]>(geocodeUrl, { timeoutMs: 8000, retries: 0, backoffMs: 400 });
         if (geoData && geoData.length > 0) {
-          const g0 = geoData[0];
+          const g0 =
+            geoData.find((item) => String(item.display_name || '').trim().toLowerCase() === trimmed.toLowerCase()) ||
+            geoData[0];
           return {
             ok: true,
             geoData,
@@ -1376,6 +1380,10 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                           onChange={(e) => {
                             const v = e.target.value;
                             setDestination(v);
+                            setDestinationPreview(null);
+                            if (v.trim().length < 3) {
+                              setDestinationSuggestions([]);
+                            }
                             const p = destinationPickedRef.current;
                             if (p && v.trim() !== p.displayName) {
                               destinationPickedRef.current = null;

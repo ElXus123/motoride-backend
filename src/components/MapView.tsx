@@ -62,6 +62,23 @@ type ScreenOrientationLockArg =
   | 'landscape-primary'
   | 'landscape-secondary';
 
+type SearchSuggestion = {
+  place_id?: string | number;
+  display_name?: string;
+  lat?: string;
+  lon?: string;
+  address?: {
+    city?: string;
+    town?: string;
+    village?: string;
+    municipality?: string;
+    province?: string;
+    state?: string;
+    region?: string;
+    [key: string]: string | undefined;
+  };
+};
+
 // Custom icon creator for avatars with level
 const createAvatarIcon = (url: string, level: number = 1, isPremium: boolean = false) => {
   const ring = isPremium ? '#f59e0b' : '#f97316';
@@ -698,7 +715,8 @@ export default function MapView({
   const enterPocketMode = () => void enterTouchLockMode('pocket');
   const enterMirrorLinkMode = () => void enterTouchLockMode('mirrorlink');
   const [searchDestination, setSearchDestination] = useState('');
-  const [searchSuggestions, setSearchSuggestions] = useState<any[]>([]);
+  const [searchSuggestions, setSearchSuggestions] = useState<SearchSuggestion[]>([]);
+  const [selectedSearchSuggestion, setSelectedSearchSuggestion] = useState<SearchSuggestion | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [shared, setShared] = useState(false);
   const [showInviteFriends, setShowInviteFriends] = useState(false);
@@ -1786,32 +1804,79 @@ export default function MapView({
     }
   };
 
+  const resolveSearchRouteStart = async () => {
+    if (currentLocation?.lat != null && currentLocation?.lng != null) {
+      return currentLocation;
+    }
+    if (!navigator.geolocation) {
+      throw new Error('gps-unavailable');
+    }
+    return await new Promise<{ lat: number; lng: number }>((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        () => reject(new Error('gps-unavailable')),
+        {
+          timeout: 12000,
+          maximumAge: 120000,
+          enableHighAccuracy: false,
+        }
+      );
+    });
+  };
+
   const generateRouteFromSearch = async () => {
-    if (!searchDestination || !user) return;
+    const trimmedDestination = searchDestination.trim();
+    if (!trimmedDestination || !user) return;
     setIsSearching(true);
     try {
-      const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchDestination)}&limit=1&countrycodes=es&addressdetails=1`;
-      const geoData = await requestJson<any[]>(geocodeUrl, {
-        timeoutMs: 10000,
-        retries: 1,
-        backoffMs: 600,
-        headers: {
-          'User-Agent': 'MoteroApp/1.0 (contact: motorideapp1@gmail.com)'
-        }
-      });
-      
-      let destCoords = "";
-      if (geoData && geoData.length > 0) {
-        destCoords = `${geoData[0].lon},${geoData[0].lat}`;
-      } else if (searchDestination.includes(',')) {
-        destCoords = searchDestination;
+      const selectedSuggestion =
+        selectedSearchSuggestion &&
+        String(selectedSearchSuggestion.display_name || '').trim() === trimmedDestination
+          ? selectedSearchSuggestion
+          : null;
+
+      let geoData: SearchSuggestion[] = [];
+      let destCoords = '';
+      if (selectedSuggestion?.lon != null && selectedSuggestion?.lat != null) {
+        geoData = [selectedSuggestion];
+        destCoords = `${selectedSuggestion.lon},${selectedSuggestion.lat}`;
       } else {
-        alert('No se ha podido encontrar el destino. Intenta ser más específico.');
-        setIsSearching(false);
+        const manualParts = trimmedDestination.split(',').map((part) => Number(part.trim()));
+        const isManualCoords =
+          manualParts.length === 2 && manualParts.every((value) => Number.isFinite(value));
+
+        if (isManualCoords) {
+          destCoords = `${manualParts[0]},${manualParts[1]}`;
+        } else {
+          const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(trimmedDestination)}&limit=5&countrycodes=es&addressdetails=1`;
+          const results = await requestJson<SearchSuggestion[]>(geocodeUrl, {
+            timeoutMs: 10000,
+            retries: 1,
+            backoffMs: 600,
+            headers: {
+              'User-Agent': 'MoteroApp/1.0 (contact: motorideapp1@gmail.com)'
+            }
+          });
+          geoData = Array.isArray(results) ? results : [];
+          if (geoData.length > 0) {
+            const exactMatch =
+              geoData.find((item) => String(item.display_name || '').trim().toLowerCase() === trimmedDestination.toLowerCase()) ||
+              geoData[0];
+            if (exactMatch?.lon != null && exactMatch?.lat != null) {
+              destCoords = `${exactMatch.lon},${exactMatch.lat}`;
+              setSelectedSearchSuggestion(exactMatch);
+            }
+          }
+        }
+      }
+
+      if (!destCoords) {
+        alert('No se ha podido encontrar el destino. Intenta ser más específico o elige una sugerencia.');
         return;
       }
 
-      const start = `${currentLocation?.lng || -3.7038},${currentLocation?.lat || 40.4168}`;
+      const startPosition = await resolveSearchRouteStart();
+      const start = `${startPosition.lng},${startPosition.lat}`;
       const url = `https://router.project-osrm.org/route/v1/driving/${start};${destCoords}?overview=full&geometries=geojson`;
       
       const data = await requestJson<any>(url, { timeoutMs: 12000, retries: 1, backoffMs: 700 });
@@ -1827,6 +1892,7 @@ export default function MapView({
           setShowSearchModal(false);
           setSearchDestination('');
           setSearchSuggestions([]);
+          setSelectedSearchSuggestion(null);
         } catch (error) {
           handleFirestoreError(error, OperationType.UPDATE, `groups/${groupId}`);
         }
@@ -1835,28 +1901,34 @@ export default function MapView({
       }
     } catch (e) {
       console.error(e);
-      alert('Error de conexión.');
+      if (e instanceof Error && e.message === 'gps-unavailable') {
+        alert('Espera a que el GPS localice tu posición antes de planificar la ruta.');
+      } else {
+        alert('Error de conexión.');
+      }
     } finally {
       setIsSearching(false);
     }
   };
 
   useEffect(() => {
-    if (!showSearchModal || searchDestination.trim().length < 3) {
+    const trimmedDestination = searchDestination.trim();
+    const selectedLabel = String(selectedSearchSuggestion?.display_name || '').trim();
+    if (!showSearchModal || trimmedDestination.length < 3 || (selectedLabel && selectedLabel === trimmedDestination)) {
       setSearchSuggestions([]);
       return;
     }
     const timer = setTimeout(async () => {
       try {
-        const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchDestination)}&limit=5&countrycodes=es&addressdetails=1`;
-        const geoData = await requestJson<any[]>(geocodeUrl, { timeoutMs: 9000, retries: 1, backoffMs: 500 });
+        const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(trimmedDestination)}&limit=5&countrycodes=es&addressdetails=1`;
+        const geoData = await requestJson<SearchSuggestion[]>(geocodeUrl, { timeoutMs: 9000, retries: 1, backoffMs: 500 });
         setSearchSuggestions(Array.isArray(geoData) ? geoData : []);
       } catch {
         setSearchSuggestions([]);
       }
     }, 450);
     return () => clearTimeout(timer);
-  }, [showSearchModal, searchDestination]);
+  }, [showSearchModal, searchDestination, selectedSearchSuggestion]);
 
   const copyCode = async () => {
     const ok = await copyTextToClipboard(groupId);
@@ -3163,7 +3235,10 @@ export default function MapView({
                       <input 
                         placeholder="¿A dónde quieres ir?" 
                         value={searchDestination}
-                        onChange={(e) => setSearchDestination(e.target.value)}
+                        onChange={(e) => {
+                          setSearchDestination(e.target.value);
+                          setSelectedSearchSuggestion(null);
+                        }}
                         onKeyDown={(e) => e.key === 'Enter' && generateRouteFromSearch()}
                         className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-3 text-sm text-white outline-none focus:border-orange-500 transition-all"
                       />
@@ -3183,6 +3258,7 @@ export default function MapView({
                           key={`${item.place_id || idx}`}
                           onClick={() => {
                             setSearchDestination(item.display_name || '');
+                            setSelectedSearchSuggestion(item);
                             setSearchSuggestions([]);
                           }}
                           className="w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800 transition-colors"

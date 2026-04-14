@@ -47,7 +47,7 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
           const snaps = await Promise.all(chunk.map((fid) => getDoc(doc(db, 'users', fid))));
           for (const s of snaps) {
             if (s.exists()) {
-              allFriends.push({ id: s.id, uid: s.id, ...s.data() });
+              allFriends.push({ ...s.data(), id: s.id, uid: s.id });
             }
           }
         }
@@ -71,7 +71,7 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
       for (const chunk of chunks) {
         const snaps = await Promise.all(chunk.map((fid) => getDoc(doc(db, 'users', fid))));
         for (const s of snaps) {
-          if (s.exists()) all.push({ id: s.id, uid: s.id, ...s.data() });
+          if (s.exists()) all.push({ ...s.data(), id: s.id, uid: s.id });
         }
       }
       setIncomingUsers(all);

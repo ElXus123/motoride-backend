@@ -90,6 +90,39 @@ export const useLeanAngle = (speedMps?: number | null) => {
   useEffect(() => {
     if (!permissionGranted) return;
 
+    const getOrientationAngle = () => {
+      const rawAngle =
+        typeof screen !== 'undefined' && screen.orientation && typeof screen.orientation.angle === 'number'
+          ? screen.orientation.angle
+          : typeof window !== 'undefined' && typeof window.orientation === 'number'
+            ? window.orientation
+            : 0;
+      const rounded = Math.round(rawAngle / 90) * 90;
+      return ((rounded % 360) + 360) % 360;
+    };
+
+    const extractGravityRoll = (x: number, y: number, z: number) => {
+      const norm = Math.sqrt(x * x + y * y + z * z);
+      if (!norm) return null;
+
+      const orientationAngle = getOrientationAngle();
+      const viewportLandscape = window.innerWidth > window.innerHeight;
+      const isLandscape =
+        orientationAngle === 90 ||
+        orientationAngle === 270 ||
+        ((orientationAngle === 0 || orientationAngle === 180) && viewportLandscape);
+
+      let axis = x / norm;
+      if (orientationAngle === 180) axis = -axis;
+      if (isLandscape) {
+        axis = y / norm;
+        if (orientationAngle === 270) axis = -axis;
+      }
+
+      const safeAxis = Math.max(-1, Math.min(1, axis));
+      return Math.max(-60, Math.min(60, (Math.asin(safeAxis) * 180) / Math.PI));
+    };
+
     const updateMotionStationary = (event: DeviceMotionEvent) => {
       const rr = event.rotationRate;
       const accLin = event.acceleration;
@@ -197,28 +230,27 @@ export const useLeanAngle = (speedMps?: number | null) => {
 
     const handleOrientation = (event: DeviceOrientationEvent) => {
       lastOrientationUpdateRef.current = Date.now();
-      const isLandscape = window.innerWidth > window.innerHeight;
-      const orientationAngle =
-        typeof screen !== 'undefined' && screen.orientation && typeof screen.orientation.angle === 'number'
-          ? screen.orientation.angle
-          : typeof window !== 'undefined' && typeof window.orientation === 'number'
-            ? window.orientation
-            : 0;
+      const orientationAngle = getOrientationAngle();
+      const viewportLandscape = window.innerWidth > window.innerHeight;
+      const isLandscape =
+        orientationAngle === 90 ||
+        orientationAngle === 270 ||
+        ((orientationAngle === 0 || orientationAngle === 180) && viewportLandscape);
 
       let roll = 0;
+      const beta = event.beta ?? 0;
+      const gamma = event.gamma ?? 0;
       if (isLandscape) {
-        const beta = event.beta ?? 0;
-        const gamma = event.gamma ?? 0;
-        if (Math.abs(gamma) > Math.abs(beta) * 1.15) {
-          roll = orientationAngle === 90 || orientationAngle === -270 ? gamma : -gamma;
-        } else {
+        if (orientationAngle === 90 || orientationAngle === 270) {
           roll = beta;
-          if (orientationAngle === 270 || orientationAngle === -90) {
+          if (orientationAngle === 270) {
             roll = -roll;
           }
+        } else {
+          roll = Math.abs(beta) >= Math.abs(gamma) ? beta : gamma;
         }
       } else {
-        roll = event.gamma || 0;
+        roll = orientationAngle === 180 ? -gamma : gamma;
       }
 
       processRollSample(roll);
@@ -226,15 +258,16 @@ export const useLeanAngle = (speedMps?: number | null) => {
 
     const handleMotion = (event: DeviceMotionEvent) => {
       updateMotionStationary(event);
-      if (Date.now() - lastOrientationUpdateRef.current < 1500) return;
       const acc = event.accelerationIncludingGravity;
       if (!acc) return;
       const x = acc.x ?? 0;
       const y = acc.y ?? 0;
       const z = acc.z ?? 0;
-      const norm = Math.sqrt(x * x + y * y + z * z);
-      if (!norm) return;
-      const roll = Math.max(-60, Math.min(60, (Math.asin(x / norm) * 180) / Math.PI));
+      const roll = extractGravityRoll(x, y, z);
+      if (roll == null) return;
+      // En parado, la gravedad es más estable que `deviceorientation` en muchos móviles.
+      const orientationFresh = Date.now() - lastOrientationUpdateRef.current < 800;
+      if (orientationFresh && !motionStationaryRef.current) return;
       processRollSample(roll);
     };
 
