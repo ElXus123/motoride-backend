@@ -220,8 +220,14 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-      <div className="bg-zinc-900 border border-zinc-800 w-full max-w-2xl h-[80vh] rounded-3xl overflow-hidden shadow-2xl flex flex-col animate-in fade-in zoom-in duration-200">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="bg-zinc-900 border border-zinc-800 w-full max-w-2xl h-[80vh] rounded-3xl overflow-hidden shadow-2xl flex flex-col animate-in fade-in zoom-in duration-200"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="p-6 border-b border-zinc-800 flex items-center justify-between shrink-0">
           <h2 className="text-xl font-bold flex items-center gap-2">
             {selectedUser ? (

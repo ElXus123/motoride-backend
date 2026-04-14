@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Check, Sparkles, Wrench } from 'lucide-react';
 
 /** Sube este valor cuando cambien las novedades para volver a mostrar el aviso una vez por dispositivo. */
-export const WHATS_NEW_VERSION = '2026.04.16';
+export const WHATS_NEW_VERSION = '2026.04.17';
 
 const STORAGE_KEY = 'motoride_whats_new_seen_version';
 
@@ -24,6 +24,16 @@ type DayGroup = {
  * Mantén el texto corto y claro para usuarios no técnicos.
  */
 const CHANGELOG: DayGroup[] = [
+  {
+    label: '17 de abril de 2026',
+    entries: [
+      {
+        time: '23:30',
+        kind: 'novedad',
+        text: 'En el mapa de ruta: aviso automático (unos 30 s) si hay posible lluvia en tu trazado o cerca de ti (≈10 km), con datos meteorológicos. Conduce con precaución.',
+      },
+    ],
+  },
   {
     label: '16 de abril de 2026',
     entries: [

@@ -123,8 +123,12 @@ export default function PendingRideInviteOverlay({ onJoinGroup, activeGroupId }:
       role="dialog"
       aria-modal="true"
       aria-labelledby="global-ride-invite-title"
+      onClick={() => void dismiss()}
     >
-      <div className="w-full max-w-md bg-zinc-900 border border-blue-500/50 rounded-3xl shadow-2xl shadow-blue-900/20 overflow-hidden">
+      <div
+        className="w-full max-w-md bg-zinc-900 border border-blue-500/50 rounded-3xl shadow-2xl shadow-blue-900/20 overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="px-6 pt-6 pb-4 border-b border-zinc-800 bg-gradient-to-br from-blue-600/20 to-orange-500/10">
           <p className="text-[10px] font-black uppercase tracking-widest text-blue-300 mb-2">Invitación a ruta</p>
           <h2 id="global-ride-invite-title" className="text-lg font-black text-white leading-snug">

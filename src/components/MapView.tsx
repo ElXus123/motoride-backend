@@ -23,7 +23,12 @@ import { useOpenMeteoWeather } from '../hooks/useOpenMeteoWeather';
 import { useLeanAngle } from '../hooks/useLeanAngle';
 import { useNavigation } from '../hooks/useNavigation';
 import { useNavigationHeading } from '../hooks/useNavigationHeading';
-import { snapPointToRouteDetailed } from '../lib/navigationPose';
+import { getLineCoordinates, snapPointToRouteDetailed } from '../lib/navigationPose';
+import {
+  anyPrecipitationRiskAtPoints,
+  dedupeNearbyPoints,
+  samplePolylineByDistance,
+} from '../lib/precipitationRisk';
 import { useRoadData } from '../hooks/useRoadData';
 import { parseGPX, parseRouteData } from '../lib/gpx';
 import { getDistance, offsetByMeters } from '../lib/geoUtils';
@@ -39,8 +44,9 @@ import socket from '../lib/socket';
 import { useVoiceChat } from '../hooks/useVoiceChat';
 import PremiumBadge from './PremiumBadge';
 import InviteFriendsModal from './InviteFriendsModal';
-import { Upload, ArrowLeft, Copy, Check, Navigation, AlertTriangle, Play, Square, ArrowUp, MapPin, Trophy, Bell, AlertCircle, Wrench, Fuel, X, Maximize, Minimize, Search, Share2, Menu, Target, LogOut, Users, UserPlus, Mic, MicOff, ShieldAlert, Activity, Layers, Lock, LockOpen, Smartphone, RotateCw, Crown, WifiOff, Monitor, Loader2, Mail, Ban } from 'lucide-react';
+import { Upload, ArrowLeft, Copy, Check, Navigation, AlertTriangle, Play, Square, ArrowUp, MapPin, Trophy, Bell, AlertCircle, Wrench, Fuel, X, Maximize, Minimize, Search, Share2, Menu, Target, LogOut, Users, UserPlus, Mic, MicOff, ShieldAlert, Activity, Layers, Lock, LockOpen, Smartphone, RotateCw, Crown, WifiOff, Monitor, Loader2, Mail, Ban, CloudRain } from 'lucide-react';
 import { copyTextToClipboard, getSupportMailtoHref } from '../lib/clientInfo';
+import { formatNavDistanceMeters } from '../lib/navFormat';
 import { generateGroupCode } from '../lib/groupCode';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -170,7 +176,13 @@ const CurrentUserMarker = ({
 
 const getDirectionIcon = (type?: string, modifier?: string) => {
   if (type === 'arrive') return <MapPin size={28} />;
-  if (type === 'roundabout' || type === 'rotary' || type === 'roundabout turn') {
+  if (
+    type === 'roundabout' ||
+    type === 'rotary' ||
+    type === 'roundabout turn' ||
+    type === 'exit roundabout' ||
+    type === 'exit rotary'
+  ) {
     return <RotateCw size={28} className="shrink-0" aria-hidden />;
   }
   if (type === 'off ramp' || type === 'on ramp') {
@@ -951,6 +963,9 @@ export default function MapView({
     isHost
   });
 
+  const [precipitationBanner, setPrecipitationBanner] = useState(false);
+  const lastPrecipBannerAtRef = useRef(0);
+
   /** Rumbo para telemetría (inclinación GPS / auto-calibración): muchos navegadores no rellenan `coords.heading`; usamos COG derivado de posiciones. */
   const headingOrCourseForTelemetry = useMemo(() => {
     if (heading !== null && Number.isFinite(heading)) return heading;
@@ -1124,6 +1139,61 @@ export default function MapView({
     () => (navigationGuideHiddenLocal ? null : parsedRoute),
     [navigationGuideHiddenLocal, parsedRoute]
   );
+
+  useEffect(() => {
+    if (!precipitationBanner) return;
+    const id = window.setTimeout(() => setPrecipitationBanner(false), 30000);
+    return () => window.clearTimeout(id);
+  }, [precipitationBanner]);
+
+  useEffect(() => {
+    setPrecipitationBanner(false);
+    lastPrecipBannerAtRef.current = 0;
+  }, [groupId]);
+
+  useEffect(() => {
+    if (!isOnline || !currentLocation) return;
+    let cancelled = false;
+    const COOLDOWN_MS = 10 * 60 * 1000;
+    const INTERVAL_MS = 4 * 60 * 1000;
+
+    const run = async () => {
+      if (cancelled) return;
+      if (Date.now() - lastPrecipBannerAtRef.current < COOLDOWN_MS) return;
+      const lat = currentLocation.lat;
+      const lng = currentLocation.lng;
+      const pts: { lat: number; lng: number }[] = [{ lat, lng }];
+      for (const deg of [0, 90, 180, 270] as const) {
+        pts.push(offsetByMeters(lat, lng, deg, 10000));
+      }
+      const routeGeo = effectiveRouteForNav;
+      if (routeGeo) {
+        const coords = getLineCoordinates(routeGeo);
+        if (coords.length >= 2) {
+          samplePolylineByDistance(coords, 4).forEach((p) => pts.push(p));
+        }
+      }
+      const unique = dedupeNearbyPoints(pts);
+      if (unique.length === 0) return;
+      try {
+        const risk = await anyPrecipitationRiskAtPoints(unique);
+        if (cancelled || !risk) return;
+        lastPrecipBannerAtRef.current = Date.now();
+        setPrecipitationBanner(true);
+        if (navigator.vibrate) navigator.vibrate(80);
+      } catch {
+        /* ignore */
+      }
+    };
+
+    const boot = window.setTimeout(() => void run(), 22000);
+    const interval = window.setInterval(() => void run(), INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(boot);
+      window.clearInterval(interval);
+    };
+  }, [isOnline, currentLocation?.lat, currentLocation?.lng, effectiveRouteForNav, groupId]);
 
   const navState = useNavigation(currentLocation, effectiveRouteForNav);
   const navigationHeading = useNavigationHeading(
@@ -2641,6 +2711,9 @@ export default function MapView({
   const blockBelowHeader = belowBanners + peerAlertsStripHeight;
   const gpsErrorTop = topBelowSafe(blockBelowHeader + navHeaderPad);
   const weakTilesBannerTop = topBelowSafe(blockBelowHeader + navHeaderPad + (gpsError ? 58 : 0) + 6);
+  const precipBannerTop = topBelowSafe(
+    blockBelowHeader + navHeaderPad + (gpsError ? 58 : 0) + 6 + (weakMapTilesNotice ? 78 : 0)
+  );
   const leanIosBannerTop = topBelowSafe(blockBelowHeader + navHeaderPad + (gpsError ? 58 : 0) + 8);
 
   const topStackBelowSafe = edgeGap + C + H;
@@ -2814,13 +2887,17 @@ export default function MapView({
                      </p>
                    ) : null}
                    {navState.distanceToNext !== null && (
-                     <div className="flex items-baseline gap-1 mt-1">
-                       <span className={`${isCompactUI ? 'text-xl' : 'text-2xl'} text-blue-400 font-black`}>
-                         {navState.distanceToNext >= 1000 ? (navState.distanceToNext / 1000).toFixed(1) : navState.distanceToNext}
-                       </span>
-                       <span className="text-blue-400/70 font-bold text-sm uppercase">
-                         {navState.distanceToNext >= 1000 ? 'km' : 'm'}
-                       </span>
+                     <div className="mt-1.5">
+                       <div className="flex items-baseline gap-1.5">
+                         <span className={`${isCompactUI ? 'text-xl' : 'text-2xl'} text-blue-400 font-black tabular-nums`}>
+                           {formatNavDistanceMeters(navState.distanceToNext)}
+                         </span>
+                       </div>
+                       {!isCompactUI && (
+                         <p className="text-[10px] text-zinc-500 font-medium mt-0.5 leading-tight">
+                           Aprox. en línea recta hasta el siguiente giro
+                         </p>
+                       )}
                      </div>
                    )}
                  </div>
@@ -3153,6 +3230,36 @@ export default function MapView({
         </div>
       )}
 
+      {isOnline && precipitationBanner && (
+        <div
+          className="absolute z-[1000] bg-sky-900/95 text-sky-50 p-3 rounded-xl shadow-xl text-xs sm:text-sm font-semibold flex items-start gap-3 border border-sky-500/40"
+          style={{
+            top: precipBannerTop,
+            left: 'max(1rem, env(safe-area-inset-left, 0px))',
+            right: 'max(1rem, env(safe-area-inset-right, 0px))',
+          }}
+          role="status"
+        >
+          <CloudRain size={20} className="shrink-0 mt-0.5 text-sky-300" aria-hidden />
+          <div className="min-w-0 flex-1 leading-snug">
+            <p className="font-black text-[11px] sm:text-xs uppercase tracking-wide text-sky-200/95 mb-1">
+              Posible precipitación
+            </p>
+            <p className="text-sky-50/95">
+              Los datos meteorológicos indican lluvia o chaparrones en tu ruta o cerca de ti (aprox. 10 km). Conduce con
+              precaución; el aviso se oculta solo en unos segundos.
+            </p>
+            <button
+              type="button"
+              className="mt-2 text-sky-200 font-black underline underline-offset-2 text-left"
+              onClick={() => setPrecipitationBanner(false)}
+            >
+              Cerrar aviso
+            </button>
+          </div>
+        </div>
+      )}
+
       {showExitConfirm && (
         <div
           className="fixed inset-0 z-[6000] flex items-center justify-center p-6 bg-black/75 backdrop-blur-sm"
@@ -3202,8 +3309,19 @@ export default function MapView({
           role="dialog"
           aria-modal="true"
           aria-labelledby="lean-beta-title"
+          onClick={() => {
+            try {
+              localStorage.setItem('motoride_lean_beta_dismissed_v1', '1');
+            } catch {
+              /* ignore */
+            }
+            setShowLeanBetaNotice(false);
+          }}
         >
-          <div className="bg-zinc-900 border border-orange-500/40 rounded-3xl p-5 sm:p-6 max-w-md w-full shadow-2xl">
+          <div
+            className="bg-zinc-900 border border-orange-500/40 rounded-3xl p-5 sm:p-6 max-w-md w-full shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center gap-2 mb-3">
               <Activity className="text-orange-400 shrink-0" size={22} aria-hidden />
               <h2 id="lean-beta-title" className="text-lg font-black text-white leading-tight">

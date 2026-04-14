@@ -14,6 +14,8 @@ export type NominatimItem = {
   class?: string;
   importance?: number | string;
   address?: Record<string, string>;
+  /** p. ej. city, town, province — viene en JSON de Nominatim y ayuda a priorizar la ciudad sobre la provincia */
+  addresstype?: string;
 };
 
 /** Letra (incl. ñ / acentos) para detectar si un carácter es parte de una palabra. */
@@ -65,6 +67,27 @@ function primaryPlaceToken(queryLower: string): string {
   return (significant[0] || words[0] || '').toLowerCase();
 }
 
+/**
+ * Nominatim usa nombres bilingües p. ej. "Huesca/Uesca" — el primer tramo es el topónimo que el usuario busca.
+ * Sin esto, "huesca" no coincide con la ciudad y además se penaliza como si fuera "Adahuesca".
+ */
+function firstToponymSegment(placeFieldLower: string): string {
+  const pl = placeFieldLower.trim().toLowerCase();
+  const slash = pl.indexOf('/');
+  if (slash <= 0) return pl;
+  return pl.slice(0, slash).trim();
+}
+
+/** ¿El campo ciudad/municipio del resultado corresponde al lugar buscado (incl. Huesca/Uesca)? */
+function placeFieldMatchesPrimary(placeFieldLower: string, primary: string): boolean {
+  if (!primary || primary.length < 2) return false;
+  const pl = placeFieldLower.trim().toLowerCase();
+  if (pl === primary) return true;
+  const head = firstToponymSegment(pl);
+  if (head === primary) return true;
+  return matchesAsWholeWord(pl, primary);
+}
+
 function scoreItem(item: NominatimItem, queryLower: string): number {
   let s = 0;
   const imp = Number(item.importance);
@@ -83,7 +106,16 @@ function scoreItem(item: NominatimItem, queryLower: string): number {
   const q = queryLower;
   const primary = primaryPlaceToken(q);
 
-  // Coincidencia exacta del lugar principal con la ciudad/municipio del resultado (p. ej. Huesca ≠ Adahuesca).
+  const addrType = (item.addresstype || '').toLowerCase();
+  // Para rutas: preferir población (ciudad/municipio) frente al polígono de provincia cuando ambos coinciden con la búsqueda.
+  if (addrType === 'city' || addrType === 'town' || addrType === 'municipality' || addrType === 'village') {
+    s += 22;
+  }
+  if (addrType === 'province' || addrType === 'state') {
+    s -= 18;
+  }
+
+  // Coincidencia del lugar principal con la ciudad/municipio del resultado (p. ej. Huesca/Uesca, Huesca ≠ Adahuesca).
   const placeFields = [
     addr.city,
     addr.town,
@@ -95,13 +127,14 @@ function scoreItem(item: NominatimItem, queryLower: string): number {
     .map((x) => String(x).toLowerCase());
   if (primary.length >= 3) {
     for (const pl of placeFields) {
-      if (pl === primary) {
+      if (placeFieldMatchesPrimary(pl, primary)) {
         s += 28;
         break;
       }
     }
     // Penalizar nombres que contienen el token como subcadena pero no son el mismo sitio (Adahuesca vs Huesca).
     for (const pl of placeFields) {
+      if (placeFieldMatchesPrimary(pl, primary)) continue;
       if (pl.length > primary.length && pl.includes(primary) && pl !== primary) {
         s -= 22;
         break;

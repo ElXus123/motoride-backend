@@ -5,7 +5,6 @@ import {
   doc,
   setDoc,
   getDoc,
-  getDocs,
   updateDoc,
   arrayUnion,
   arrayRemove,
@@ -22,7 +21,7 @@ import { parseGPX, parseRouteData } from '../lib/gpx';
 import { calculateLevel, formatDurationHoursMinutes } from '../lib/utils';
 import { requestJson } from '../lib/network';
 import { LEAFLET_LIGHT_ERROR_TILE } from '../lib/leafletTiles';
-import { Users, Plus, LogOut, User as UserIcon, Activity, Trash2, Trophy, Calendar, MapPin, Search, Clock, ChevronRight, Upload, X, Map as MapIcon, HeartHandshake, CircleDollarSign, Shield, CheckCircle2, AlertCircle, Mail, Share2, Copy, Check, Loader2, Globe, Lock, Inbox, UserPlus, ListOrdered } from 'lucide-react';
+import { Users, Plus, LogOut, User as UserIcon, Activity, Trash2, Calendar, MapPin, Search, Clock, ChevronRight, Upload, X, Map as MapIcon, HeartHandshake, CircleDollarSign, Shield, CheckCircle2, AlertCircle, Mail, Share2, Copy, Check, Loader2, Globe, Lock, Inbox, UserPlus, ListOrdered } from 'lucide-react';
 import { copyTextToClipboard, getSupportMailtoHref } from '../lib/clientInfo';
 import { generateGroupCode } from '../lib/groupCode';
 import {
@@ -96,6 +95,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   const [donationEngagementStart, setDonationEngagementStart] = useState<number | null>(null);
   const [scheduledInviteModal, setScheduledInviteModal] = useState<null | { groupId: string; groupName: string; memberUids: string[] }>(null);
   const [showPreviewModal, setShowPreviewModal] = useState<any>(null);
+  const [showJoinCodeModal, setShowJoinCodeModal] = useState(false);
   const supportPopupRef = useRef<Window | null>(null);
   const premiumCandidateWrittenThisOpenRef = useRef(false);
   const lastBackHandledAtRef = useRef(0);
@@ -104,6 +104,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     showFriendsModal: false,
     showSupportModal: false,
     hasPreview: false,
+    showJoinCodeModal: false,
   });
   /** Tras crear ruta programada: mostrar código y enlaces de invitación (antes no se veía el código). */
   const [postScheduleInvite, setPostScheduleInvite] = useState<{
@@ -230,8 +231,6 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   const [inviteInboxCount, setInviteInboxCount] = useState(0);
   const [showInvitesMailbox, setShowInvitesMailbox] = useState(false);
   const [friendsPlannedRoutes, setFriendsPlannedRoutes] = useState<any[]>([]);
-  const [friendRoutePoints, setFriendRoutePoints] = useState<Record<string, number>>({});
-  const [friendRoutePointsLoading, setFriendRoutePointsLoading] = useState(false);
   const friendsRoutesChunkRef = useRef<Record<number, Record<string, any>>>({});
 
   useEffect(() => {
@@ -283,55 +282,6 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     });
     return () => unsubs.forEach((u) => u());
   }, [user?.uid, userData?.friends]);
-
-  /** Puntos que el amigo (creador) ha sumado en rideHistory para esa misma ruta (mismo groupId). */
-  useEffect(() => {
-    if (!user?.uid || friendsPlannedRoutes.length === 0) {
-      setFriendRoutePoints({});
-      setFriendRoutePointsLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setFriendRoutePointsLoading(true);
-    (async () => {
-      const next: Record<string, number> = {};
-      await Promise.all(
-        friendsPlannedRoutes.map(async (route) => {
-          const gid = route.id as string;
-          const creator = route.createdBy as string | undefined;
-          if (!gid || !creator) {
-            next[gid] = 0;
-            return;
-          }
-          try {
-            const q = query(
-              collection(db, 'rideHistory'),
-              where('groupId', '==', gid),
-              where('uid', '==', creator)
-            );
-            const snap = await getDocs(q);
-            let total = 0;
-            snap.forEach((d) => {
-              const raw = d.data();
-              const sc = Number(raw.score ?? raw.pointsEarned ?? 0);
-              if (Number.isFinite(sc)) total += sc;
-            });
-            next[gid] = total;
-          } catch (e) {
-            console.error('Puntos ruta amigo:', e);
-            next[gid] = 0;
-          }
-        })
-      );
-      if (!cancelled) {
-        setFriendRoutePoints(next);
-        setFriendRoutePointsLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.uid, friendsPlannedRoutes]);
 
   useEffect(() => {
     const handleOnline = () => setIsOffline(false);
@@ -406,6 +356,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   // Create browser-history layers for dashboard overlays.
   useEffect(() => {
     const prev = prevLayersRef.current;
+    if (showJoinCodeModal && !prev.showJoinCodeModal) window.history.pushState({ layer: 'joinCode' }, '');
     if (showCreateModal && !prev.showCreateModal) window.history.pushState({ layer: 'create' }, '');
     if (showFriendsModal && !prev.showFriendsModal) window.history.pushState({ layer: 'friends' }, '');
     if (showSupportModal && !prev.showSupportModal) window.history.pushState({ layer: 'support' }, '');
@@ -416,8 +367,9 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       showFriendsModal,
       showSupportModal,
       hasPreview: !!showPreviewModal,
+      showJoinCodeModal,
     };
-  }, [showCreateModal, showFriendsModal, showSupportModal, showPreviewModal]);
+  }, [showJoinCodeModal, showCreateModal, showFriendsModal, showSupportModal, showPreviewModal]);
 
   // Mobile back button: close external popup/overlays before leaving dashboard.
   useEffect(() => {
@@ -439,6 +391,10 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
         setShowPreviewModal(null);
         return;
       }
+      if (showJoinCodeModal) {
+        setShowJoinCodeModal(false);
+        return;
+      }
       if (showCreateModal) {
         closeCreateModal();
         return;
@@ -453,7 +409,15 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, [showCreateModal, showFriendsModal, showSupportModal, showPreviewModal, routeGenFeedback, closeCreateModal]);
+  }, [
+    showJoinCodeModal,
+    showCreateModal,
+    showFriendsModal,
+    showSupportModal,
+    showPreviewModal,
+    routeGenFeedback,
+    closeCreateModal,
+  ]);
 
   useEffect(() => {
     if (!user) return;
@@ -860,6 +824,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
         await updateDoc(groupRef, {
           members: arrayUnion(user.uid)
         });
+        setShowJoinCodeModal(false);
         onJoinGroup(code);
       } else {
         showMessage({ variant: 'error', title: 'Código', message: 'Grupo no encontrado. Comprueba el código.' });
@@ -975,11 +940,17 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
             <button
               type="button"
               onClick={onOpenProfile}
-              className="flex w-full max-w-[min(100%,20rem)] flex-col gap-0 py-1 text-left rounded-[1.25rem] focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/70 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
+              className="flex w-full max-w-[min(100%,20rem)] flex-col gap-0 py-1 text-center rounded-[1.25rem] focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/70 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
               aria-label={`Abrir perfil: nivel ${level} y experiencia hacia el nivel ${level + 1}`}
             >
-              <div className="flex flex-col gap-2 rounded-[1.25rem] border border-zinc-800 bg-zinc-900/80 px-3 py-2.5 transition-colors hover:border-zinc-700 hover:bg-zinc-900 sm:rounded-[1.35rem] sm:px-3.5 sm:py-3">
-                <div className="flex min-h-0 items-center gap-2">
+              <div className="relative flex flex-col gap-2 rounded-[1.25rem] border border-zinc-800 bg-zinc-900/80 px-3 py-2.5 transition-colors hover:border-zinc-700 hover:bg-zinc-900 sm:rounded-[1.35rem] sm:px-3.5 sm:py-3">
+                {isOffline && (
+                  <span
+                    className="absolute right-2.5 top-2.5 h-1.5 w-1.5 animate-pulse rounded-full bg-red-500 ring-1 ring-red-900/40"
+                    title="Modo sin conexión"
+                  />
+                )}
+                <div className="flex min-h-0 w-full flex-wrap items-center justify-center gap-2 text-center">
                   <span className="shrink-0 whitespace-nowrap rounded-full bg-orange-500/15 px-2 py-1 text-[11px] font-black text-orange-400">
                     Lv. {level}
                   </span>
@@ -988,12 +959,9 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                       <PremiumBadge compact />
                     </span>
                   )}
-                  <p className="min-w-0 flex-1 truncate text-sm font-bold text-white">
+                  <p className="max-w-[min(100%,14rem)] truncate text-sm font-bold text-white sm:max-w-[18rem]">
                     {userData?.displayName || user?.displayName || 'Motero'}
                   </p>
-                  {isOffline && (
-                    <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-red-500" title="Modo Offline" />
-                  )}
                 </div>
                 <div
                   className="h-1.5 w-full shrink-0 overflow-hidden rounded-full bg-zinc-800/95 ring-1 ring-zinc-700/60 pointer-events-none"
@@ -1009,13 +977,6 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap justify-end">
-            <a
-              href={getSupportMailtoHref()}
-              className="p-2 bg-zinc-900 border border-zinc-800 rounded-full hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-sky-400 shrink-0"
-              title="Contactar soporte"
-            >
-              <Mail size={20} />
-            </a>
             <button
               type="button"
               onClick={() => setShowSupportModal(true)}
@@ -1077,46 +1038,32 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           <div className="bg-gradient-to-br from-orange-500 to-orange-600 p-8 rounded-[2rem] shadow-xl shadow-orange-500/10 relative overflow-hidden group">
             <div className="relative z-10">
               <h2 className="text-3xl font-black mb-2 leading-tight">¿Listo para rodar?</h2>
-              <p className="text-orange-100 mb-8 text-base opacity-90 max-w-md">Crea una ruta instantánea o programa una para el futuro con tus amigos.</p>
-              <button 
-                onClick={() => {
-                  setLoading(false);
-                  setShowCreateModal(true);
-                }}
-                className="bg-white text-orange-600 px-8 py-4 rounded-2xl font-bold flex items-center gap-2 hover:bg-orange-50 shadow-lg transition-all active:scale-95"
-              >
-                <Plus size={24} />
-                Crear Nueva Ruta
-              </button>
+              <p className="text-orange-100 mb-6 text-base opacity-90 max-w-md">Crea una ruta instantánea o programa una para el futuro con tus amigos.</p>
+              <div className="flex w-full max-w-xl flex-nowrap items-center gap-1.5 sm:gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoading(false);
+                    setShowCreateModal(true);
+                  }}
+                  className="min-h-[52px] min-w-0 flex-1 bg-white text-orange-600 px-3 sm:px-6 py-3.5 rounded-2xl text-sm sm:text-base font-bold flex items-center justify-center gap-1.5 sm:gap-2 hover:bg-orange-50 shadow-lg transition-all active:scale-[0.98]"
+                >
+                  <Plus size={20} strokeWidth={2.5} className="shrink-0 sm:w-[22px] sm:h-[22px]" />
+                  <span className="truncate">Crear Ruta</span>
+                </button>
+                <div className="flex shrink-0 items-center justify-center text-white/90" aria-hidden>
+                  <ChevronRight size={20} strokeWidth={2.5} className="opacity-95 sm:w-[22px] sm:h-[22px]" />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowJoinCodeModal(true)}
+                  className="min-h-[52px] min-w-0 flex-1 rounded-2xl border-2 border-white/40 bg-white/15 px-3 sm:px-6 py-3.5 text-sm sm:text-base font-bold text-white shadow-lg transition-all hover:bg-white/25 active:scale-[0.98]"
+                >
+                  <span className="truncate">Unirse Ruta</span>
+                </button>
+              </div>
             </div>
             <MapIcon size={200} className="absolute -right-10 -bottom-10 text-white opacity-10 group-hover:scale-110 transition-transform duration-500" />
-          </div>
-
-          <div className="bg-zinc-900 border border-zinc-800 p-5 md:p-8 rounded-3xl md:rounded-[2rem] shadow-xl">
-            <h2 className="text-xl md:text-2xl font-bold mb-6 flex items-center gap-3">
-              <Users className="text-blue-500" size={24} />
-              Unirse con código
-            </h2>
-            <div className="flex flex-col gap-4">
-              <div className="flex-1 relative">
-                <input 
-                  type="text" 
-                  placeholder="CÓDIGO" 
-                  value={joinCode}
-                  onChange={(e) => setJoinCode(e.target.value)}
-                  className="w-full h-14 bg-zinc-950 border border-zinc-800 rounded-2xl px-6 text-white uppercase tracking-[0.3em] font-mono text-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all placeholder:tracking-normal placeholder:font-sans placeholder:text-zinc-600 placeholder:text-sm"
-                  maxLength={6}
-                />
-              </div>
-              <button 
-                onClick={() => joinGroup()}
-                disabled={loading || joinCode.length < 3}
-                className="h-14 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-10 rounded-2xl font-bold transition-all active:scale-95 whitespace-nowrap flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20"
-              >
-                {loading ? <Clock className="animate-spin" size={20} /> : <ChevronRight size={20} />}
-                Unirse al grupo
-              </button>
-            </div>
           </div>
         </div>
 
@@ -1240,7 +1187,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                     <button
                       type="button"
                       onClick={() => bumpAttendeesList(route.id)}
-                      className="w-full py-2 rounded-xl border border-zinc-600/60 bg-zinc-800/50 text-zinc-100 text-xs font-bold flex items-center justify-center gap-2 hover:bg-zinc-800 hover:border-zinc-500 transition-colors"
+                      className="mt-4 w-full py-2 rounded-xl border border-zinc-600/60 bg-zinc-800/50 text-zinc-100 text-xs font-bold flex items-center justify-center gap-2 hover:bg-zinc-800 hover:border-zinc-500 transition-colors"
                     >
                       <ListOrdered size={14} className="text-orange-400 shrink-0" />
                       Ver lista de apuntados
@@ -1271,12 +1218,6 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           {friendsPlannedRoutes.length > 0 ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {friendsPlannedRoutes.map((route) => {
-                const pts = friendRoutePoints[route.id] ?? 0;
-                const ptsLine = friendRoutePointsLoading
-                  ? null
-                  : pts > 0
-                    ? `+${Math.round(pts)} pts en esta ruta`
-                    : '0 pts — sin resumen guardado aún';
                 const canEnterSession = canEnterScheduledRouteSession(route.scheduledTimestamp);
                 const isJoined = route.members?.includes(user?.uid);
                 const isCreator = route.createdBy === user?.uid;
@@ -1303,14 +1244,6 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                         </span>
                       </div>
                     </div>
-                    <p className="text-[10px] font-bold flex items-center gap-1 text-amber-400/95">
-                      <Trophy size={12} className="shrink-0 opacity-90" />
-                      {friendRoutePointsLoading ? (
-                        <span className="text-zinc-500 font-medium">Cargando puntos…</span>
-                      ) : (
-                        ptsLine
-                      )}
-                    </p>
                     <p className="text-[10px] text-zinc-600 capitalize flex items-center gap-1">
                       <MapPin size={10} />
                       {route.municipality}, {route.province}
@@ -1365,7 +1298,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                     <button
                       type="button"
                       onClick={() => bumpAttendeesList(route.id)}
-                      className="w-full py-2 rounded-xl border border-zinc-600/60 bg-zinc-800/50 text-zinc-100 text-xs font-bold flex items-center justify-center gap-2 hover:bg-zinc-800 hover:border-zinc-500 transition-colors"
+                      className="mt-3 w-full py-2 rounded-xl border border-zinc-600/60 bg-zinc-800/50 text-zinc-100 text-xs font-bold flex items-center justify-center gap-2 hover:bg-zinc-800 hover:border-zinc-500 transition-colors"
                     >
                       <ListOrdered size={14} className="text-orange-400 shrink-0" />
                       Ver lista de apuntados
@@ -1501,7 +1434,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                       <button
                         type="button"
                         onClick={() => bumpAttendeesList(route.id)}
-                        className="w-full py-2 rounded-xl border border-zinc-600/60 bg-zinc-800/50 text-zinc-100 text-[10px] font-bold flex items-center justify-center gap-1.5 hover:bg-zinc-800 hover:border-zinc-500 transition-colors"
+                        className="mt-3 w-full py-2 rounded-xl border border-zinc-600/60 bg-zinc-800/50 text-zinc-100 text-[10px] font-bold flex items-center justify-center gap-1.5 hover:bg-zinc-800 hover:border-zinc-500 transition-colors"
                       >
                         <ListOrdered size={12} className="text-orange-400 shrink-0" />
                         Ver lista de apuntados
@@ -1636,8 +1569,14 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
 
       {/* Support Modal */}
       {showSupportModal && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <div className="bg-zinc-900 border border-zinc-800 w-full max-w-md rounded-3xl overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-200">
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+          onClick={closeSupportModal}
+        >
+          <div
+            className="bg-zinc-900 border border-zinc-800 w-full max-w-md rounded-3xl overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
               <h2 className="text-xl font-bold text-white flex items-center gap-2">
                 <HeartHandshake size={20} className="text-orange-400" />
@@ -1658,7 +1597,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                   openSupportLink('https://ko-fi.com/motorideapp');
                   if (user) setDonationEngagementStart(Date.now());
                 }}
-                className="w-full bg-zinc-950 border border-zinc-800 hover:border-emerald-500/40 rounded-2xl p-4 flex items-center gap-3 transition-all"
+                className="w-full bg-zinc-950 border border-zinc-800 hover:border-emerald-500/40 rounded-2xl p-4 flex items-center gap-3 transition-all text-left"
               >
                 <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
                   <CircleDollarSign size={18} />
@@ -1668,6 +1607,80 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                   <p className="text-[11px] text-zinc-500">Aporte voluntario · chat de voz Premium tras activación manual.</p>
                 </div>
               </button>
+
+              <div className="pt-4 border-t border-zinc-800 space-y-2">
+                <p className="text-[11px] text-zinc-500 leading-relaxed">
+                  ¿Dudas, algo no funciona o una idea? Escríbenos por correo; leemos los mensajes y te ayudamos cuando podamos.
+                </p>
+                <a
+                  href={getSupportMailtoHref()}
+                  className="w-full bg-zinc-950 border border-zinc-800 hover:border-sky-500/40 rounded-2xl p-4 flex items-start gap-3 transition-all text-left"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-sky-500/15 text-sky-400 flex items-center justify-center shrink-0">
+                    <Mail size={18} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-white">Contacto por correo</p>
+                    <p className="text-[11px] text-zinc-500 mt-0.5">
+                      Se abrirá tu app de correo con un texto breve; puedes cambiarlo o borrarlo y enviar cuando quieras.
+                    </p>
+                  </div>
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showJoinCodeModal && (
+        <div
+          className="fixed inset-0 z-[51] flex items-center justify-center p-4 bg-zinc-950/[0.97]"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="join-code-modal-title"
+          onClick={() => setShowJoinCodeModal(false)}
+        >
+          <div
+            className="bg-zinc-900 border border-zinc-800 w-full max-w-md rounded-3xl overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-5 border-b border-zinc-800 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <Users className="text-blue-500 shrink-0" size={22} />
+                <h2 id="join-code-modal-title" className="text-lg font-bold text-white truncate">
+                  Unirse con código
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowJoinCodeModal(false)}
+                className="p-2 hover:bg-zinc-800 rounded-full transition-colors text-zinc-400"
+                aria-label="Cerrar"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="relative">
+                <input
+                  type="text"
+                  placeholder="CÓDIGO"
+                  value={joinCode}
+                  onChange={(e) => setJoinCode(e.target.value)}
+                  autoFocus
+                  className="w-full h-14 bg-zinc-950 border border-zinc-800 rounded-2xl px-6 text-white uppercase tracking-[0.3em] font-mono text-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all placeholder:tracking-normal placeholder:font-sans placeholder:text-zinc-600 placeholder:text-sm"
+                  maxLength={6}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => void joinGroup()}
+                disabled={loading || joinCode.length < 3}
+                className="w-full h-14 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-6 rounded-2xl font-bold transition-all active:scale-[0.99] flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20"
+              >
+                {loading ? <Clock className="animate-spin" size={20} /> : <ChevronRight size={20} />}
+                Unirse al grupo
+              </button>
             </div>
           </div>
         </div>
@@ -1675,8 +1688,14 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
 
       {/* Create Route Modal — sin backdrop-blur en el overlay: el blur sobre toda la pantalla ralentiza el scroll interno */}
       {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/[0.97]">
-          <div className="bg-zinc-900 border border-zinc-800 w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-200 max-h-[min(92dvh,900px)] flex flex-col min-h-0">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/[0.97]"
+          onClick={closeCreateModal}
+        >
+          <div
+            className="bg-zinc-900 border border-zinc-800 w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-200 max-h-[min(92dvh,900px)] flex flex-col min-h-0"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="p-6 border-b border-zinc-800 flex items-center justify-between shrink-0">
               <h2 className="text-xl font-bold">Configurar Nueva Ruta</h2>
               <button onClick={closeCreateModal} className="p-2 hover:bg-zinc-800 rounded-full transition-colors">
@@ -1958,8 +1977,14 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       )}
 
       {postScheduleInvite && (
-        <div className="fixed inset-0 z-[55] flex items-center justify-center p-4 bg-zinc-950/[0.97]">
-          <div className="bg-zinc-900 border border-orange-500/40 w-full max-w-md rounded-3xl overflow-hidden shadow-2xl shadow-orange-500/10">
+        <div
+          className="fixed inset-0 z-[55] flex items-center justify-center p-4 bg-zinc-950/[0.97]"
+          onClick={() => setPostScheduleInvite(null)}
+        >
+          <div
+            className="bg-zinc-900 border border-orange-500/40 w-full max-w-md rounded-3xl overflow-hidden shadow-2xl shadow-orange-500/10"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="p-6 border-b border-zinc-800">
               <h2 className="text-xl font-black text-white flex items-center gap-2">
                 <Users className="text-orange-500" size={22} />
@@ -2060,8 +2085,14 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
 
       {/* Route Preview Modal — overlay opaco sin blur para no penalizar pan/zoom del mapa */}
       {showPreviewModal && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-zinc-950/[0.96]">
-          <div className="bg-zinc-900 border border-zinc-800 w-full max-w-4xl h-[80vh] rounded-3xl overflow-hidden shadow-2xl flex flex-col">
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-zinc-950/[0.96]"
+          onClick={() => setShowPreviewModal(null)}
+        >
+          <div
+            className="bg-zinc-900 border border-zinc-800 w-full max-w-4xl h-[80vh] rounded-3xl overflow-hidden shadow-2xl flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="p-4 border-b border-zinc-800 flex items-center justify-between bg-zinc-900">
               <div>
                 <h2 className="text-lg font-bold text-orange-500">{showPreviewModal.name}</h2>

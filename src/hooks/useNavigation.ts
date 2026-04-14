@@ -33,20 +33,33 @@ function roadLabel(name?: string, ref?: string): string {
   return r || n || '';
 }
 
-/** OSRM usa salida 1-based en rotondas */
+/** OSRM usa salida 1-based en rotondas (sentido horario desde la entrada). */
 function spanishRoundaboutExit(exit: number): string {
   const words: Record<number, string> = {
-    1: 'la primera salida',
-    2: 'la segunda salida',
-    3: 'la tercera salida',
-    4: 'la cuarta salida',
-    5: 'la quinta salida',
-    6: 'la sexta salida',
-    7: 'la séptima salida',
-    8: 'la octava salida',
+    1: 'la 1.ª salida',
+    2: 'la 2.ª salida',
+    3: 'la 3.ª salida',
+    4: 'la 4.ª salida',
+    5: 'la 5.ª salida',
+    6: 'la 6.ª salida',
+    7: 'la 7.ª salida',
+    8: 'la 8.ª salida',
+    9: 'la 9.ª salida',
+    10: 'la 10.ª salida',
   };
   if (words[exit]) return words[exit];
-  return `la salida n.º ${exit}`;
+  return `la salida ${exit}`;
+}
+
+/** Número de salida en rotonda (OSRM, 1-based en `maneuver.exit`). */
+function getRoundaboutExitNumber(maneuver: Record<string, unknown>): number | null {
+  const raw = maneuver?.exit;
+  if (typeof raw === 'number' && raw > 0 && Number.isFinite(raw)) return Math.round(raw);
+  if (typeof raw === 'string') {
+    const n = parseInt(String(raw).replace(/\D/g, ''), 10);
+    if (n > 0) return n;
+  }
+  return null;
 }
 
 /**
@@ -72,7 +85,6 @@ function buildStepInstruction(step: any, isOnRouteNow: boolean): { instruction: 
   const maneuver = step.maneuver || {};
   const type = maneuver.type as string | undefined;
   const mod = ((maneuver.modifier || '') as string).toLowerCase();
-  const exit = typeof maneuver.exit === 'number' ? maneuver.exit : null;
   const name = step.name as string | undefined;
   const ref = step.ref as string | undefined;
   const destinations = formatDestinations((step.destinations as string) || '');
@@ -82,27 +94,34 @@ function buildStepInstruction(step: any, isOnRouteNow: boolean): { instruction: 
 
   const appendRoad = (base: string) => {
     const lbl = roadLabel(name, ref);
-    if (lbl) return `${base} → ${lbl}`;
+    if (lbl) return `${base} por ${lbl}`;
     return base;
   };
 
   switch (type) {
     case 'roundabout':
     case 'rotary':
-    case 'roundabout turn':
+    case 'roundabout turn': {
+      const exit = getRoundaboutExitNumber(maneuver as Record<string, unknown>);
       if (exit != null && exit > 0) {
-        instruction = `En la rotonda, toma ${spanishRoundaboutExit(exit)}`;
+        instruction = `Rotonda: toma ${spanishRoundaboutExit(exit)}`;
+        detail =
+          'Cuenta las salidas en el sentido de las agujas del reloj desde donde entras. Si hay duda, sigue la línea azul en el mapa.';
       } else {
-        instruction = 'Entra en la rotonda y sigue tu ruta';
+        instruction = 'Entra en la rotonda y sigue el trazado';
+        detail =
+          'En cuanto el mapa muestre el número de salida, úsalo; si no, sigue la curva de la ruta.';
       }
-      if (name || ref) detail = roadLabel(name, ref) || null;
+      const road = roadLabel(name, ref);
+      if (road) detail = `${road}. ${detail}`;
       break;
+    }
 
     case 'exit roundabout':
     case 'exit rotary':
       if (mod.includes('right')) instruction = 'Sal de la rotonda por la derecha';
       else if (mod.includes('left')) instruction = 'Sal de la rotonda por la izquierda';
-      else if (mod.includes('straight') || mod.includes('slight')) instruction = 'Sal de la rotonda (sigue recto)';
+      else if (mod.includes('straight') || mod.includes('slight')) instruction = 'Sal de la rotonda (sigue de frente)';
       else instruction = 'Sal de la rotonda';
       if (name || ref) detail = roadLabel(name, ref) || null;
       break;

@@ -30,24 +30,32 @@ export function getBrowserLabel(): string {
 }
 
 export function buildSupportMailBody(userNote: string): string {
+  const note = userNote.trim();
+  const main =
+    note ||
+    [
+      'Hola,',
+      '',
+      'Escribe aquí tu mensaje (duda, fallo que ves o sugerencia).',
+      '',
+      'Gracias.',
+    ].join('\n');
   const href = typeof window !== 'undefined' ? window.location.href : '';
-  const lines = [
-    '--- Datos automáticos (no borrar, ayuda a depurar) ---',
-    `Sistema: ${getClientPlatform()}`,
-    `Navegador: ${getBrowserLabel()}`,
-    `Pantalla: ${typeof screen !== 'undefined' ? `${screen.width}x${screen.height}` : 'n/d'}`,
-    `URL: ${href}`,
-    `User-Agent: ${typeof navigator !== 'undefined' ? navigator.userAgent : 'n/d'}`,
+  const optional = [
     '',
-    '--- Tu mensaje ---',
-    userNote.trim() || '(describe el problema y los pasos para reproducirlo)',
-    '',
-  ];
-  return lines.join('\n');
+    '—',
+    'Datos opcionales para el equipo:',
+    `${getClientPlatform()} · ${getBrowserLabel()}`,
+    typeof screen !== 'undefined' ? `Pantalla: ${screen.width}×${screen.height}` : '',
+    href ? `Enlace: ${href}` : '',
+  ]
+    .filter((line) => line !== '')
+    .join('\n');
+  return `${main}\n${optional}`;
 }
 
 export function getSupportMailtoHref(): string {
-  const subject = encodeURIComponent('Soporte MotoRide');
+  const subject = encodeURIComponent('Consulta MotoRide');
   const body = encodeURIComponent(buildSupportMailBody(''));
   return `mailto:${SUPPORT_EMAIL}?subject=${subject}&body=${body}`;
 }
