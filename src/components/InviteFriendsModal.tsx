@@ -51,7 +51,12 @@ export default function InviteFriendsModal({ open, onClose, groupId, groupName, 
   const invite = async (friendUid: string) => {
     if (!user) return;
     const gid = groupId.toUpperCase().trim();
-    if (gid.length !== 6 || gid === 'REPEATED') return;
+    if (gid === 'REPEATED' || gid.length !== 6) {
+      window.alert(
+        'No se puede enviar la invitación: el código de ruta no es válido (debe ser 6 caracteres). Si acabas de crear la ruta, vuelve a abrir Invitar.'
+      );
+      return;
+    }
     setSendingId(friendUid);
     try {
       const safeName = (groupName || 'Ruta').trim().slice(0, 120) || 'Ruta';

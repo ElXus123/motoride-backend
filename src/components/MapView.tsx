@@ -25,6 +25,7 @@ import PremiumBadge from './PremiumBadge';
 import InviteFriendsModal from './InviteFriendsModal';
 import { Upload, ArrowLeft, Copy, Check, Navigation, AlertTriangle, Play, Square, ArrowUp, MapPin, Trophy, Bell, AlertCircle, Wrench, Fuel, X, Maximize, Minimize, Search, Share2, Menu, Target, LogOut, Users, UserPlus, Mic, MicOff, ShieldAlert, Activity, Layers, Lock, LockOpen, Smartphone, RotateCw, Crown, WifiOff, Monitor, Loader2 } from 'lucide-react';
 import { copyTextToClipboard } from '../lib/clientInfo';
+import { generateGroupCode } from '../lib/groupCode';
 import { motion, AnimatePresence } from 'motion/react';
 
 // Tile prefetching helpers
@@ -783,6 +784,9 @@ export default function MapView({
 
   const { level: userLevel } = calculateLevel(score);
   const isHost = group?.createdBy === user?.uid;
+  /** Evita cleanups del efecto pagehide/unmount cuando `isHost` pasa de false→true al cargar el snapshot del grupo (p. ej. tras promover desde REPEATED). */
+  const isHostRef = useRef(!!isHost);
+  isHostRef.current = !!isHost;
   const isRecording = group?.isRecording || false;
   
   const headingHistoryRef = useRef<{heading: number, time: number}[]>([]);
@@ -969,7 +973,9 @@ export default function MapView({
         name: 'Repitiendo Ruta',
         routeGeoJSON: preloadedRoute,
         isEsporadica: true,
-        startTime: Date.now()
+        startTime: Date.now(),
+        createdBy: user?.uid,
+        members: user?.uid ? [user.uid] : [],
       });
       return;
     }
@@ -980,7 +986,7 @@ export default function MapView({
       handleFirestoreError(error, OperationType.GET, `groups/${groupId}`);
     });
     return unsub;
-  }, [groupId, preloadedRoute]);
+  }, [groupId, preloadedRoute, user?.uid]);
 
   // Listen to locations of group members via Socket.io
   useEffect(() => {
@@ -1108,7 +1114,7 @@ export default function MapView({
     if (!groupId || groupId === 'REPEATED' || !user || leaveInProgressRef.current) return;
     leaveInProgressRef.current = true;
     try {
-      if (isHost) {
+      if (isHostRef.current) {
         const hostLeftAt = Date.now();
         await updateDoc(doc(db, 'groups', groupId), {
           isRecording: false,
@@ -1227,7 +1233,9 @@ export default function MapView({
         deleteGroupIfHost('unmount');
       }
     };
-  }, [groupId, user?.uid, isHost]);
+    // No incluir `isHost` aquí: al llegar el snapshot del grupo, isHost pasa a true y el cleanup
+    // anterior ejecutaría deleteGroupIfHost con valores obsoletos y podría expulsar al anfitrión.
+  }, [groupId, user?.uid]);
 
   // GPS-based lean angle estimation (fallback for when phone is in pocket/screen off)
   useEffect(() => {
@@ -1889,7 +1897,7 @@ export default function MapView({
     }
     setInviteBusy(true);
     try {
-      const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+      const code = generateGroupCode();
       const routeName =
         group?.name && group.name !== 'Repitiendo Ruta' ? String(group.name).slice(0, 100) : 'Ruta compartida';
       await setDoc(doc(db, 'groups', code), {

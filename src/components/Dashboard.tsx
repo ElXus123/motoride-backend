@@ -10,6 +10,7 @@ import { requestJson } from '../lib/network';
 import { LEAFLET_TRANSPARENT_ERROR_TILE } from '../lib/leafletTiles';
 import { Users, Plus, LogOut, User as UserIcon, Activity, Trash2, Trophy, Calendar, MapPin, Search, Clock, ChevronRight, Upload, X, Map as MapIcon, Play, HeartHandshake, CircleDollarSign, Shield, CheckCircle2, AlertCircle, Mail, Share2, Copy, Check, Loader2 } from 'lucide-react';
 import { copyTextToClipboard, getSupportMailtoHref } from '../lib/clientInfo';
+import { generateGroupCode } from '../lib/groupCode';
 import FriendsModal from './FriendsModal';
 import AdminPointsPanel from './AdminPointsPanel';
 import PremiumBadge from './PremiumBadge';
@@ -413,7 +414,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     }
 
     setLoading(true);
-    const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+    const code = generateGroupCode();
     
     const scheduledTimestamp = routeType === 'scheduled' 
       ? new Date(`${scheduledDate}T${scheduledTime}`).getTime() 
