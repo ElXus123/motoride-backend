@@ -11,6 +11,8 @@ export const useLocationTracking = (isActive: boolean, groupId: string, extraDat
   const [speed, setSpeed] = useState<number | null>(null);
   const [heading, setHeading] = useState<number | null>(null);
   const [currentLocation, setCurrentLocation] = useState<{lat: number, lng: number} | null>(null);
+  /** Radio de incertidumbre horizontal del último fix (m). `null` si el SO no lo da. */
+  const [horizontalAccuracy, setHorizontalAccuracy] = useState<number | null>(null);
   /** Curso sobre el suelo (histórico de posiciones) cuando el GPS no da heading */
   const [courseOverGround, setCourseOverGround] = useState<number | null>(null);
   const positionHistoryRef = useRef<Array<{ lat: number; lng: number; t: number }>>([]);
@@ -20,6 +22,8 @@ export const useLocationTracking = (isActive: boolean, groupId: string, extraDat
   const lastPersistedLocRef = useRef<{ lat: number; lng: number } | null>(null);
   /** Último paquete enviado por socket (para reemitir tras location-sync-request). */
   const lastSocketPayloadRef = useRef<Record<string, unknown> | null>(null);
+  /** Limita ráfagas de `update-location` (algunos dispositivos entregan varios fixes/s). El intervalo de 5s sigue siendo red de seguridad. */
+  const lastSocketEmitRef = useRef<{ t: number; lat: number; lng: number; alertKey: string } | null>(null);
   useEffect(() => {
     extraDataRef.current = extraData;
   }, [extraData]);
@@ -75,7 +79,7 @@ export const useLocationTracking = (isActive: boolean, groupId: string, extraDat
 
       watchId = navigator.geolocation.watchPosition(
         (position) => {
-          const { latitude, longitude, speed: gpsSpeed, heading: gpsHeading } = position.coords;
+          const { latitude, longitude, speed: gpsSpeed, heading: gpsHeading, accuracy } = position.coords;
           setError(null);
           
           lastLat = latitude;
@@ -86,6 +90,9 @@ export const useLocationTracking = (isActive: boolean, groupId: string, extraDat
           setSpeed(gpsSpeed); // meters per second
           setHeading(gpsHeading);
           setCurrentLocation({ lat: latitude, lng: longitude });
+          setHorizontalAccuracy(
+            accuracy != null && Number.isFinite(accuracy) && accuracy > 0 && accuracy < 5000 ? accuracy : null
+          );
 
           const now = Date.now();
           const hist = positionHistoryRef.current;
@@ -102,9 +109,26 @@ export const useLocationTracking = (isActive: boolean, groupId: string, extraDat
             }
           }
 
-          // Broadcast location and score via Socket.io EVERY SECOND (or whenever GPS updates)
-          // This costs ZERO Firestore quota
+          // Socket.io: no en cada fix GPS (evita ráfagas); sí si hay movimiento, alerta nueva o pasó el intervalo mínimo.
           if (groupId !== 'REPEATED') {
+            const alertRaw = extraDataRef.current?.alert ?? null;
+            const alertKey =
+              alertRaw && typeof alertRaw === 'object'
+                ? JSON.stringify(alertRaw)
+                : alertRaw != null
+                  ? String(alertRaw)
+                  : '';
+            const lastEmit = lastSocketEmitRef.current;
+            const movedSinceEmit = lastEmit
+              ? getDistance(latitude, longitude, lastEmit.lat, lastEmit.lng)
+              : Number.POSITIVE_INFINITY;
+            const minSocketMs = 850;
+            const skipBurst =
+              lastEmit != null &&
+              now - lastEmit.t < minSocketMs &&
+              movedSinceEmit < 6 &&
+              lastEmit.alertKey === alertKey;
+
             const payload = {
               groupId,
               uid: user.uid,
@@ -120,7 +144,10 @@ export const useLocationTracking = (isActive: boolean, groupId: string, extraDat
               level: extraDataRef.current?.level || 1
             };
             lastSocketPayloadRef.current = payload;
-            socket.emit('update-location', payload);
+            if (!skipBurst) {
+              lastSocketEmitRef.current = { t: now, lat: latitude, lng: longitude, alertKey };
+              socket.emit('update-location', payload);
+            }
 
             // Fallback persistence for cross-client visibility if socket packets are missed.
             // Use a real elapsed-time throttle to avoid burst writes on some devices.
@@ -157,6 +184,7 @@ export const useLocationTracking = (isActive: boolean, groupId: string, extraDat
         },
         (err) => {
           console.error('Geolocation error:', err);
+          setHorizontalAccuracy(null);
           if (err.code === 1) {
             setError('Permiso de GPS denegado');
           } else if (err.code === 2) {
@@ -169,14 +197,23 @@ export const useLocationTracking = (isActive: boolean, groupId: string, extraDat
         },
         {
           enableHighAccuracy: true,
-          maximumAge: 0,
-          timeout: 5000
+          // Fijaciones recientes del SO: menos despertares del chip y menos TIMEOUT en señal débil (túnel/bosque).
+          maximumAge: 2500,
+          timeout: 18000
         }
       );
 
       // Also emit every 5 seconds to ensure new users see everyone even if stationary
       intervalId = setInterval(() => {
         if (lastLat !== 0 && lastLng !== 0 && groupId !== 'REPEATED') {
+          const t = Date.now();
+          const alertRaw = extraDataRef.current?.alert ?? null;
+          const alertKey =
+            alertRaw && typeof alertRaw === 'object'
+              ? JSON.stringify(alertRaw)
+              : alertRaw != null
+                ? String(alertRaw)
+                : '';
           const payload = {
             groupId,
             uid: user.uid,
@@ -185,13 +222,14 @@ export const useLocationTracking = (isActive: boolean, groupId: string, extraDat
             speed: lastSpeed,
             heading: lastHeading,
             score: extraDataRef.current?.score || 0,
-            timestamp: Date.now(),
+            timestamp: t,
             photoURL: extraDataRef.current?.photoURL || '',
             displayName: extraDataRef.current?.displayName || 'Motero',
             alert: extraDataRef.current?.alert || null,
             level: extraDataRef.current?.level || 1
           };
           lastSocketPayloadRef.current = payload;
+          lastSocketEmitRef.current = { t, lat: lastLat, lng: lastLng, alertKey };
           socket.emit('update-location', payload);
         }
       }, 5000);
@@ -209,5 +247,5 @@ export const useLocationTracking = (isActive: boolean, groupId: string, extraDat
     };
   }, [isActive, user, groupId]);
 
-  return { error, speed, heading, currentLocation, courseOverGround };
+  return { error, speed, heading, currentLocation, courseOverGround, horizontalAccuracy };
 };

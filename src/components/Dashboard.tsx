@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { doc, setDoc, getDoc, updateDoc, arrayUnion, arrayRemove, collection, query, where, onSnapshot, deleteDoc, orderBy, limit } from 'firebase/firestore';
+import { doc, setDoc, getDoc, updateDoc, arrayUnion, arrayRemove, collection, query, where, onSnapshot, deleteDoc, orderBy, limit, deleteField } from 'firebase/firestore';
 import { db, logOut, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { parseGPX, parseRouteData } from '../lib/gpx';
 import { calculateLevel } from '../lib/utils';
 import { requestJson } from '../lib/network';
 import { LEAFLET_TRANSPARENT_ERROR_TILE } from '../lib/leafletTiles';
-import { Users, Plus, LogOut, User as UserIcon, Activity, Trash2, Trophy, Calendar, MapPin, Search, Clock, ChevronRight, Upload, X, Map as MapIcon, Play, HeartHandshake, CircleDollarSign, Shield, CheckCircle2, AlertCircle, Mail, Share2, Copy, Check } from 'lucide-react';
+import { Users, Plus, LogOut, User as UserIcon, Activity, Trash2, Trophy, Calendar, MapPin, Search, Clock, ChevronRight, Upload, X, Map as MapIcon, Play, HeartHandshake, CircleDollarSign, Shield, CheckCircle2, AlertCircle, Mail, Share2, Copy, Check, Loader2 } from 'lucide-react';
 import { copyTextToClipboard, getSupportMailtoHref } from '../lib/clientInfo';
 import FriendsModal from './FriendsModal';
 import AdminPointsPanel from './AdminPointsPanel';
@@ -118,6 +118,8 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deletingType, setDeletingType] = useState<'history' | 'scheduled' | null>(null);
+  const [rideInviteJoining, setRideInviteJoining] = useState(false);
+  const [inviteFromName, setInviteFromName] = useState<string | null>(null);
   
   // Create Route Form State
   const [routeName, setRouteName] = useState('');
@@ -703,6 +705,63 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     setDeletingType(null);
   };
 
+  useEffect(() => {
+    const inv = userData?.rideInvitePending;
+    if (!inv?.fromUid) {
+      setInviteFromName(null);
+      return;
+    }
+    let cancelled = false;
+    void getDoc(doc(db, 'users', inv.fromUid)).then((s) => {
+      if (cancelled) return;
+      if (s.exists()) setInviteFromName((s.data()?.displayName as string) || 'Un amigo');
+      else setInviteFromName('Un amigo');
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [userData?.rideInvitePending?.fromUid, userData?.rideInvitePending?.sentAt]);
+
+  const acceptRideInvite = async () => {
+    const inv = userData?.rideInvitePending as { groupId?: string } | undefined;
+    if (!inv?.groupId || !user) return;
+    setRideInviteJoining(true);
+    try {
+      const code = String(inv.groupId).toUpperCase().trim();
+      const gRef = doc(db, 'groups', code);
+      const snap = await getDoc(gRef);
+      if (!snap.exists()) {
+        await updateDoc(doc(db, 'users', user.uid), { rideInvitePending: deleteField() });
+        setRouteGenFeedback({
+          kind: 'error',
+          title: 'Ruta no disponible',
+          detail: 'Esa ruta ya no existe o el código no es válido.',
+        });
+        return;
+      }
+      await updateDoc(gRef, { members: arrayUnion(user.uid) });
+      await updateDoc(doc(db, 'users', user.uid), { rideInvitePending: deleteField() });
+      onJoinGroup(code);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `groups/${inv.groupId}`);
+    } finally {
+      setRideInviteJoining(false);
+    }
+  };
+
+  const dismissRideInvite = async () => {
+    if (!user) return;
+    try {
+      await updateDoc(doc(db, 'users', user.uid), { rideInvitePending: deleteField() });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
+    }
+  };
+
+  const rideInv = userData?.rideInvitePending as
+    | { groupId?: string; groupName?: string; sentAt?: number; fromUid?: string }
+    | undefined;
+
   return (
     <div className="min-h-dvh bg-zinc-950 text-white overflow-x-hidden pb-[env(safe-area-inset-bottom,0px)]">
       {/* Header — respeta notch / Dynamic Island (pt = max padding, safe-area) */}
@@ -783,6 +842,37 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
         {pointsFixError && (
           <div className="bg-red-500/10 border border-red-500/30 rounded-2xl px-4 py-3 text-sm text-red-200">
             {pointsFixError}
+          </div>
+        )}
+
+        {rideInv?.groupId && (
+          <div className="bg-gradient-to-r from-blue-600/25 to-orange-500/20 border border-blue-500/40 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] font-black uppercase tracking-widest text-blue-300 mb-1">Invitación a ruta</p>
+              <p className="text-white font-bold text-sm sm:text-base leading-snug">
+                <span className="text-blue-200">{inviteFromName || 'Un amigo'}</span> te invita a{' '}
+                <span className="text-orange-300">{rideInv.groupName || 'una ruta'}</span>
+              </p>
+              <p className="text-xs text-zinc-400 mt-1 font-mono">Código: {rideInv.groupId}</p>
+            </div>
+            <div className="flex gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => void dismissRideInvite()}
+                className="px-4 py-2.5 rounded-xl bg-zinc-800 text-zinc-300 text-sm font-bold hover:bg-zinc-700"
+              >
+                Ignorar
+              </button>
+              <button
+                type="button"
+                disabled={rideInviteJoining}
+                onClick={() => void acceptRideInvite()}
+                className="px-4 py-2.5 rounded-xl bg-orange-500 text-white text-sm font-black hover:bg-orange-400 disabled:opacity-60 flex items-center justify-center gap-2 min-w-[7rem]"
+              >
+                {rideInviteJoining ? <Loader2 size={16} className="animate-spin" /> : null}
+                Unirme
+              </button>
+            </div>
           </div>
         )}
 

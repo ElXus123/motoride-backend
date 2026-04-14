@@ -80,22 +80,28 @@ export const useLeanAngle = () => {
       lastOrientationUpdateRef.current = Date.now();
       let angle = 0;
       const isLandscape = window.innerWidth > window.innerHeight;
-      const orientation = window.orientation || 0;
+      const orientationAngle =
+        typeof screen !== 'undefined' && screen.orientation && typeof screen.orientation.angle === 'number'
+          ? screen.orientation.angle
+          : typeof window !== 'undefined' && typeof window.orientation === 'number'
+            ? window.orientation
+            : 0;
 
-      // Isolate lateral lean (roll)
-      // On most devices:
-      // Portrait: gamma is roll, beta is pitch
-      // Landscape: beta is roll, gamma is pitch
-      
+      // Roll lateral: en retrato gamma; en apaisado suele mezclarse beta/gamma según el dispositivo.
       let roll = 0;
       if (isLandscape) {
-        // En landscape, beta suele ser el balanceo lateral; el signo depende de window.orientation.
-        roll = event.beta || 0;
-        if (orientation === -90 || orientation === 270) {
-          roll = -roll;
+        const beta = event.beta ?? 0;
+        const gamma = event.gamma ?? 0;
+        // Si un eje domina claramente, usarlo (mejor en bolsillo/montajes raros).
+        if (Math.abs(gamma) > Math.abs(beta) * 1.15) {
+          roll = orientationAngle === 90 || orientationAngle === -270 ? gamma : -gamma;
+        } else {
+          roll = beta;
+          if (orientationAngle === 270 || orientationAngle === -90) {
+            roll = -roll;
+          }
         }
       } else {
-        // In portrait, gamma is the lateral tilt
         roll = event.gamma || 0;
       }
 
@@ -170,8 +176,7 @@ export const useLeanAngle = () => {
     setMaxLeanRight(0);
   };
 
-  const calibrate = () => {
-    // Use recent smoothed samples to avoid calibrating on a noisy instant.
+  const calibrate = useCallback(() => {
     const samples = angleHistoryRef.current.slice(-15);
     if (!samples.length) {
       setCalibrationOffset(smoothedAngleRef.current);
@@ -180,15 +185,14 @@ export const useLeanAngle = () => {
     const sorted = [...samples].sort((a, b) => a - b);
     const median = sorted[Math.floor(sorted.length / 2)];
     setCalibrationOffset(median);
-  };
+  }, []);
 
-  const applyCalibrationStep = (error: number, strength: number = 0.005) => {
-    setCalibrationOffset(prev => {
+  const applyCalibrationStep = useCallback((error: number, strength: number = 0.005) => {
+    setCalibrationOffset((prev) => {
       const next = prev + error * strength;
-      // Hard safety clamp to avoid runaway calibration.
       return Math.max(-30, Math.min(30, next));
     });
-  };
+  }, []);
 
   return { leanAngle, maxLeanLeft, maxLeanRight, permissionGranted, requestPermission, resetMaxLean, calibrate, applyCalibrationStep };
 };

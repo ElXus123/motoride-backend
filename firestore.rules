@@ -54,7 +54,16 @@ service cloud.firestore {
              (!('friends' in data) || data.friends is list) &&
              (!('friendRequestsIncoming' in data) || data.friendRequestsIncoming is list) &&
              (!('friendRequestsOutgoing' in data) || data.friendRequestsOutgoing is list) &&
-             isValidOptionalBool('isPremium');
+             isValidOptionalBool('isPremium') &&
+             (!('rideInvitePending' in data) || data.rideInvitePending == null ||
+               (data.rideInvitePending is map &&
+                data.rideInvitePending.keys().hasAll(['fromUid','groupId','groupName','sentAt']) &&
+                data.rideInvitePending.fromUid is string &&
+                data.rideInvitePending.groupId is string &&
+                data.rideInvitePending.groupId.size() == 6 &&
+                data.rideInvitePending.groupName is string &&
+                data.rideInvitePending.groupName.size() <= 120 &&
+                data.rideInvitePending.sentAt is number));
     }
 
     function isOptionalRouteGeoJSON(data) {
@@ -162,6 +171,21 @@ service cloud.firestore {
         !(request.auth.uid in friendsList(request.resource.data));
     }
 
+    function crossUserSetRideInviteOnFriend(friendId) {
+      let me = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      let friends = ('friends' in me && me.friends is list) ? me.friends : [];
+      return request.auth.uid != friendId &&
+        friendId in friends &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rideInvitePending']) &&
+        request.resource.data.rideInvitePending is map &&
+        request.resource.data.rideInvitePending.fromUid == request.auth.uid &&
+        request.resource.data.rideInvitePending.groupId is string &&
+        request.resource.data.rideInvitePending.groupId.size() == 6 &&
+        request.resource.data.rideInvitePending.groupName is string &&
+        request.resource.data.rideInvitePending.groupName.size() <= 120 &&
+        request.resource.data.rideInvitePending.sentAt is number;
+    }
+
     match /users/{userId} {
       allow read: if isAuthenticated();
       allow create: if isOwner(userId) && isValidUser(request.resource.data) &&
@@ -176,7 +200,8 @@ service cloud.firestore {
         crossUserRemoveSelfFromTheirIncoming(userId) ||
         crossUserRemoveSelfFromTheirOutgoing(userId) ||
         crossUserAcceptFriendOnRequester(userId) ||
-        crossUserRemoveSelfFromTheirFriends(userId)
+        crossUserRemoveSelfFromTheirFriends(userId) ||
+        crossUserSetRideInviteOnFriend(userId)
       );
     }
 

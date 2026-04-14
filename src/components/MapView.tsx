@@ -13,7 +13,7 @@ import { useNavigationHeading } from '../hooks/useNavigationHeading';
 import { snapPointToRouteDetailed } from '../lib/navigationPose';
 import { useRoadData } from '../hooks/useRoadData';
 import { parseGPX, parseRouteData } from '../lib/gpx';
-import { getDistance } from '../lib/geoUtils';
+import { getDistance, offsetByMeters } from '../lib/geoUtils';
 import { requestJson } from '../lib/network';
 import { getActivePointsConfig } from '../lib/pointsConfig';
 import { fetchRainViewerTileUrl } from '../lib/rainviewer';
@@ -22,13 +22,30 @@ import { weatherWmoToLucide } from '../lib/weatherWmo';
 import socket from '../lib/socket';
 import { useVoiceChat } from '../hooks/useVoiceChat';
 import PremiumBadge from './PremiumBadge';
-import { Upload, ArrowLeft, Copy, Check, Navigation, AlertTriangle, Play, Square, ArrowUp, MapPin, Trophy, Bell, AlertCircle, Wrench, Fuel, X, Maximize, Minimize, Search, Share2, Menu, Target, LogOut, Users, Mic, MicOff, ShieldAlert, Activity, Layers, Lock, LockOpen, Smartphone, RotateCw, Crown, WifiOff, Monitor } from 'lucide-react';
+import InviteFriendsModal from './InviteFriendsModal';
+import { Upload, ArrowLeft, Copy, Check, Navigation, AlertTriangle, Play, Square, ArrowUp, MapPin, Trophy, Bell, AlertCircle, Wrench, Fuel, X, Maximize, Minimize, Search, Share2, Menu, Target, LogOut, Users, UserPlus, Mic, MicOff, ShieldAlert, Activity, Layers, Lock, LockOpen, Smartphone, RotateCw, Crown, WifiOff, Monitor, Loader2 } from 'lucide-react';
 import { copyTextToClipboard } from '../lib/clientInfo';
 import { motion, AnimatePresence } from 'motion/react';
 
 // Tile prefetching helpers
 const lon2tile = (lon: number, zoom: number) => Math.floor((lon + 180) / 360 * Math.pow(2, zoom));
 const lat2tile = (lat: number, zoom: number) => Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, zoom));
+
+/**
+ * Modo bolsillo / MirrorLink: media ponderada entre inclinación IMU (useLeanAngle) y estimación por GPS.
+ * A mayor velocidad, más peso al GPS (curvatura coherente con rumbo); el sensor sigue suavizando picos del rumbo.
+ */
+function blendLeanPocketMirror(sensorDeg: number, gpsDeg: number, speedMps: number): number {
+  if (speedMps < 3) return 0;
+  let wGps: number;
+  if (speedMps >= 14) wGps = 0.78;
+  else if (speedMps >= 10) wGps = 0.65;
+  else if (speedMps >= 7) wGps = 0.52;
+  else if (speedMps >= 5) wGps = 0.4;
+  else wGps = 0.28;
+  const blended = wGps * gpsDeg + (1 - wGps) * sensorDeg;
+  return Math.max(-60, Math.min(60, Math.round(blended)));
+}
 
 /**
  * Valores válidos para `screen.orientation.lock()` (Screen Orientation API).
@@ -211,35 +228,103 @@ const MapInvalidateHelper = ({ layoutKey }: { layoutKey: string }) => {
 };
 
 // Component to handle map centering and rotation
-const MapController = ({ location, heading, isFollowing, showRanking, isRecording, speedKmh, hasActiveRoute }: { location: any, heading: number | null, isFollowing: boolean, showRanking: boolean, isRecording: boolean, speedKmh: number, hasActiveRoute: boolean }) => {
+const MapController = ({
+  location,
+  bearingForMapOffset,
+  headingRotationActive,
+  isFollowing,
+  showRanking,
+  isRecording,
+  speedKmh,
+  hasActiveRoute,
+  isLandscapeUi,
+}: {
+  location: any;
+  /** Rumbo para desplazar el centro en horizontal con mapa rotado (flecha a la derecha como GPS). */
+  bearingForMapOffset: number;
+  /** Mismo criterio que el `rotate()` del contenedor del mapa. */
+  headingRotationActive: boolean;
+  isFollowing: boolean;
+  showRanking: boolean;
+  isRecording: boolean;
+  speedKmh: number;
+  hasActiveRoute: boolean;
+  /** Sincronizado con resize/orientación (evita desfase flecha / centro tras MirrorLink o giro). */
+  isLandscapeUi: boolean;
+}) => {
   const map = useMap();
   const hasAutoZoomedRef = useRef(false);
-  
+  const lastFollowRef = useRef<{ lat: number; lng: number; zoom: number; t: number } | null>(null);
+
   useEffect(() => {
     if (isFollowing && location && typeof location.lat === 'number' && typeof location.lng === 'number') {
-      // Dynamic zoom while recording: start a bit wider so maneuvers stay visible; zoom out slightly as speed rises.
       const speedZoomSteps = Math.floor(Math.max(speedKmh, 0) / 10);
       const dynamicZoom = Math.max(15.4, 17.15 - speedZoomSteps * 0.22);
       const followZoomInitial = hasActiveRoute ? 15.35 : Math.max(map.getZoom(), 17);
-      const zoom = isRecording ? dynamicZoom : (hasAutoZoomedRef.current ? map.getZoom() : followZoomInitial);
-      const isLandscape = window.innerWidth > window.innerHeight;
-      
-      if (isLandscape) {
-        // Offset center to the right so the bike is on the right side of the screen
-        const offsetX = showRanking ? window.innerWidth / 3 : window.innerWidth / 4;
-        const targetPoint = map.project([location.lat, location.lng], zoom).subtract([offsetX, 0]);
-        const targetLatLng = map.unproject(targetPoint, zoom);
-        
-        map.setView(targetLatLng, zoom, { animate: true });
-      } else {
-        map.setView([location.lat, location.lng], zoom, { animate: true });
+      const zoom = isRecording ? dynamicZoom : hasAutoZoomedRef.current ? map.getZoom() : followZoomInitial;
+      const size = map.getSize();
+      const mapW = size.x;
+      const mapH = size.y;
+      const landscapeMap = mapW > mapH || isLandscapeUi;
+
+      const animatePan = !hasAutoZoomedRef.current;
+      const now = Date.now();
+      const prev = lastFollowRef.current;
+      const zoomChanged = prev != null && Math.abs(prev.zoom - zoom) > 0.04;
+      const movedM =
+        prev != null ? getDistance(location.lat, location.lng, prev.lat, prev.lng) : Number.POSITIVE_INFINITY;
+      const tooSoon = prev != null && now - prev.t < 1100 && movedM < 3.2 && !zoomChanged;
+      if (hasAutoZoomedRef.current && tooSoon) {
+        return;
       }
+
+      if (!hasAutoZoomedRef.current) {
+        map.invalidateSize();
+      }
+
+      if (landscapeMap && mapW > 40) {
+        // Apaisado: flecha a la derecha (carretera “adelante” a la izquierda-centro).
+        // Con mapa rotado por rumbo, un offset solo en X de Leaflet no coincide con la derecha de pantalla → centro geográfico desplazado ⊥ al rumbo.
+        const useGeoOffset =
+          headingRotationActive &&
+          Number.isFinite(bearingForMapOffset) &&
+          speedKmh > 3;
+        if (useGeoOffset) {
+          const lat = location.lat as number;
+          const cosLat = Math.max(0.2, Math.cos((lat * Math.PI) / 180));
+          const mpp = (40075016.686 * cosLat) / (256 * Math.pow(2, zoom));
+          const shiftM = Math.min(130, Math.max(38, mapW * mpp * 0.26 * (showRanking ? 1.08 : 1)));
+          const centerLeftOfTravel = offsetByMeters(lat, location.lng as number, bearingForMapOffset - 90, shiftM);
+          map.setView([centerLeftOfTravel.lat, centerLeftOfTravel.lng], zoom, { animate: animatePan });
+        } else {
+          const frac = showRanking ? 0.34 : 0.30;
+          const offsetX = mapW * frac;
+          const targetPoint = map.project([location.lat, location.lng], zoom).subtract([offsetX, 0]);
+          const targetLatLng = map.unproject(targetPoint, zoom);
+          map.setView(targetLatLng, zoom, { animate: animatePan });
+        }
+      } else {
+        map.setView([location.lat, location.lng], zoom, { animate: animatePan });
+      }
+
+      lastFollowRef.current = { lat: location.lat, lng: location.lng, zoom, t: now };
 
       if (!hasAutoZoomedRef.current) {
         hasAutoZoomedRef.current = true;
       }
     }
-  }, [location, isFollowing, map, showRanking, isRecording, speedKmh, hasActiveRoute]);
+  }, [
+    location,
+    isFollowing,
+    map,
+    showRanking,
+    isRecording,
+    speedKmh,
+    hasActiveRoute,
+    isLandscapeUi,
+    bearingForMapOffset,
+    headingRotationActive,
+  ]);
 
   return null;
 };
@@ -249,11 +334,14 @@ export default function MapView({
   onLeave,
   preloadedRoute,
   prepareHistoryLeave,
+  onPromoteFromRepeat,
 }: {
   groupId: string;
   onLeave: () => void;
   preloadedRoute?: string | null;
   prepareHistoryLeave?: () => void;
+  /** Repetir ruta → crear grupo real y enlazar la sesión (invitaciones con código de 6 caracteres). */
+  onPromoteFromRepeat?: (liveGroupCode: string) => void;
 }) {
   const LOCAL_RIDE_DRAFT_KEY = `motoride_ride_draft_${groupId}`;
   const { user } = useAuth();
@@ -311,6 +399,10 @@ export default function MapView({
   const [isFollowing, setIsFollowing] = useState(true);
   const lastHeadingRef = useRef<number | null>(null);
   const lastHeadingTimeRef = useRef<number>(Date.now());
+  /** Prefetch de teselas: posición viva (no re-disparar el debounce en cada fix GPS). */
+  const lastKnownLocForPrefetchRef = useRef<{ lat: number; lng: number } | null>(null);
+  const lastPrefetchDistRef = useRef(0);
+  const tilePrefetchGenRef = useRef(0);
   const [showTraffic, setShowTraffic] = useState(false);
   const [showWeather, setShowWeather] = useState(false);
   const [rainRadar, setRainRadar] = useState<{ url: string; maxNativeZoom: number } | null>(null);
@@ -338,17 +430,13 @@ export default function MapView({
   const [showSearchModal, setShowSearchModal] = useState(false);
   
   type TouchLockKind = 'pocket' | 'mirrorlink';
-  // Modo bolsillo (retrato) o MirrorLink (paisaje + pantalla táctil protegida)
+  // Bolsillo (retrato) o MirrorLink (paisaje: móvil en bolsillo, telemetría en pantalla externa de la moto)
   const [touchLockKind, setTouchLockKind] = useState<TouchLockKind | null>(null);
   const [pocketCountdown, setPocketCountdown] = useState(30);
   const [isPocketLocked, setIsPocketLocked] = useState(false);
   const [pocketTaps, setPocketTaps] = useState(0);
   const [lastPocketTapTime, setLastPocketTapTime] = useState(0);
   const [isLongPressing, setIsLongPressing] = useState(false);
-  const [pocketDist, setPocketDist] = useState(0);
-  const [hasCalibratedInPocket, setHasCalibratedInPocket] = useState(false);
-  /** Tras la cuenta atrás de MirrorLink: calibrando antes de mostrar mapa + bloqueo táctil */
-  const [mirrorLinkCalibrating, setMirrorLinkCalibrating] = useState(false);
   const longPressTimerRef = useRef<any>(null);
   const tapResetTimerRef = useRef<any>(null);
   const pocketTapsRef = useRef(0);
@@ -401,14 +489,14 @@ export default function MapView({
     };
   }, [showWeather]);
 
-  // Cuenta atrás 30 s (bolsillo / MirrorLink); al llegar a 0 ver efectos posteriores a useLeanAngle
+  // Cuenta atrás 30 s (bolsillo / MirrorLink); al llegar a 0, bloqueo táctil
   useEffect(() => {
-    if (!touchLockKind || isPocketLocked || mirrorLinkCalibrating || pocketCountdown <= 0) return;
+    if (!touchLockKind || isPocketLocked || pocketCountdown <= 0) return;
     const timer = window.setInterval(() => {
       setPocketCountdown((prev) => (prev > 0 ? prev - 1 : 0));
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [touchLockKind, isPocketLocked, pocketCountdown, mirrorLinkCalibrating]);
+  }, [touchLockKind, isPocketLocked, pocketCountdown]);
 
   useEffect(() => {
     pocketTapsRef.current = pocketTaps;
@@ -425,9 +513,6 @@ export default function MapView({
       setPocketTaps(0);
       pocketTapsRef.current = 0;
       setIsLongPressing(false);
-      setPocketDist(0);
-      setHasCalibratedInPocket(false);
-      setMirrorLinkCalibrating(false);
       if (navigator.vibrate) navigator.vibrate(100);
       releaseOrientationLockUi();
     }, 1500);
@@ -514,11 +599,6 @@ export default function MapView({
     setIsPocketLocked(false);
     setPocketTaps(0);
     pocketTapsRef.current = 0;
-    setMirrorLinkCalibrating(false);
-    if (kind === 'pocket') {
-      setPocketDist(0);
-      setHasCalibratedInPocket(false);
-    }
     if (tapResetTimerRef.current) clearTimeout(tapResetTimerRef.current);
     setShowSettings(false);
 
@@ -557,6 +637,9 @@ export default function MapView({
   const [searchSuggestions, setSearchSuggestions] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [shared, setShared] = useState(false);
+  const [showInviteFriends, setShowInviteFriends] = useState(false);
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [inviteModalContext, setInviteModalContext] = useState<{ groupId: string; groupName: string } | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
@@ -701,9 +784,10 @@ export default function MapView({
   
   const headingHistoryRef = useRef<{heading: number, time: number}[]>([]);
   const angleHistoryRef = useRef<number[]>([]);
+  const lastLeanAutoCalibMsRef = useRef(0);
 
   // Activate real-time location tracking
-  const { speed, heading, currentLocation, courseOverGround, error: gpsError } = useLocationTracking(true, groupId, { 
+  const { speed, heading, currentLocation, courseOverGround, horizontalAccuracy, error: gpsError } = useLocationTracking(true, groupId, { 
     score, 
     alert: alertType ? { type: alertType, timestamp: Date.now() } : null,
     displayName: displayNameToUse,
@@ -711,6 +795,16 @@ export default function MapView({
     level: userLevel,
     isHost
   });
+
+  /** Rumbo para telemetría (inclinación GPS / auto-calibración): muchos navegadores no rellenan `coords.heading`; usamos COG derivado de posiciones. */
+  const headingOrCourseForTelemetry = useMemo(() => {
+    if (heading !== null && Number.isFinite(heading)) return heading;
+    if ((speed ?? 0) >= 1.2 && courseOverGround !== null && Number.isFinite(courseOverGround)) {
+      return courseOverGround;
+    }
+    return null;
+  }, [heading, speed, courseOverGround]);
+
   const mapWeather = useOpenMeteoWeather(currentLocation?.lat, currentLocation?.lng);
   const {
     leanAngle: sensorLeanAngle,
@@ -722,9 +816,6 @@ export default function MapView({
     calibrate,
     applyCalibrationStep,
   } = useLeanAngle();
-
-  const calibrateRef = useRef(calibrate);
-  calibrateRef.current = calibrate;
 
   const playTouchLockReadyFeedback = () => {
     if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
@@ -744,30 +835,11 @@ export default function MapView({
     }
   };
 
-  // Bolsillo: al terminar 30 s, bloqueo inmediato
+  // Bolsillo o MirrorLink: al terminar la cuenta atrás, bloqueo táctil (MirrorLink = móvil en bolsillo, datos en pantalla de la moto).
   useEffect(() => {
-    if (touchLockKind !== 'pocket' || pocketCountdown !== 0 || isPocketLocked || mirrorLinkCalibrating) return;
+    if (!touchLockKind || pocketCountdown !== 0 || isPocketLocked) return;
     setIsPocketLocked(true);
     playTouchLockReadyFeedback();
-  }, [touchLockKind, pocketCountdown, isPocketLocked, mirrorLinkCalibrating]);
-
-  // MirrorLink: 30 s → calibrar inclinación → mostrar mapa (GPS) con capa táctil bloqueada
-  useEffect(() => {
-    if (touchLockKind !== 'mirrorlink' || pocketCountdown !== 0 || isPocketLocked) return;
-    let cancelled = false;
-    setMirrorLinkCalibrating(true);
-    calibrateRef.current();
-    const t = window.setTimeout(() => {
-      if (cancelled) return;
-      setIsPocketLocked(true);
-      setMirrorLinkCalibrating(false);
-      playTouchLockReadyFeedback();
-    }, 800);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(t);
-      setMirrorLinkCalibrating(false);
-    };
   }, [touchLockKind, pocketCountdown, isPocketLocked]);
 
   const needsOrientationUserGesture =
@@ -776,52 +848,47 @@ export default function MapView({
       .requestPermission === 'function';
   const [estimatedLeanAngle, setEstimatedLeanAngle] = useState(0);
 
-  // Dynamic Auto-Calibration Logic
+  // Auto-calibración en recta: antes era casi imposible (>40 km/h y rumbo ±1,5°). Afinado para uso real.
   useEffect(() => {
-    if (!currentLocation || heading === null) return;
-    
+    if (!currentLocation || headingOrCourseForTelemetry === null) return;
+
     const now = Date.now();
-    headingHistoryRef.current.push({ heading, time: now });
-    // Keep last 4 seconds for stability check
+    headingHistoryRef.current.push({ heading: headingOrCourseForTelemetry, time: now });
     if (headingHistoryRef.current.length > 40) headingHistoryRef.current.shift();
-    
+
     angleHistoryRef.current.push(sensorLeanAngle);
     if (angleHistoryRef.current.length > 40) angleHistoryRef.current.shift();
 
     const currentSpeedKmh = (speed || 0) * 3.6;
-    
-    // Conditions for dynamic calibration:
-    // 1. Speed > 40 km/h (Stable riding speed)
-    // 2. Heading is stable (max diff < 1.5 degrees in last 4s)
-    // 3. Sensor is relatively stable (not jumping wildly - protection for imprecise devices)
-    
-    if (currentSpeedKmh > 40 && headingHistoryRef.current.length >= 30) {
-      const headings = headingHistoryRef.current.map(h => h.heading);
-      const minH = Math.min(...headings);
-      const maxH = Math.max(...headings);
-      let hDiff = maxH - minH;
-      
-      // Handle 0/360 wrap around
-      if (hDiff > 180) {
-        const adjustedHeadings = headings.map(h => h < 180 ? h + 360 : h);
-        hDiff = Math.max(...adjustedHeadings) - Math.min(...adjustedHeadings);
-      }
 
-      if (hDiff < 1.5) {
-        // Check sensor stability (variance check)
-        const avgAngle = angleHistoryRef.current.reduce((a, b) => a + b, 0) / angleHistoryRef.current.length;
-        const variance = angleHistoryRef.current.reduce((a, b) => a + Math.pow(b - avgAngle, 2), 0) / angleHistoryRef.current.length;
-        
-        // Only calibrate if readings aren't jumping wildly (variance < 5)
-        // This protects against imprecise sensors or very bumpy roads
-        if (variance < 5) {
-           // Apply a very small correction step towards 0
-           // The error is the current sensorLeanAngle (which should be 0 in a straight)
-           applyCalibrationStep(sensorLeanAngle, 0.002);
-        }
-      }
+    if (currentSpeedKmh < 22 || headingHistoryRef.current.length < 24) return;
+
+    const headings = headingHistoryRef.current.map((h) => h.heading);
+    const minH = Math.min(...headings);
+    const maxH = Math.max(...headings);
+    let hDiff = maxH - minH;
+    if (hDiff > 180) {
+      const adjustedHeadings = headings.map((h) => (h < 180 ? h + 360 : h));
+      hDiff = Math.max(...adjustedHeadings) - Math.min(...adjustedHeadings);
     }
-  }, [currentLocation, heading, speed, sensorLeanAngle, applyCalibrationStep]);
+
+    // Recta tolerante al GPS real (~6–7° en ~4 s)
+    if (hDiff > 7) return;
+
+    const n = angleHistoryRef.current.length;
+    if (n < 12) return;
+    const avgAngle = angleHistoryRef.current.reduce((a, b) => a + b, 0) / n;
+    const variance = angleHistoryRef.current.reduce((a, b) => a + (b - avgAngle) ** 2, 0) / n;
+
+    if (variance > 18) return;
+
+    const nowMs = Date.now();
+    if (nowMs - lastLeanAutoCalibMsRef.current < 480) return;
+    lastLeanAutoCalibMsRef.current = nowMs;
+
+    const strength = currentSpeedKmh > 45 ? 0.022 : currentSpeedKmh > 30 ? 0.016 : 0.012;
+    applyCalibrationStep(avgAngle, strength);
+  }, [currentLocation, headingOrCourseForTelemetry, speed, sensorLeanAngle, applyCalibrationStep]);
 
   const leftTurnsRef = useRef(0);
   const rightTurnsRef = useRef(0);
@@ -857,11 +924,17 @@ export default function MapView({
     if (!snapCandidate) return currentLocation;
 
     const snapped = snapPointToRouteDetailed(currentLocation.lat, currentLocation.lng, snapCandidate);
-    if (snapped.distanceMeters <= 42) {
+    const acc = horizontalAccuracy;
+    let maxSnapM = 42;
+    if (acc != null && Number.isFinite(acc) && acc > 18) {
+      // GPS impreciso: acotar el snap para no “saltar” a la polilínea equivocada.
+      maxSnapM = Math.max(16, Math.min(42, 52 - acc * 0.42));
+    }
+    if (snapped.distanceMeters <= maxSnapM) {
       return { lat: snapped.lat, lng: snapped.lng };
     }
     return currentLocation;
-  }, [currentLocation, navState.routeGeometry, parsedRoute]);
+  }, [currentLocation, navState.routeGeometry, parsedRoute, horizontalAccuracy]);
 
   const { nearbyRadar, radars } = useRoadData(currentLocation);
   const [hostIsPremium, setHostIsPremium] = useState(false);
@@ -1160,12 +1233,12 @@ export default function MapView({
       return;
     }
 
-    if (lastHeadingRef.current !== null && heading !== null) {
+    if (lastHeadingRef.current !== null && headingOrCourseForTelemetry !== null) {
       const now = Date.now();
       const dt = (now - lastHeadingTimeRef.current) / 1000; // seconds
       
       if (dt > 0.5) { // Update every 0.5s to avoid jitter
-        let deltaHeading = heading - lastHeadingRef.current;
+        let deltaHeading = headingOrCourseForTelemetry - lastHeadingRef.current;
         // Normalize deltaHeading to [-180, 180]
         if (deltaHeading > 180) deltaHeading -= 360;
         if (deltaHeading < -180) deltaHeading += 360;
@@ -1191,75 +1264,103 @@ export default function MapView({
           setEstimatedLeanAngle(prev => Math.round(prev * 0.8));
         }
 
-        lastHeadingRef.current = heading;
+        lastHeadingRef.current = headingOrCourseForTelemetry;
         lastHeadingTimeRef.current = now;
       }
-    } else if (heading !== null) {
-      lastHeadingRef.current = heading;
+    } else if (headingOrCourseForTelemetry !== null) {
+      lastHeadingRef.current = headingOrCourseForTelemetry;
       lastHeadingTimeRef.current = Date.now();
     }
-  }, [currentLocation, heading, speed, isRecording]);
+  }, [currentLocation, headingOrCourseForTelemetry, speed, isRecording]);
 
-  // Pre-fetch tiles for offline/smooth loading
   useEffect(() => {
-    if (!currentLocation) return;
-    
-    const prefetch = async () => {
-      const zoomLevels = [13, 14, 15, 16]; // Multi-level cache around user
-      const radiusKm = 5; // Preload ~5km around user
-      const latDelta = radiusKm / 111;
-      const lngDelta = radiusKm / (111 * Math.max(Math.cos((currentLocation.lat * Math.PI) / 180), 0.2));
+    if (currentLocation) {
+      lastKnownLocForPrefetchRef.current = { lat: currentLocation.lat, lng: currentLocation.lng };
+    }
+  }, [currentLocation?.lat, currentLocation?.lng]);
 
-      const tileUrls: string[] = [];
-      for (const z of zoomLevels) {
-        const minX = lon2tile(currentLocation.lng - lngDelta, z);
-        const maxX = lon2tile(currentLocation.lng + lngDelta, z);
-        const minY = lat2tile(currentLocation.lat + latDelta, z);
-        const maxY = lat2tile(currentLocation.lat - latDelta, z);
+  // Pre-fetch tiles (debounced): al avanzar ~1 km; el debounce evita tormentas de fetch si `localDistance` oscila.
+  useEffect(() => {
+    if (Math.abs(localDistance - lastPrefetchDistRef.current) <= 1) return;
+    const loc = lastKnownLocForPrefetchRef.current;
+    if (!loc) return;
 
-        for (let x = Math.min(minX, maxX); x <= Math.max(minX, maxX); x++) {
-          for (let y = Math.min(minY, maxY); y <= Math.max(minY, maxY); y++) {
-            tileUrls.push(
-              `https://a.basemaps.cartocdn.com/rastertiles/voyager/${z}/${x}/${y}.png`
-            );
+    const gen = ++tilePrefetchGenRef.current;
+    const debounceMs = 2600;
+    const id = window.setTimeout(() => {
+      if (tilePrefetchGenRef.current !== gen) return;
+      lastPrefetchDistRef.current = localDistance;
+      const center = lastKnownLocForPrefetchRef.current ?? loc;
+
+      const prefetch = async () => {
+        const zoomLevels = [13, 14, 15, 16];
+        const radiusKm = 5;
+        const latDelta = radiusKm / 111;
+        const lngDelta = radiusKm / (111 * Math.max(Math.cos((center.lat * Math.PI) / 180), 0.2));
+
+        const tileUrls: string[] = [];
+        for (const z of zoomLevels) {
+          const minX = lon2tile(center.lng - lngDelta, z);
+          const maxX = lon2tile(center.lng + lngDelta, z);
+          const minY = lat2tile(center.lat + latDelta, z);
+          const maxY = lat2tile(center.lat - latDelta, z);
+
+          for (let x = Math.min(minX, maxX); x <= Math.max(minX, maxX); x++) {
+            for (let y = Math.min(minY, maxY); y <= Math.max(minY, maxY); y++) {
+              tileUrls.push(
+                `https://a.basemaps.cartocdn.com/rastertiles/voyager/${z}/${x}/${y}.png`
+              );
+            }
           }
         }
-      }
 
-      try {
-        if ('caches' in window) {
-          const cache = await caches.open('map-tiles-v1');
-          await Promise.all(
-            tileUrls.map(async (url) => {
-              const req = new Request(url, { mode: 'no-cors' });
-              const cached = await cache.match(req);
-              if (!cached) {
-                const res = await fetch(req);
-                if (res) await cache.put(req, res.clone());
-              }
-            })
-          );
-        } else {
-          tileUrls.forEach((url) => {
-            const img = new Image();
-            img.src = url;
-          });
+        try {
+          if ('caches' in window) {
+            const cache = await caches.open('map-tiles-v1');
+            await Promise.all(
+              tileUrls.map(async (url) => {
+                const req = new Request(url, { mode: 'no-cors' });
+                const cached = await cache.match(req);
+                if (!cached) {
+                  const res = await fetch(req);
+                  if (res) await cache.put(req, res.clone());
+                }
+              })
+            );
+          } else {
+            tileUrls.forEach((url) => {
+              const img = new Image();
+              img.src = url;
+            });
+          }
+        } catch {
+          // Prefetch is best-effort; ignore failures.
         }
-      } catch {
-        // Prefetch is best-effort; ignore failures.
-      }
-    };
+      };
 
-    // Prefetch every ~1km to avoid excessive traffic
-    const lastPrefetchDist = (window as any)._lastPrefetchDist || 0;
-    if (Math.abs(localDistance - lastPrefetchDist) > 1) {
-      prefetch();
-      (window as any)._lastPrefetchDist = localDistance;
-    }
-  }, [currentLocation, localDistance]);
+      void prefetch();
+    }, debounceMs);
+
+    return () => clearTimeout(id);
+  }, [localDistance]);
 
   // Use sensor data if available, otherwise fallback to GPS estimate
-  const leanAngle = Math.abs(sensorLeanAngle) > 2 ? sensorLeanAngle : estimatedLeanAngle;
+  /**
+   * Bolsillo / MirrorLink bloqueado: mezcla IMU + estimación GPS (el GPS solo es aproximado por rumbo).
+   * Modo GPS normal (móvil en manillar): prioridad al sensor del móvil; GPS solo como respaldo suave.
+   */
+  const leanAngle = useMemo(() => {
+    const telemetryFromPocket =
+      isPocketLocked && isRecording && (touchLockKind === 'pocket' || touchLockKind === 'mirrorlink');
+    if (telemetryFromPocket) {
+      if (speed !== null && speed >= 4) {
+        return blendLeanPocketMirror(sensorLeanAngle, estimatedLeanAngle, speed);
+      }
+      return 0;
+    }
+    if (Math.abs(sensorLeanAngle) > 2) return sensorLeanAngle;
+    return estimatedLeanAngle;
+  }, [touchLockKind, isPocketLocked, isRecording, speed, estimatedLeanAngle, sensorLeanAngle]);
 
   // Curve detection & scoring
   useEffect(() => {
@@ -1289,6 +1390,10 @@ export default function MapView({
   const [summaryData, setSummaryData] = useState<any>(null);
   const [isSharingSummary, setIsSharingSummary] = useState(false);
 
+  const prevRecordingRef = useRef(isRecording);
+  const recordingStartTimeRef = useRef<number>(0);
+  const ridePointsCommittedSessionKeyRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (isRecording || summaryData) return;
     const draft = readRideDraft();
@@ -1296,6 +1401,9 @@ export default function MapView({
       setSummaryData(draft.summaryData);
       setRecordedPath(Array.isArray(draft.path) ? draft.path : []);
       setShowSummary(true);
+      // Borradores antiguos sin clave: asumimos que los puntos ya se sumaron al cerrar la ruta.
+      ridePointsCommittedSessionKeyRef.current =
+        draft.summaryData.rideSessionKey ?? 'legacy-draft';
     }
   }, [isRecording, summaryData]);
 
@@ -1428,85 +1536,131 @@ export default function MapView({
     }
   };
 
+  useEffect(() => {
+    if (isRecording && group?.startTime) {
+      recordingStartTimeRef.current = group.startTime;
+    }
+  }, [isRecording, group?.startTime]);
+
+  const commitRidePointsToProfile = useCallback(
+    async (stats: {
+      distance: number;
+      score: number;
+      leftTurns: number;
+      rightTurns: number;
+      maxLeanLeft: number;
+      maxLeanRight: number;
+    }): Promise<boolean> => {
+      if (!user?.uid) return false;
+      const userRef = doc(db, 'users', user.uid);
+      try {
+        const userSnap = await getDoc(userRef);
+        const finalScore = stats.score;
+        const dist = stats.distance;
+        if (userSnap.exists()) {
+          const userData = userSnap.data();
+          const currentPoints = userData.points || 0;
+          const newPoints = currentPoints + finalScore;
+          const { level: newLevel } = calculateLevel(newPoints);
+          await updateDoc(userRef, {
+            points: newPoints,
+            level: newLevel,
+            totalDistance: (userData.totalDistance || 0) + dist,
+            totalLeftTurns: (userData.totalLeftTurns || 0) + stats.leftTurns,
+            totalRightTurns: (userData.totalRightTurns || 0) + stats.rightTurns,
+          });
+        } else {
+          const { level: newLevel } = calculateLevel(finalScore);
+          await setDoc(userRef, {
+            points: finalScore,
+            level: newLevel,
+            totalDistance: dist,
+            totalLeftTurns: stats.leftTurns,
+            totalRightTurns: stats.rightTurns,
+          });
+        }
+        return true;
+      } catch (err: unknown) {
+        console.error('Error al sumar puntos al perfil:', err);
+        handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`);
+        return false;
+      }
+    },
+    [user?.uid]
+  );
+
   // Handle start/stop recording for all members
-  const prevRecordingRef = useRef(isRecording);
   useEffect(() => {
     const handleStopRecording = async () => {
-      if (prevRecordingRef.current && !isRecording && user && group?.startTime) {
-        // Stopped - Always update profile stats regardless of history save
-        const rideDuration = Date.now() - group.startTime;
-        const distanceBonus = Math.floor(localDistance / 100) * 20;
-        const pointsConfig = await getActivePointsConfig();
-        const adjustedBaseScore = Math.round(score * pointsConfig.baseMultiplier);
-        const adjustedDistanceBonus = Math.round(distanceBonus * pointsConfig.distanceMultiplier);
-        const finalScore = Math.round((adjustedBaseScore + adjustedDistanceBonus) * pointsConfig.eventMultiplier);
-        const currentRideStats = {
-          distance: Number(localDistance.toFixed(2)),
-          score: finalScore,
-          baseScore: adjustedBaseScore,
-          distanceBonus: adjustedDistanceBonus,
-          leftTurns: leftTurnsRef.current,
-          rightTurns: rightTurnsRef.current,
-          maxLeanLeft,
-          maxLeanRight,
-          duration: rideDuration,
-          multipliers: pointsConfig
-        };
-
-        try {
-          // Update user points and level (ALWAYS)
-          const userRef = doc(db, 'users', user.uid);
-          const userSnap = await getDoc(userRef);
-          if (userSnap.exists()) {
-            const userData = userSnap.data();
-            const currentPoints = userData.points || 0;
-            const newPoints = currentPoints + finalScore;
-            const { level: newLevel } = calculateLevel(newPoints);
-            await updateDoc(userRef, {
-              points: newPoints,
-              level: newLevel,
-              totalDistance: (userData.totalDistance || 0) + localDistance,
-              totalLeftTurns: (userData.totalLeftTurns || 0) + leftTurnsRef.current,
-              totalRightTurns: (userData.totalRightTurns || 0) + rightTurnsRef.current
-            });
-          } else {
-            const { level: newLevel } = calculateLevel(finalScore);
-            await setDoc(userRef, {
-              points: finalScore,
-              level: newLevel,
-              totalDistance: localDistance,
-              totalLeftTurns: leftTurnsRef.current,
-              totalRightTurns: rightTurnsRef.current
-            });
-          }
-
-          // Show summary modal
-          setSummaryData(currentRideStats);
-          setShowSummary(true);
-          persistRideDraft({
-            createdAt: Date.now(),
-            summaryData: currentRideStats,
-            path: recordedPath
-          });
-
-          // Reset local stats
-          setRecordedPath([]);
-          leftTurnsRef.current = 0;
-          rightTurnsRef.current = 0;
-          setLocalDistance(0);
-          setScore(0);
-          resetMaxLean();
-        } catch (err: any) {
-          console.error("Error updating profile stats:", err);
-          handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`);
-        }
+      const startTime = group?.startTime ?? recordingStartTimeRef.current;
+      if (!(prevRecordingRef.current && !isRecording && user && startTime)) {
+        return;
       }
+
+      const rideSessionKey = `${user.uid}:${groupId}:${startTime}`;
+      if (ridePointsCommittedSessionKeyRef.current === rideSessionKey) {
+        return;
+      }
+
+      const rideDuration = Math.max(0, Date.now() - startTime);
+      const distanceBonus = Math.floor(localDistance / 100) * 20;
+      const pointsConfig = await getActivePointsConfig();
+      const adjustedBaseScore = Math.round(score * pointsConfig.baseMultiplier);
+      const adjustedDistanceBonus = Math.round(distanceBonus * pointsConfig.distanceMultiplier);
+      const finalScore = Math.round((adjustedBaseScore + adjustedDistanceBonus) * pointsConfig.eventMultiplier);
+      const currentRideStats = {
+        distance: Number(localDistance.toFixed(2)),
+        score: finalScore,
+        baseScore: adjustedBaseScore,
+        distanceBonus: adjustedDistanceBonus,
+        leftTurns: leftTurnsRef.current,
+        rightTurns: rightTurnsRef.current,
+        maxLeanLeft,
+        maxLeanRight,
+        duration: rideDuration,
+        multipliers: pointsConfig,
+        rideSessionKey,
+      };
+
+      const pathSnapshot = [...recordedPath];
+      const ok = await commitRidePointsToProfile({
+        distance: currentRideStats.distance,
+        score: finalScore,
+        leftTurns: currentRideStats.leftTurns,
+        rightTurns: currentRideStats.rightTurns,
+        maxLeanLeft: currentRideStats.maxLeanLeft,
+        maxLeanRight: currentRideStats.maxLeanRight,
+      });
+
+      if (!ok) {
+        setSummaryData(currentRideStats);
+        setShowSummary(true);
+        persistRideDraft({ createdAt: Date.now(), summaryData: currentRideStats, path: pathSnapshot });
+        return;
+      }
+
+      ridePointsCommittedSessionKeyRef.current = rideSessionKey;
+      setSummaryData(currentRideStats);
+      setShowSummary(true);
+      persistRideDraft({
+        createdAt: Date.now(),
+        summaryData: currentRideStats,
+        path: pathSnapshot,
+      });
+
+      setRecordedPath([]);
+      leftTurnsRef.current = 0;
+      rightTurnsRef.current = 0;
+      setLocalDistance(0);
+      setScore(0);
+      resetMaxLean();
     };
 
-    handleStopRecording();
+    void handleStopRecording();
 
     if (!prevRecordingRef.current && isRecording) {
-      // Started
+      ridePointsCommittedSessionKeyRef.current = null;
+      recordingStartTimeRef.current = group?.startTime ?? Date.now();
       clearRideDraft();
       resetMaxLean();
       setLocalDistance(0);
@@ -1515,7 +1669,21 @@ export default function MapView({
       lastLocRef.current = currentLocation;
     }
     prevRecordingRef.current = isRecording;
-  }, [isRecording, user, group?.startTime, localDistance, maxLeanLeft, maxLeanRight, score, groupId, recordedPath, resetMaxLean, currentLocation, group?.name]);
+  }, [
+    isRecording,
+    user,
+    group?.startTime,
+    localDistance,
+    maxLeanLeft,
+    maxLeanRight,
+    score,
+    groupId,
+    recordedPath,
+    resetMaxLean,
+    currentLocation,
+    group?.name,
+    commitRidePointsToProfile,
+  ]);
 
   // Record path locally from the moment movement starts
   useEffect(() => {
@@ -1547,17 +1715,7 @@ export default function MapView({
         setLocalDistance(prev => {
           const newDist = prev + d;
           
-          // Pocket Mode Auto-Calibration after 20m
-          if (touchLockKind === 'pocket' && !hasCalibratedInPocket) {
-            setPocketDist(p => {
-              const next = p + d;
-              if (next >= 0.02) { // 20 meters
-                calibrate();
-                setHasCalibratedInPocket(true);
-              }
-              return next;
-            });
-          }
+          // En bolsillo no auto-calibrar por distancia: la postura del móvil no es "moto recta" y empeora el offset.
 
           // Add 1 point per kilometer (d is in km)
           // Only update when we cross a kilometer boundary
@@ -1709,6 +1867,51 @@ export default function MapView({
       }
     }
   };
+
+  const openInviteFriendsModal = useCallback(async () => {
+    if (groupId !== 'REPEATED') {
+      setInviteModalContext(null);
+      setShowInviteFriends(true);
+      return;
+    }
+    const routeJson = typeof preloadedRoute === 'string' ? preloadedRoute.trim() : '';
+    if (!routeJson) {
+      window.alert('No hay una ruta cargada para invitar desde esta sesión.');
+      return;
+    }
+    if (!user) return;
+    if (!onPromoteFromRepeat) {
+      window.alert('No se puede generar invitación en este modo.');
+      return;
+    }
+    setInviteBusy(true);
+    try {
+      const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+      const routeName =
+        group?.name && group.name !== 'Repitiendo Ruta' ? String(group.name).slice(0, 100) : 'Ruta compartida';
+      await setDoc(doc(db, 'groups', code), {
+        name: routeName,
+        code,
+        createdBy: user.uid,
+        members: [user.uid],
+        isScheduled: false,
+        scheduledTimestamp: Date.now(),
+        isEsporadica: true,
+        province: '',
+        municipality: '',
+        description: '',
+        createdAt: Date.now(),
+        routeGeoJSON: routeJson,
+      });
+      setInviteModalContext({ groupId: code, groupName: routeName });
+      onPromoteFromRepeat(code);
+      setShowInviteFriends(true);
+    } catch (e) {
+      handleFirestoreError(e, OperationType.CREATE, 'groups/from-repeat-invite');
+    } finally {
+      setInviteBusy(false);
+    }
+  }, [groupId, preloadedRoute, user, onPromoteFromRepeat, group?.name]);
 
   const toggleRecording = async () => {
     if (!isHost) return;
@@ -1906,14 +2109,14 @@ export default function MapView({
       const adjusted = headings.map(h => h < 180 ? h + 360 : h);
       hDiff = Math.max(...adjusted) - Math.min(...adjusted);
     }
-    return hDiff < 2;
+    return hDiff < 6;
   };
 
   const handleSmartCalibration = async () => {
     await requestPermission();
     const currentSpeedKmh = (speed || 0) * 3.6;
     const canCalibrateStopped = currentSpeedKmh <= 8;
-    const canCalibrateOnStraight = currentSpeedKmh >= 30 && isHeadingStableNow();
+    const canCalibrateOnStraight = currentSpeedKmh >= 22 && isHeadingStableNow();
 
     if (canCalibrateStopped || canCalibrateOnStraight) {
       calibrate();
@@ -1921,7 +2124,7 @@ export default function MapView({
       return;
     }
 
-    alert("Para calibrar mejor: hazlo parado o en una recta estable durante unos segundos.");
+    alert('Para calibrar mejor: parado (o casi) o en recta estable unos segundos a partir de ~22 km/h.');
   };
 
   const otherLocations = useMemo(
@@ -2073,6 +2276,19 @@ export default function MapView({
                    <button onClick={shareRoute} className="hover:text-white transition-colors p-1" title="Compartir enlace">
                      {shared ? <Check size={12} className="text-green-500" /> : <Share2 size={12} />}
                    </button>
+                   <button
+                     type="button"
+                     disabled={inviteBusy || (groupId === 'REPEATED' && !preloadedRoute?.trim())}
+                     onClick={() => void openInviteFriendsModal()}
+                     className="hover:text-orange-400 text-zinc-400 transition-colors p-1 disabled:opacity-40 disabled:pointer-events-none"
+                     title={
+                       groupId === 'REPEATED' && !preloadedRoute?.trim()
+                         ? 'Sin ruta para compartir'
+                         : 'Invitar amigos desde la app'
+                     }
+                   >
+                     {inviteBusy ? <Loader2 size={12} className="animate-spin text-orange-400" /> : <UserPlus size={12} />}
+                   </button>
                  </div>
                </div>
              </div>
@@ -2215,6 +2431,21 @@ export default function MapView({
                   <div className="px-4 py-2 border-b border-zinc-800 mb-1">
                     <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Opciones de Mapa</p>
                   </div>
+
+                  <button
+                    type="button"
+                    disabled={inviteBusy || (groupId === 'REPEATED' && !preloadedRoute?.trim())}
+                    onClick={() => {
+                      setShowSettings(false);
+                      void openInviteFriendsModal();
+                    }}
+                    className="flex items-center gap-3 text-white hover:bg-zinc-800 p-3 rounded-2xl text-sm font-bold transition-colors disabled:opacity-40 disabled:pointer-events-none w-full text-left"
+                  >
+                    <div className="w-8 h-8 rounded-xl bg-orange-500/20 flex items-center justify-center text-orange-400">
+                      {inviteBusy ? <Loader2 size={18} className="animate-spin" /> : <UserPlus size={18} />}
+                    </div>
+                    Invitar amigos a la ruta
+                  </button>
 
                   {isHost && (
                    <button 
@@ -2493,28 +2724,7 @@ export default function MapView({
             onPointerDown={touchLockKind === 'mirrorlink' && isPocketLocked ? handlePocketTouchStart : undefined}
             onPointerUp={touchLockKind === 'mirrorlink' && isPocketLocked ? handlePocketTouchEnd : undefined}
           >
-            {!isPocketLocked && touchLockKind === 'mirrorlink' && mirrorLinkCalibrating ? (
-              <div className="text-center space-y-6 p-8 max-w-xs mx-auto">
-                <RotateCw className="w-12 h-12 mx-auto text-orange-500 animate-spin" strokeWidth={2.5} aria-hidden />
-                <div className="space-y-2">
-                  <h2 className="text-xl font-black text-white uppercase tracking-tight">Calibrando inclinación</h2>
-                  <p className="text-zinc-500 text-sm leading-snug">
-                    Ajustando el sensor. En un momento verás el mapa y el GPS con la pantalla protegida de toques.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    releaseOrientationLockUi();
-                    setMirrorLinkCalibrating(false);
-                    setTouchLockKind(null);
-                  }}
-                  className="px-6 py-3 bg-zinc-800 text-white rounded-2xl font-bold text-sm"
-                >
-                  Cancelar
-                </button>
-              </div>
-            ) : !isPocketLocked ? (
+            {!isPocketLocked ? (
               <div className="text-center space-y-8 p-8">
                 <div
                   key={pocketRingSession}
@@ -2553,7 +2763,7 @@ export default function MapView({
                   </h2>
                   <p className="text-zinc-400 text-sm max-w-[260px] mx-auto leading-snug">
                     {touchLockKind === 'mirrorlink'
-                      ? '30 segundos en horizontal. Luego se calibra la inclinación y se muestra el mapa con GPS; los toques quedarán bloqueados (mismo desbloqueo que el modo bolsillo).'
+                      ? 'Para ver mapa y datos en la pantalla de la moto: guarda el teléfono en el bolsillo. Vista horizontal, 30 s y luego mapa con toques bloqueados. La inclinación se calcula por GPS (el móvil va guardado). Mismo desbloqueo que modo bolsillo.'
                       : 'Guarda el móvil en tu bolsillo. Se bloqueará automáticamente.'}
                   </p>
                 </div>
@@ -2561,7 +2771,6 @@ export default function MapView({
                   type="button"
                   onClick={() => {
                     releaseOrientationLockUi();
-                    setMirrorLinkCalibrating(false);
                     setTouchLockKind(null);
                   }}
                   className="px-6 py-3 bg-zinc-800 text-white rounded-2xl font-bold text-sm"
@@ -2721,12 +2930,12 @@ export default function MapView({
 
       {/* HUD Overlay */}
       <div className={`absolute left-0 right-0 z-[1000] pointer-events-none flex justify-center px-2 sm:px-4 landscape:justify-start landscape:left-4 landscape:right-auto ${isLandscape ? 'landscape:bottom-3' : 'bottom-5'}`}>
-        <div className="bg-zinc-950/90 backdrop-blur-3xl rounded-[2.1rem] sm:rounded-[2.65rem] p-2 sm:p-2.5 border border-white/10 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.8)] flex items-stretch gap-1 sm:gap-1.5 pointer-events-auto max-w-full overflow-hidden landscape:scale-90 landscape:origin-bottom-left">
+        <div className="bg-zinc-950/90 backdrop-blur-3xl rounded-[2rem] sm:rounded-[2.5rem] p-1.5 border border-white/10 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.8)] flex items-center gap-0.5 sm:gap-1 pointer-events-auto max-w-full overflow-hidden landscape:scale-90 landscape:origin-bottom-left">
           
           {/* Speed + tiempo en ubicación */}
-          <div className="flex flex-col items-center justify-center min-w-[92px] sm:min-w-[136px] py-2.5 sm:py-4 pl-5 sm:pl-8 pr-3 sm:pr-6 ml-1 sm:ml-2 bg-white/5 rounded-[1.6rem] sm:rounded-[2.1rem] border border-white/5 shrink-0 landscape:min-w-[86px] landscape:pl-4 landscape:pr-2.5 landscape:ml-1">
+          <div className="flex flex-col items-center justify-center min-w-[80px] sm:min-w-[120px] py-2 sm:py-3 px-3 sm:px-6 bg-white/5 rounded-[1.5rem] sm:rounded-[2rem] border border-white/5 shrink-0 landscape:min-w-[80px] landscape:px-3">
             <div
-              className="flex items-center justify-center gap-1 sm:gap-1.5 mb-1 sm:mb-1.5 min-h-[1.15rem] sm:min-h-[1.35rem]"
+              className="flex items-center justify-center gap-1 sm:gap-1.5 mb-0.5 sm:mb-1"
               title="Temperatura ahora e icono según la previsión del día (Open-Meteo)"
             >
               {mapWeather.loading && mapWeather.tempC == null ? (
@@ -2750,7 +2959,7 @@ export default function MapView({
           </div>
 
           {/* Lean Angle & Stats Section */}
-          <div className="flex items-center gap-3 sm:gap-6 px-3 sm:px-6 py-2 sm:py-3 min-w-0">
+          <div className="flex items-center gap-3 sm:gap-6 px-3 sm:px-6 py-1 sm:py-2 min-w-0">
             {/* Lean Angle Display */}
             <div className="flex flex-col items-center shrink-0">
               <div className="flex justify-between w-full text-[8px] sm:text-[9px] font-black uppercase tracking-widest px-1 mb-0.5 sm:mb-1">
@@ -2777,7 +2986,7 @@ export default function MapView({
             </div>
 
             {/* Vertical Divider */}
-            <div className="w-px h-12 sm:h-14 bg-white/10 shrink-0 self-center" />
+            <div className="w-px h-10 sm:h-12 bg-white/10 shrink-0" />
 
             {/* Score & Stop Recording */}
             <div className="flex flex-col gap-1 sm:gap-1.5 min-w-[80px] sm:min-w-[100px]">
@@ -3009,7 +3218,19 @@ export default function MapView({
           />
         )}
 
-        <MapController location={displayLocation} heading={currentSpeedKmh > 2 ? navigationHeading : 0} isFollowing={isFollowing} showRanking={showRanking} isRecording={isRecording} speedKmh={currentSpeedKmh} hasActiveRoute={!!parsedRoute} />
+        <MapController
+          location={displayLocation}
+          bearingForMapOffset={navigationHeading}
+          headingRotationActive={
+            isRecording && currentSpeedKmh > 3 && localDistance >= 0.05
+          }
+          isFollowing={isFollowing}
+          showRanking={showRanking}
+          isRecording={isRecording}
+          speedKmh={currentSpeedKmh}
+          hasActiveRoute={!!parsedRoute}
+          isLandscapeUi={isLandscape}
+        />
           </MapContainer>
         </div>
       </div>
@@ -3083,9 +3304,30 @@ export default function MapView({
               <div className="space-y-3">
                 <button 
                   onClick={async () => {
+                    if (!summaryData || !user?.uid) return;
                     try {
+                      if (
+                        summaryData.rideSessionKey &&
+                        ridePointsCommittedSessionKeyRef.current !== summaryData.rideSessionKey
+                      ) {
+                        const ok = await commitRidePointsToProfile({
+                          distance: summaryData.distance,
+                          score: summaryData.score,
+                          leftTurns: summaryData.leftTurns,
+                          rightTurns: summaryData.rightTurns,
+                          maxLeanLeft: summaryData.maxLeanLeft,
+                          maxLeanRight: summaryData.maxLeanRight,
+                        });
+                        if (!ok) {
+                          alert('No se pudieron sumar los puntos al perfil. Revisa la conexión e inténtalo de nuevo.');
+                          return;
+                        }
+                        ridePointsCommittedSessionKeyRef.current = summaryData.rideSessionKey;
+                      }
+                      const draft = readRideDraft();
+                      const pathForHistory = Array.isArray(draft?.path) && draft.path.length > 0 ? draft.path : recordedPath;
                       await addDoc(collection(db, 'rideHistory'), {
-                        uid: user?.uid,
+                        uid: user.uid,
                         groupId,
                         groupName: group?.name || 'Ruta',
                         startTime: Date.now() - summaryData.duration,
@@ -3096,7 +3338,7 @@ export default function MapView({
                         leftTurns: summaryData.leftTurns,
                         rightTurns: summaryData.rightTurns,
                         score: summaryData.score,
-                        path: recordedPath
+                        path: pathForHistory,
                       });
                       clearRideDraft();
                       setShowSummary(false);
@@ -3111,19 +3353,57 @@ export default function MapView({
                   Guardar en Historial
                 </button>
                 <button 
-                  onClick={() => {
+                  onClick={async () => {
+                    if (summaryData?.rideSessionKey && user?.uid) {
+                      if (ridePointsCommittedSessionKeyRef.current !== summaryData.rideSessionKey) {
+                        const ok = await commitRidePointsToProfile({
+                          distance: summaryData.distance,
+                          score: summaryData.score,
+                          leftTurns: summaryData.leftTurns,
+                          rightTurns: summaryData.rightTurns,
+                          maxLeanLeft: summaryData.maxLeanLeft,
+                          maxLeanRight: summaryData.maxLeanRight,
+                        });
+                        if (ok) {
+                          ridePointsCommittedSessionKeyRef.current = summaryData.rideSessionKey;
+                        } else {
+                          alert(
+                            'Los puntos de esta ruta no se han podido sumar al perfil (conexión o servidor). Los intentaremos de nuevo si reaparece el resumen al volver a entrar.'
+                          );
+                        }
+                      }
+                    }
                     clearRideDraft();
                     setShowSummary(false);
                   }}
                   className="w-full bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-4 rounded-2xl transition-all"
                 >
-                  No guardar (solo estadísticas)
+                  No guardar en historial (los puntos sí cuentan para el nivel)
                 </button>
               </div>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
+
+      <InviteFriendsModal
+        open={showInviteFriends}
+        onClose={() => {
+          setShowInviteFriends(false);
+          setInviteModalContext(null);
+        }}
+        groupId={inviteModalContext?.groupId ?? groupId}
+        groupName={inviteModalContext?.groupName ?? group?.name ?? 'Ruta'}
+        memberUids={
+          inviteModalContext && user?.uid
+            ? [user.uid]
+            : Array.isArray(group?.members) && group.members.length > 0
+              ? group.members.filter(Boolean)
+              : user?.uid
+                ? [user.uid]
+                : []
+        }
+      />
     </div>
   );
 }

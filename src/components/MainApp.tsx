@@ -114,6 +114,10 @@ export default function MainApp() {
         prepareHistoryLeave={() => {
           bypassRoutePopRef.current = true;
         }}
+        onPromoteFromRepeat={(liveCode) => {
+          setActiveGroupId(liveCode);
+          setRepeatedRoute(null);
+        }}
         onLeave={() => {
           routeHistoryInsertedRef.current = false;
           setActiveGroupId(null);

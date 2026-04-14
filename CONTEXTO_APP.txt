@@ -1,1 +1,33 @@
-Ver CONTEXTO_APP.txt en la raiz del proyecto.
+MotoRide — registro de contexto / cambios recientes
+Ultima actualizacion: 2026-04-14
+
+=== Contacto y soporte ===
+- Correo publico de contacto: motorideapp1@gmail.com
+  - src/lib/clientInfo.ts: constante SUPPORT_EMAIL y mailto de soporte.
+  - src/components/MapView.tsx: User-Agent cortesia Nominatim con el mismo correo.
+- Cuenta admin (panel) y reglas Firestore siguen usando juarp123@gmail.com salvo que se migre a mano.
+
+=== iPhone / Safari (textos de la app) ===
+- src/App.tsx: modal de instalacion PWA (pasos claros en Safari), pantalla completa, correccion «Anadir» -> «Añadir».
+- src/components/MapView.tsx: mensaje inclinometro iPhone simplificado.
+- src/hooks/useVoiceChat.ts: permisos de microfono (Safari «aA», Ajustes) y aviso si no hay getUserMedia (abrir fuera de apps embebidas).
+
+=== HUD del mapa (velocidad) ===
+- Tiempo en ubicacion: Open-Meteo sin API key (temperatura actual + codigo WMO del dia para icono).
+- src/hooks/useOpenMeteoWeather.ts, src/lib/weatherWmo.ts (Lucide).
+- Bloque velocidad: mas margen izquierdo, HUD algo mas alto; icono + °C encima de km/h.
+
+=== MirrorLink (ajustes / menu GPS en MapView) ===
+- Estado unificado touchLockKind: 'pocket' | 'mirrorlink' | null.
+- MirrorLink: pantalla completa, orientacion horizontal, misma cuenta atras 30 s que bolsillo.
+- Tras 30 s: pantalla «Calibrando inclinacion» (~800 ms) con calibrate(), luego mapa visible con capa tactil bloqueada (anti toques fantasma).
+- Desbloqueo: 3 toques + pulsacion larga (igual que bolsillo); candado discreto arriba a la izquierda en MirrorLink bloqueado.
+- Modo bolsillo: sin cambio de flujo (bloqueo al acabar 30 s).
+
+=== Mapa / tema ===
+- Eliminado el interruptor «Modo oscuro / claro» del mapa: teselas siempre Carto Voyager (claro); sin estado isDarkMode en MapView.
+
+=== Archivos de puntero ===
+- contexto_app.txt remite a este archivo.
+
+(contexto_app.txt -> ver este archivo)
