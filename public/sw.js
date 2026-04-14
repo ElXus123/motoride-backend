@@ -1,4 +1,5 @@
-const CACHE_NAME = 'ruta-motera-v4';
+// Subir versión en cada deploy importante para vaciar caches viejos del SW.
+const CACHE_NAME = 'ruta-motera-v6';
 const TILE_CACHE = 'map-tiles-v3';
 const CORE_ASSETS = ['/', '/index.html'];
 
@@ -34,16 +35,24 @@ self.addEventListener('fetch', (event) => {
     requestUrl.hostname.includes('tile.openstreetmap.org') ||
     requestUrl.hostname.includes('tilecache.rainviewer.com');
 
-  // For app routes, prefer network then fallback to cached shell.
+  // Navegación: red primero (HTML siempre fresco si hay red). Así el HTML coincide con los hashes de /assets/.
   if (isNavigation) {
     event.respondWith(
       fetch(event.request)
         .then((response) => {
-          const cloned = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put('/index.html', cloned));
+          if (response.ok) {
+            const forNav = response.clone();
+            const forIndex = response.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(event.request, forNav);
+              cache.put('/index.html', forIndex);
+            });
+          }
           return response;
         })
-        .catch(() => caches.match('/index.html'))
+        .catch(() =>
+          caches.match(event.request).then((r) => r || caches.match('/index.html'))
+        )
     );
     return;
   }
@@ -70,17 +79,25 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Cache-first for same-origin static assets (except manifest to avoid stale installability metadata).
-  if (isSameOrigin && (requestUrl.pathname.startsWith('/assets/') || requestUrl.pathname.endsWith('.png')) && !requestUrl.pathname.endsWith('manifest.json') && !requestUrl.pathname.endsWith('manifest.webmanifest')) {
+  // JS/CSS con hash: red primero (evita bundle viejo con index nuevo o 404 silencioso tras deploy).
+  // PNG / iconos: misma política para coherencia con despliegues.
+  if (
+    isSameOrigin &&
+    (requestUrl.pathname.startsWith('/assets/') || requestUrl.pathname.endsWith('.png')) &&
+    !requestUrl.pathname.endsWith('manifest.json') &&
+    !requestUrl.pathname.endsWith('manifest.webmanifest')
+  ) {
     event.respondWith(
-      caches.match(event.request).then((cached) => {
-        if (cached) return cached;
-        return fetch(event.request).then((response) => {
-          const cloned = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, cloned));
+      fetch(event.request)
+        .then((response) => {
+          if (response.ok) {
+            const cloned = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, cloned));
+          }
           return response;
-        });
-      })
+        })
+        .catch(() => caches.match(event.request))
     );
+    return;
   }
 });

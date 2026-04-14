@@ -1,0 +1,13 @@
+# Cloudflare Pages: evita servir index.html viejo desde la CDN tras un deploy
+# (HTML apuntando a /assets/*.js que ya no existen => pantalla en blanco).
+# Tras desplegar, purga caché en Cloudflare si el problema ya afectó a usuarios.
+
+/
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/index.html
+  Cache-Control: no-cache, no-store, must-revalidate
+
+# Hashes en nombre: seguros de cachear largo en navegador/edge
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

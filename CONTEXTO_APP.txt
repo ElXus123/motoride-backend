@@ -1,5 +1,6 @@
 MotoRide app - Contexto y registro de cambios
-Ultima actualizacion: 2026-04-13 (radar lluvia + avisos + wake lock)
+  (Alias de nombre: contexto_app.txt — en Windows suele ser el mismo fichero que CONTEXTO_APP.txt.)
+Ultima actualizacion: 2026-04-13 (mapa esporadica, voz, error boundary, radar 5 min)
 
 Objetivo del archivo
 - Mantener el contexto funcional y tecnico de la app.
@@ -331,6 +332,47 @@ Registro de cambios de sesiones
     - El popup tambien cubre errores de geocoding/OSRM/GPS en ese flujo.
   - Archivos: server.ts, src/components/MapView.tsx,
     src/hooks/useLocationTracking.ts, src/components/Dashboard.tsx
+
+- [2026-04-13] Sesion: mapa base, radar, wake lock, microfono, pantalla blanca:
+  - Aviso "conexion debil al mapa" (teselas Carto):
+    - Contador de `tileerror` en ventana de 12s; si >=6 errores y el usuario
+      no ha cerrado el aviso, se muestra banda ambar (solo online) con texto
+      en castellano y boton "Entendido, ocultar".
+    - `TileLayer` base con `eventHandlers.tileerror` hacia el contador.
+    - Archivos: src/components/MapView.tsx
+  - Radar lluvia (Rain Viewer) — intervalo de refresco de URL/teselas:
+    - Ajustado a 5 minutos (`5 * 60 * 1000`); mensaje de error alineado
+      ("cada 5 min").
+    - Archivos: src/components/MapView.tsx
+  - Wake Lock (pantalla encendida en ruta):
+    - Antes: solo grabacion o modo bolsillo.
+    - Ahora: mientras MapView esta montado (mapa con GPS activo), se pide
+      Screen Wake Lock; reintentos en toque, visibilidad y pageshow.
+    - Archivos: src/components/MapView.tsx
+  - Microfono / voz en moviles viejos:
+    - Cadena de restricciones getUserMedia: ideal (AEC/NS/AGC) -> `audio: true`
+      -> sin procesado (todo false). No reintentar si permiso denegado.
+    - Reproduccion remota: `document.createElement('audio')`, volume 1,
+      playsinline + webkit-playsinline.
+    - Archivos: src/hooks/useVoiceChat.ts
+  - Mapa en blanco / ruta esporadica (sin GPX) y primer GPS:
+    - `min-h-0` en contenedor flex del mapa (evita altura 0 en columnas flex).
+    - Componente `MapResizeSync`: ResizeObserver en contenedor y padre,
+      invalidateSize diferido (100/400/1000 ms), resize/orientationchange/
+      visualViewport, y primer invalidate al llegar `currentLocation`.
+    - Archivos: src/components/MapView.tsx
+  - Pantalla totalmente vacia (sin interfaz):
+    - `AppErrorBoundary` pasa a ser clase real con UI de recuperacion
+      (recargar + limpiar cache y reintentar) y log en consola.
+    - Recuperacion automatica global (SW + caches) solo ante errores tipo
+      ChunkLoadError / chunk dinamico, no ante cualquier error o rejection.
+    - Archivos: src/App.tsx
+  - Notas de producto (referencia conversacion):
+    - Anuncios/donacion en web: AdSense o enlaces externos; rewarded tipo
+      tienda requeriria Capacitor + AdMob.
+    - GPS no mide lluvia; datos radar son Rain Viewer; refresco en app 5 min.
+    - Firestore: ruta esporadica sin GPX no debe enviar `routeGeoJSON: null`
+      (reglas); omitir campo si no hay trazado.
 
 Plantilla para futuras entradas
 - [AAAA-MM-DD]:
