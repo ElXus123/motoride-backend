@@ -29,6 +29,11 @@ import {
   dedupeNearbyPoints,
   samplePolylineByDistance,
 } from '../lib/precipitationRisk';
+import {
+  DEFAULT_PREMIUM_GPS_POLICY,
+  normalizePremiumGpsPolicy,
+  type PremiumGpsPolicy,
+} from '../lib/premiumGpsConfig';
 import { useRoadData } from '../hooks/useRoadData';
 import { parseGPX, parseRouteData } from '../lib/gpx';
 import { getDistance, offsetByMeters } from '../lib/geoUtils';
@@ -495,12 +500,32 @@ export default function MapView({
   const tilePrefetchGenRef = useRef(0);
   const [tilePrefetchEpoch, setTilePrefetchEpoch] = useState(0);
   const bumpTilePrefetch = useCallback(() => setTilePrefetchEpoch((n) => n + 1), []);
+
+  const [premiumGpsPolicy, setPremiumGpsPolicy] = useState<PremiumGpsPolicy>(DEFAULT_PREMIUM_GPS_POLICY);
+  useEffect(() => {
+    const unsub = onSnapshot(
+      doc(db, 'appConfig', 'premiumGps'),
+      (snap) => {
+        setPremiumGpsPolicy(normalizePremiumGpsPolicy(snap.exists() ? snap.data() : null));
+      },
+      () => setPremiumGpsPolicy(DEFAULT_PREMIUM_GPS_POLICY)
+    );
+    return () => unsub();
+  }, []);
+
+  const selfPremium = user?.isPremium === true;
+  const gpsHighAccuracyEnabled = !premiumGpsPolicy.highAccuracyPremiumOnly || selfPremium;
+  const weatherLayerAllowed = !premiumGpsPolicy.rainRadarPremiumOnly || selfPremium;
+  const showHudWeather = !premiumGpsPolicy.weatherHudPremiumOnly || selfPremium;
+
   const [showTraffic, setShowTraffic] = useState(false);
   const [showWeather, setShowWeather] = useState(false);
+  const showWeatherEffective = showWeather && weatherLayerAllowed;
   const [rainRadar, setRainRadar] = useState<{ url: string; maxNativeZoom: number } | null>(null);
   const [weatherFetchFailed, setWeatherFetchFailed] = useState(false);
   const [weatherTilesLoaded, setWeatherTilesLoaded] = useState(false);
   const [weatherTileErrors, setWeatherTileErrors] = useState(0);
+
   const [distance, setDistance] = useState(0); // in km
   const [localDistance, setLocalDistance] = useState(0); // for auto-start and save check
   const lastLocRef = useRef<{lat: number, lng: number} | null>(null);
@@ -568,9 +593,15 @@ export default function MapView({
     return () => clearTimeout(t);
   }, []);
 
+  useEffect(() => {
+    if (premiumGpsPolicy.rainRadarPremiumOnly && !selfPremium && showWeather) {
+      setShowWeather(false);
+    }
+  }, [premiumGpsPolicy.rainRadarPremiumOnly, selfPremium, showWeather]);
+
   // Rain Viewer: load real tile path from API (paths are hashed; /v2/radar/0 is invalid). Refresh cada 5 min.
   useEffect(() => {
-    if (!showWeather) {
+    if (!showWeatherEffective) {
       setRainRadar(null);
       setWeatherFetchFailed(false);
       setWeatherTilesLoaded(false);
@@ -595,7 +626,7 @@ export default function MapView({
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [showWeather]);
+  }, [showWeatherEffective]);
 
   // Cuenta atrás 30 s (bolsillo / MirrorLink); al llegar a 0, bloqueo táctil
   useEffect(() => {
@@ -954,14 +985,19 @@ export default function MapView({
   const lastLeanAutoCalibMsRef = useRef(0);
 
   // Activate real-time location tracking
-  const { speed, heading, currentLocation, courseOverGround, horizontalAccuracy, error: gpsError } = useLocationTracking(true, groupId, { 
-    score, 
-    alert: alertType ? { type: alertType, timestamp: Date.now() } : null,
-    displayName: displayNameToUse,
-    photoURL: photoURLToUse,
-    level: userLevel,
-    isHost
-  });
+  const { speed, heading, currentLocation, courseOverGround, horizontalAccuracy, error: gpsError } = useLocationTracking(
+    true,
+    groupId,
+    {
+      score,
+      alert: alertType ? { type: alertType, timestamp: Date.now() } : null,
+      displayName: displayNameToUse,
+      photoURL: photoURLToUse,
+      level: userLevel,
+      isHost,
+    },
+    { enableHighAccuracy: gpsHighAccuracyEnabled }
+  );
 
   const [precipitationBanner, setPrecipitationBanner] = useState(false);
   const lastPrecipBannerAtRef = useRef(0);
@@ -1159,6 +1195,7 @@ export default function MapView({
 
     const run = async () => {
       if (cancelled) return;
+      if (premiumGpsPolicy.precipAlertsPremiumOnly && !selfPremium) return;
       if (Date.now() - lastPrecipBannerAtRef.current < COOLDOWN_MS) return;
       const lat = currentLocation.lat;
       const lng = currentLocation.lng;
@@ -1193,7 +1230,15 @@ export default function MapView({
       window.clearTimeout(boot);
       window.clearInterval(interval);
     };
-  }, [isOnline, currentLocation?.lat, currentLocation?.lng, effectiveRouteForNav, groupId]);
+  }, [
+    isOnline,
+    currentLocation?.lat,
+    currentLocation?.lng,
+    effectiveRouteForNav,
+    groupId,
+    premiumGpsPolicy.precipAlertsPremiumOnly,
+    selfPremium,
+  ]);
 
   const navState = useNavigation(currentLocation, effectiveRouteForNav);
   const navigationHeading = useNavigationHeading(
@@ -1240,7 +1285,6 @@ export default function MapView({
     return () => unsub();
   }, [group?.createdBy]);
 
-  const selfPremium = user?.isPremium === true;
   const voiceAllowed = selfPremium || hostIsPremium;
 
   const { isVoiceActive, toggleVoice, peersCount, micError, clearMicError } = useVoiceChat(groupId, voiceAllowed);
@@ -3036,31 +3080,54 @@ export default function MapView({
                    </button>
                  )}
 
-                <button 
-                  onClick={() => { setShowWeather(!showWeather); setShowSettings(false); }}
-                  className="flex items-center gap-3 text-white hover:bg-zinc-800 p-3 rounded-2xl text-sm font-bold transition-colors"
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!weatherLayerAllowed) {
+                      showMessage({
+                        variant: 'info',
+                        title: 'Capa de lluvia',
+                        message: 'Esta función está reservada a usuarios Premium.',
+                      });
+                      return;
+                    }
+                    setShowWeather(!showWeather);
+                    setShowSettings(false);
+                  }}
+                  className={`flex items-center gap-3 text-white p-3 rounded-2xl text-sm font-bold transition-colors ${
+                    weatherLayerAllowed ? 'hover:bg-zinc-800' : 'opacity-55 cursor-not-allowed'
+                  }`}
                 >
-                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${showWeather ? 'bg-cyan-500/20 text-cyan-400' : 'bg-zinc-800 text-zinc-400'}`}>
+                  <div
+                    className={`w-8 h-8 rounded-xl flex items-center justify-center ${
+                      showWeatherEffective ? 'bg-cyan-500/20 text-cyan-400' : 'bg-zinc-800 text-zinc-400'
+                    }`}
+                  >
                     <Layers size={18} />
                   </div>
-                  Capa Lluvia {showWeather ? 'ON' : 'OFF'}
+                  <span className="text-left">
+                    Capa lluvia {showWeatherEffective ? 'ON' : 'OFF'}
+                    {!weatherLayerAllowed && (
+                      <span className="block text-[10px] font-semibold text-amber-400/90">Solo Premium</span>
+                    )}
+                  </span>
                 </button>
-                {showWeather && weatherFetchFailed && (
+                {showWeatherEffective && weatherFetchFailed && (
                   <p className="text-[11px] text-amber-400/90 px-3 -mt-2 mb-1 leading-snug">
                     No se pudo cargar el radar ahora. Revisa la conexión; se reintentará al abrir ajustes o cada 10 min.
                   </p>
                 )}
-                {showWeather && !weatherFetchFailed && rainRadar && !weatherTilesLoaded && (
+                {showWeatherEffective && !weatherFetchFailed && rainRadar && !weatherTilesLoaded && (
                   <p className="text-[11px] text-zinc-500 px-3 -mt-2 mb-1 leading-snug">
                     Cargando radar de lluvia...
                   </p>
                 )}
-                {showWeather && !weatherFetchFailed && rainRadar && weatherTilesLoaded && weatherTileErrors === 0 && (
+                {showWeatherEffective && !weatherFetchFailed && rainRadar && weatherTilesLoaded && weatherTileErrors === 0 && (
                   <p className="text-[11px] text-emerald-400/90 px-3 -mt-2 mb-1 leading-snug">
                     Radar activo. Si no ves colores, puede que no haya precipitación en la zona.
                   </p>
                 )}
-                {showWeather && !weatherFetchFailed && rainRadar && weatherTileErrors > 2 && (
+                {showWeatherEffective && !weatherFetchFailed && rainRadar && weatherTileErrors > 2 && (
                   <p className="text-[11px] text-red-400/90 px-3 -mt-2 mb-1 leading-snug">
                     Problema cargando teselas del radar ({weatherTileErrors}). Prueba a desactivar/activar la capa.
                   </p>
@@ -3593,23 +3660,34 @@ export default function MapView({
           {/* Speed + tiempo en ubicación */}
           <div className="flex flex-col items-center justify-center min-w-[80px] sm:min-w-[120px] py-2 sm:py-3 px-3 sm:px-6 bg-white/5 rounded-[1.5rem] sm:rounded-[2rem] border border-white/5 shrink-0 landscape:min-w-[80px] landscape:px-3">
             <div
-              className="flex items-center justify-center gap-1 sm:gap-1.5 mb-0.5 sm:mb-1"
-              title="Temperatura ahora e icono según la previsión del día (Open-Meteo)"
+              className="flex items-center justify-center gap-1 sm:gap-1.5 mb-0.5 sm:mb-1 min-h-[22px] sm:min-h-[26px]"
+              title={
+                showHudWeather
+                  ? 'Temperatura ahora e icono según la previsión del día (Open-Meteo)'
+                  : 'Tiempo en pantalla reservado a Premium'
+              }
             >
-              {mapWeather.loading && mapWeather.tempC == null ? (
-                <span className="inline-block h-3.5 w-3.5 sm:h-4 sm:w-4 border-2 border-sky-400/30 border-t-sky-300 rounded-full animate-spin" aria-hidden />
+              {showHudWeather ? (
+                mapWeather.loading && mapWeather.tempC == null ? (
+                  <span className="inline-block h-3.5 w-3.5 sm:h-4 sm:w-4 border-2 border-sky-400/30 border-t-sky-300 rounded-full animate-spin" aria-hidden />
+                ) : (
+                  <>
+                    <DayWeatherIcon
+                      className="shrink-0 text-sky-200"
+                      size={isLandscapeUi ? 15 : 19}
+                      strokeWidth={2.25}
+                      aria-hidden
+                    />
+                    <span className="text-[11px] sm:text-sm font-black tabular-nums text-zinc-100 leading-none">
+                      {mapWeather.tempC != null ? `${Math.round(mapWeather.tempC)}°` : '—'}
+                    </span>
+                  </>
+                )
               ) : (
-                <>
-                  <DayWeatherIcon
-                    className="shrink-0 text-sky-200"
-                    size={isLandscapeUi ? 15 : 19}
-                    strokeWidth={2.25}
-                    aria-hidden
-                  />
-                  <span className="text-[11px] sm:text-sm font-black tabular-nums text-zinc-100 leading-none">
-                    {mapWeather.tempC != null ? `${Math.round(mapWeather.tempC)}°` : '—'}
-                  </span>
-                </>
+                <span className="text-[10px] sm:text-[11px] font-black text-zinc-500 leading-none flex items-center gap-1">
+                  <Crown size={14} className="text-amber-500/80 shrink-0" aria-hidden />
+                  Premium
+                </span>
               )}
             </div>
             <span className="text-3xl sm:text-5xl font-black leading-none tracking-tighter text-white tabular-nums">{currentSpeedKmh}</span>
@@ -3814,7 +3892,7 @@ export default function MapView({
             zIndex={10}
           />
         )}
-        {showWeather && rainRadar && (
+        {showWeatherEffective && rainRadar && (
           <Pane name="rainRadarPane" style={{ zIndex: 350 }}>
             <TileLayer
               key={rainRadar.url}

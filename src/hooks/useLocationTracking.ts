@@ -5,7 +5,18 @@ import { useAuth } from '../contexts/AuthContext';
 import { getDistance, getBearing } from '../lib/geoUtils';
 import socket from '../lib/socket';
 
-export const useLocationTracking = (isActive: boolean, groupId: string, extraData?: any) => {
+export type LocationTrackingOptions = {
+  /** Por defecto `true`. Si `false`, GPS menos preciso (menor consumo; p. ej. usuarios no Premium). */
+  enableHighAccuracy?: boolean;
+};
+
+export const useLocationTracking = (
+  isActive: boolean,
+  groupId: string,
+  extraData?: any,
+  trackingOptions?: LocationTrackingOptions
+) => {
+  const enableHighAccuracy = trackingOptions?.enableHighAccuracy !== false;
   const { user } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [speed, setSpeed] = useState<number | null>(null);
@@ -204,7 +215,7 @@ export const useLocationTracking = (isActive: boolean, groupId: string, extraDat
           }
         },
         {
-          enableHighAccuracy: true,
+          enableHighAccuracy,
           // Fijaciones recientes del SO: menos despertares del chip y menos TIMEOUT en señal débil (túnel/bosque).
           maximumAge: 2500,
           timeout: 18000
@@ -253,7 +264,7 @@ export const useLocationTracking = (isActive: boolean, groupId: string, extraDat
         clearInterval(intervalId);
       }
     };
-  }, [isActive, user, groupId]);
+  }, [isActive, user, groupId, enableHighAccuracy]);
 
   return { error, speed, heading, currentLocation, courseOverGround, horizontalAccuracy };
 };

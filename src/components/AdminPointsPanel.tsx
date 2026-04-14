@@ -9,21 +9,98 @@ import {
   addDoc,
   updateDoc,
   getDocs,
+  getCountFromServer,
   writeBatch,
   limit,
   startAt,
   endAt,
-  deleteDoc
+  deleteDoc,
 } from 'firebase/firestore';
-import { X, Shield, Save, PlusCircle, Search, Crown, Trash2 } from 'lucide-react';
+import {
+  X,
+  Shield,
+  Save,
+  PlusCircle,
+  Search,
+  Crown,
+  Trash2,
+  LayoutGrid,
+  Navigation,
+  Layers,
+  CloudRain,
+  Thermometer,
+  Coins,
+  CalendarRange,
+  Skull,
+  Users,
+  RefreshCw,
+} from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppMessage } from '../contexts/AppMessageContext';
+import {
+  DEFAULT_PREMIUM_GPS_POLICY,
+  normalizePremiumGpsPolicy,
+  type PremiumGpsPolicy,
+} from '../lib/premiumGpsConfig';
+
+type AdminSection = 'gps' | 'accounts' | 'points' | 'events' | 'danger';
+
+const SECTIONS: { id: AdminSection; label: string; icon: React.ReactNode }[] = [
+  { id: 'gps', label: 'GPS Premium', icon: <Navigation size={16} /> },
+  { id: 'accounts', label: 'Cuentas Premium', icon: <Crown size={16} /> },
+  { id: 'points', label: 'Puntos', icon: <Coins size={16} /> },
+  { id: 'events', label: 'Eventos puntos', icon: <CalendarRange size={16} /> },
+  { id: 'danger', label: 'Zona peligro', icon: <Skull size={16} /> },
+];
+
+function ToggleRow({
+  checked,
+  onChange,
+  title,
+  description,
+  icon,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  title: string;
+  description: string;
+  icon: React.ReactNode;
+}) {
+  return (
+    <label className="flex items-start gap-3 rounded-2xl border border-zinc-800 bg-zinc-950/60 p-3 cursor-pointer hover:border-zinc-700 transition-colors">
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={() => onChange(!checked)}
+        className={`mt-0.5 relative h-7 w-12 shrink-0 rounded-full transition-colors ${
+          checked ? 'bg-orange-500' : 'bg-zinc-700'
+        }`}
+      >
+        <span
+          className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+            checked ? 'left-6' : 'left-1'
+          }`}
+        />
+      </button>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-bold text-white flex items-center gap-2">
+          <span className="text-orange-400 shrink-0">{icon}</span>
+          {title}
+        </p>
+        <p className="text-xs text-zinc-500 mt-1 leading-relaxed">{description}</p>
+      </div>
+    </label>
+  );
+}
 
 export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
   const { user } = useAuth();
   const showMessage = useAppMessage();
   const isAdmin = user?.email?.toLowerCase() === 'juarp123@gmail.com';
+  const [section, setSection] = useState<AdminSection>('gps');
+
   const [baseMultiplier, setBaseMultiplier] = useState(1);
   const [distanceMultiplier, setDistanceMultiplier] = useState(1);
   const [events, setEvents] = useState<any[]>([]);
@@ -34,10 +111,36 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
   const [premiumSearchResults, setPremiumSearchResults] = useState<any[]>([]);
   const [premiumSearchLoading, setPremiumSearchLoading] = useState(false);
   const [premiumCandidates, setPremiumCandidates] = useState<any[]>([]);
+  const [premiumGpsDraft, setPremiumGpsDraft] = useState<PremiumGpsPolicy>(DEFAULT_PREMIUM_GPS_POLICY);
+  const [totalUsers, setTotalUsers] = useState<number | null>(null);
+  const [totalUsersLoading, setTotalUsersLoading] = useState(false);
+
+  const refreshTotalUsers = async () => {
+    setTotalUsersLoading(true);
+    try {
+      const agg = await getCountFromServer(query(collection(db, 'users')));
+      setTotalUsers(agg.data().count);
+    } catch (e) {
+      console.error('getCountFromServer users', e);
+      setTotalUsers(null);
+      showMessage({
+        variant: 'error',
+        title: 'Usuarios',
+        message: 'No se pudo obtener el total. Revisa reglas de Firestore o conexión.',
+      });
+    } finally {
+      setTotalUsersLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (!isAdmin) onClose();
   }, [isAdmin, onClose]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    void refreshTotalUsers();
+  }, [isAdmin]);
 
   useEffect(() => {
     const unsubCfg = onSnapshot(doc(db, 'appConfig', 'points'), (snap) => {
@@ -47,11 +150,19 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
         setDistanceMultiplier(Number(data.distanceMultiplier || 1));
       }
     });
+    const unsubGps = onSnapshot(
+      doc(db, 'appConfig', 'premiumGps'),
+      (snap) => {
+        setPremiumGpsDraft(normalizePremiumGpsPolicy(snap.exists() ? snap.data() : null));
+      },
+      () => setPremiumGpsDraft(DEFAULT_PREMIUM_GPS_POLICY)
+    );
     const unsubEvents = onSnapshot(query(collection(db, 'pointsEvents'), orderBy('createdAt', 'desc')), (snap) => {
       setEvents(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
     });
     return () => {
       unsubCfg();
+      unsubGps();
       unsubEvents();
     };
   }, []);
@@ -110,14 +221,14 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
     return () => clearTimeout(t);
   }, [premiumSearchQuery]);
 
-  const setUserPremium = async (uid: string, isPremium: boolean) => {
+  const setUserPremium = async (uid: string, premium: boolean) => {
     try {
-      await updateDoc(doc(db, 'users', uid), { isPremium });
-      setPremiumSearchResults((prev) => prev.map((u) => (u.id === uid ? { ...u, isPremium } : u)));
+      await updateDoc(doc(db, 'users', uid), { isPremium: premium });
+      setPremiumSearchResults((prev) => prev.map((u) => (u.id === uid ? { ...u, isPremium: premium } : u)));
       showMessage({
         variant: 'success',
         title: 'Premium',
-        message: isPremium ? 'Usuario marcado como Premium.' : 'Premium desactivado para este usuario.',
+        message: premium ? 'Usuario marcado como Premium.' : 'Premium desactivado para este usuario.',
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${uid}`);
@@ -139,13 +250,30 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
   };
 
   const saveConfig = async () => {
-    await setDoc(doc(db, 'appConfig', 'points'), {
-      baseMultiplier: Math.max(0, Math.min(10, Number(baseMultiplier) || 1)),
-      distanceMultiplier: Math.max(0, Math.min(10, Number(distanceMultiplier) || 1)),
-      updatedAt: Date.now(),
-      updatedBy: user?.uid || null
-    }, { merge: true });
+    await setDoc(
+      doc(db, 'appConfig', 'points'),
+      {
+        baseMultiplier: Math.max(0, Math.min(10, Number(baseMultiplier) || 1)),
+        distanceMultiplier: Math.max(0, Math.min(10, Number(distanceMultiplier) || 1)),
+        updatedAt: Date.now(),
+        updatedBy: user?.uid || null,
+      },
+      { merge: true }
+    );
     showMessage({ variant: 'success', title: 'Admin', message: 'Configuración de puntos actualizada.' });
+  };
+
+  const savePremiumGps = async () => {
+    await setDoc(
+      doc(db, 'appConfig', 'premiumGps'),
+      {
+        ...premiumGpsDraft,
+        updatedAt: Date.now(),
+        updatedBy: user?.uid || null,
+      },
+      { merge: true }
+    );
+    showMessage({ variant: 'success', title: 'GPS Premium', message: 'Política guardada. Los cambios se aplican al instante en el mapa.' });
   };
 
   const createEvent = async () => {
@@ -158,7 +286,7 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
       endAt: now + Math.max(1, Number(eventHours) || 1) * 3600000,
       active: true,
       createdAt: now,
-      createdBy: user?.uid || null
+      createdBy: user?.uid || null,
     });
     setEventName('');
     setEventMultiplier(1.2);
@@ -168,7 +296,7 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
   const toggleEvent = async (event: any) => {
     await updateDoc(doc(db, 'pointsEvents', event.id), {
       active: !event.active,
-      updatedAt: Date.now()
+      updatedAt: Date.now(),
     });
   };
 
@@ -199,173 +327,344 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const patchPremiumGps = (key: keyof PremiumGpsPolicy, value: boolean) => {
+    setPremiumGpsDraft((prev) => ({ ...prev, [key]: value }));
+  };
+
   return (
     <div
-      className="fixed inset-0 z-[90] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+      className="fixed inset-0 z-[90] bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-3xl bg-zinc-900 border border-zinc-800 rounded-3xl shadow-2xl overflow-hidden"
+        className="w-full max-w-4xl max-h-[min(92dvh,900px)] bg-zinc-900 border border-zinc-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="p-5 border-b border-zinc-800 flex items-center justify-between">
-          <h2 className="text-lg font-bold text-white flex items-center gap-2">
-            <Shield size={18} className="text-orange-400" />
-            Panel Admin
-          </h2>
-          <button onClick={onClose} className="p-2 rounded-full hover:bg-zinc-800 text-zinc-300">
+        <div className="px-4 sm:px-5 py-4 border-b border-zinc-800 flex items-center justify-between gap-3 shrink-0 flex-wrap">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <h2 className="text-lg font-bold text-white flex items-center gap-2 min-w-0">
+              <Shield size={18} className="text-orange-400 shrink-0" />
+              <span className="truncate">Administración</span>
+            </h2>
+            <div
+              className="flex items-center gap-2 rounded-2xl border border-zinc-700 bg-zinc-950/80 px-3 py-1.5 text-sm"
+              title="Cuentas en la colección users de Firestore"
+            >
+              <Users size={16} className="text-zinc-400 shrink-0" aria-hidden />
+              <span className="text-zinc-500 font-medium">Registrados</span>
+              <span className="font-black tabular-nums text-orange-300 min-w-[2.5rem] text-right">
+                {totalUsersLoading ? '…' : totalUsers != null ? totalUsers : '—'}
+              </span>
+              <button
+                type="button"
+                onClick={() => void refreshTotalUsers()}
+                disabled={totalUsersLoading}
+                className="p-1 rounded-lg text-zinc-500 hover:text-orange-400 hover:bg-zinc-800 disabled:opacity-50"
+                title="Actualizar contador"
+                aria-label="Actualizar contador de usuarios"
+              >
+                <RefreshCw size={15} className={totalUsersLoading ? 'animate-spin' : ''} />
+              </button>
+            </div>
+          </div>
+          <button type="button" onClick={onClose} className="p-2 rounded-full hover:bg-zinc-800 text-zinc-300 shrink-0">
             <X size={18} />
           </button>
         </div>
 
-        <div className="p-5 space-y-6 max-h-[75vh] overflow-y-auto">
-          <div className="border border-zinc-800 rounded-2xl p-4 space-y-3 bg-zinc-950/50">
-            <h3 className="text-white font-bold flex items-center gap-2">
-              <Crown size={16} className="text-amber-400" />
-              Premium (voz y futuras ventajas)
-            </h3>
-            <p className="text-xs text-zinc-500">
-              Busca por nombre (mín. 2 caracteres). Los cambios se guardan en la cuenta del usuario en Firestore.
+        <div className="flex flex-1 flex-col sm:flex-row min-h-0">
+          <nav
+            className="shrink-0 border-b sm:border-b-0 sm:border-r border-zinc-800 bg-zinc-950/50 flex sm:flex-col gap-1 p-2 overflow-x-auto sm:w-52 sm:py-3"
+            aria-label="Secciones admin"
+          >
+            <p className="hidden sm:flex items-center gap-2 px-2 pb-2 text-[10px] font-black uppercase tracking-wider text-zinc-600">
+              <LayoutGrid size={12} />
+              Menú
             </p>
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
-                <input
-                  value={premiumSearchQuery}
-                  onChange={(e) => setPremiumSearchQuery(e.target.value)}
-                  placeholder="Nombre de usuario…"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-3 py-2 text-sm text-white"
-                />
-              </div>
-              {premiumSearchLoading && <span className="text-xs text-zinc-500 self-center">Buscando…</span>}
-            </div>
-            {premiumSearchResults.length > 0 && (
-              <ul className="space-y-2 max-h-48 overflow-y-auto">
-                {premiumSearchResults.map((u) => (
-                  <li
-                    key={u.id}
-                    className="flex items-center justify-between gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-white truncate">{u.displayName || u.id}</p>
-                      <p className="text-[10px] text-zinc-500 truncate">{u.id}</p>
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      {u.isPremium ? (
-                        <button
-                          type="button"
-                          onClick={() => void setUserPremium(u.id, false)}
-                          className="text-[11px] font-bold px-2 py-1 rounded-lg bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
-                        >
-                          Quitar
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => void setUserPremium(u.id, true)}
-                          className="text-[11px] font-bold px-2 py-1 rounded-lg bg-amber-500/20 text-amber-300 hover:bg-amber-500/30"
-                        >
-                          Premium
-                        </button>
-                      )}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+            {SECTIONS.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => setSection(s.id)}
+                className={`flex items-center gap-2 whitespace-nowrap rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition-colors ${
+                  section === s.id
+                    ? 'bg-orange-500/15 text-orange-300 ring-1 ring-orange-500/30'
+                    : 'text-zinc-400 hover:bg-zinc-800/80 hover:text-zinc-200'
+                }`}
+              >
+                <span className="opacity-90">{s.icon}</span>
+                {s.label}
+              </button>
+            ))}
+          </nav>
 
-          <div className="border border-amber-500/20 rounded-2xl p-4 space-y-3 bg-amber-500/5">
-            <h3 className="text-white font-bold text-sm">Candidatos Ko-fi (modal donación ≥10 s)</h3>
-            {premiumCandidates.length === 0 ? (
-              <p className="text-xs text-zinc-500">Nadie en la lista todavía.</p>
-            ) : (
-              <ul className="space-y-2 max-h-52 overflow-y-auto">
-                {premiumCandidates.map((c) => (
-                  <li
-                    key={c.id}
-                    className="flex items-center justify-between gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-white truncate">{c.displayName || c.email || c.id}</p>
-                      <p className="text-[10px] text-zinc-500 truncate">
-                        {c.email || 'sin email'} ·{' '}
-                        {typeof c.updatedAt === 'number' && Number.isFinite(c.updatedAt)
-                          ? new Date(c.updatedAt).toLocaleString()
-                          : '—'}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => void setUserPremium(c.id, true)}
-                        className="text-[11px] font-bold px-2 py-1 rounded-lg bg-amber-500/20 text-amber-300 hover:bg-amber-500/30"
-                      >
-                        Marcar premium
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void removePremiumCandidate(c.id)}
-                        className="p-1.5 rounded-lg bg-zinc-800 text-zinc-400 hover:text-red-300"
-                        title="Quitar de candidatos"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
-          <div className="border-t border-zinc-800 pt-5">
-            <h3 className="text-white font-bold mb-3">Puntos</h3>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <label className="text-sm text-zinc-300">
-              Multiplicador base
-              <input value={baseMultiplier} onChange={(e) => setBaseMultiplier(Number(e.target.value))} type="number" step="0.1" className="w-full mt-1 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2" />
-            </label>
-            <label className="text-sm text-zinc-300">
-              Multiplicador distancia
-              <input value={distanceMultiplier} onChange={(e) => setDistanceMultiplier(Number(e.target.value))} type="number" step="0.1" className="w-full mt-1 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2" />
-            </label>
-          </div>
-          <button onClick={saveConfig} className="bg-orange-500 hover:bg-orange-600 text-white font-bold px-4 py-2 rounded-xl inline-flex items-center gap-2">
-            <Save size={16} /> Guardar configuración
-          </button>
-
-          <div className="border-t border-zinc-800 pt-5 space-y-3">
-            <h3 className="text-white font-bold">Crear evento global de puntos</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <input value={eventName} onChange={(e) => setEventName(e.target.value)} placeholder="Nombre evento" className="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-sm" />
-              <input value={eventMultiplier} onChange={(e) => setEventMultiplier(Number(e.target.value))} type="number" step="0.1" placeholder="x1.5" className="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-sm" />
-              <input value={eventHours} onChange={(e) => setEventHours(Number(e.target.value))} type="number" min={1} placeholder="Horas" className="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-sm" />
-            </div>
-            <button onClick={createEvent} className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-xl inline-flex items-center gap-2">
-              <PlusCircle size={16} /> Crear evento
-            </button>
-          </div>
-
-          <div className="border-t border-zinc-800 pt-5 space-y-2">
-            <h3 className="text-white font-bold">Eventos</h3>
-            {events.map((event) => (
-              <div key={event.id} className="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 flex items-center justify-between">
+          <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-5 custom-scrollbar">
+            {section === 'gps' && (
+              <div className="space-y-4 max-w-xl">
                 <div>
-                  <p className="text-sm font-semibold text-white">{event.name}</p>
-                  <p className="text-xs text-zinc-500">x{event.multiplier} • {new Date(event.startAt).toLocaleString()} - {new Date(event.endAt).toLocaleString()}</p>
+                  <h3 className="text-white font-bold text-base">GPS y mapa — ventajas Premium</h3>
+                  <p className="text-xs text-zinc-500 mt-1 leading-relaxed">
+                    Con todo desactivado, el comportamiento es el de siempre (mismas funciones para todos). Si activas una opción,
+                    solo los usuarios con <span className="text-amber-400/95">Premium</span> reciben esa ventaja; el resto usa la
+                    alternativa básica o no ve la función.
+                  </p>
                 </div>
-                <button onClick={() => toggleEvent(event)} className={`px-3 py-1 rounded-lg text-xs font-bold ${event.active ? 'bg-emerald-500/20 text-emerald-300' : 'bg-zinc-700 text-zinc-300'}`}>
-                  {event.active ? 'Activo' : 'Inactivo'}
+                <div className="space-y-2">
+                  <ToggleRow
+                    checked={premiumGpsDraft.highAccuracyPremiumOnly}
+                    onChange={(v) => patchPremiumGps('highAccuracyPremiumOnly', v)}
+                    title="Alta precisión GPS solo Premium"
+                    description="Si está activo: solo Premium usa el modo de alta precisión del GPS. El resto obtiene posiciones algo menos precisas (menor uso del chip)."
+                    icon={<Navigation size={16} />}
+                  />
+                  <ToggleRow
+                    checked={premiumGpsDraft.rainRadarPremiumOnly}
+                    onChange={(v) => patchPremiumGps('rainRadarPremiumOnly', v)}
+                    title="Capa de radar de lluvia solo Premium"
+                    description="Si está activo: el mapa de precipitación (Rain Viewer) solo la pueden activar cuentas Premium."
+                    icon={<Layers size={16} />}
+                  />
+                  <ToggleRow
+                    checked={premiumGpsDraft.precipAlertsPremiumOnly}
+                    onChange={(v) => patchPremiumGps('precipAlertsPremiumOnly', v)}
+                    title="Avisos de lluvia en ruta solo Premium"
+                    description="Si está activo: el aviso automático de posible lluvia en la ruta o cerca solo se muestra a Premium."
+                    icon={<CloudRain size={16} />}
+                  />
+                  <ToggleRow
+                    checked={premiumGpsDraft.weatherHudPremiumOnly}
+                    onChange={(v) => patchPremiumGps('weatherHudPremiumOnly', v)}
+                    title="Tiempo en el HUD solo Premium"
+                    description="Si está activo: temperatura e icono meteorológico en el bloque de velocidad solo para Premium (el resto ve el velocímetro igual)."
+                    icon={<Thermometer size={16} />}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void savePremiumGps()}
+                  className="w-full sm:w-auto bg-orange-500 hover:bg-orange-600 text-white font-bold px-5 py-2.5 rounded-xl inline-flex items-center justify-center gap-2"
+                >
+                  <Save size={16} /> Guardar política GPS
                 </button>
               </div>
-            ))}
-          </div>
+            )}
 
-          <div className="border-t border-zinc-800 pt-5">
-            <button onClick={resetGroupsOnly} className="bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-2 rounded-xl">
-              Reset global: solo grupos
-            </button>
+            {section === 'accounts' && (
+              <div className="space-y-6">
+                <div className="border border-zinc-800 rounded-2xl p-4 space-y-3 bg-zinc-950/50">
+                  <h3 className="text-white font-bold flex items-center gap-2">
+                    <Crown size={16} className="text-amber-400" />
+                    Buscar usuario
+                  </h3>
+                  <p className="text-xs text-zinc-500">
+                    Busca por nombre (mín. 2 caracteres). Los cambios se guardan en la cuenta en Firestore.
+                  </p>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                      <input
+                        value={premiumSearchQuery}
+                        onChange={(e) => setPremiumSearchQuery(e.target.value)}
+                        placeholder="Nombre de usuario…"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-3 py-2 text-sm text-white"
+                      />
+                    </div>
+                    {premiumSearchLoading && <span className="text-xs text-zinc-500 self-center">Buscando…</span>}
+                  </div>
+                  {premiumSearchResults.length > 0 && (
+                    <ul className="space-y-2 max-h-52 overflow-y-auto">
+                      {premiumSearchResults.map((u) => (
+                        <li
+                          key={u.id}
+                          className="flex items-center justify-between gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2"
+                        >
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-white truncate">{u.displayName || u.id}</p>
+                            <p className="text-[10px] text-zinc-500 truncate">{u.id}</p>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            {u.isPremium ? (
+                              <button
+                                type="button"
+                                onClick={() => void setUserPremium(u.id, false)}
+                                className="text-[11px] font-bold px-2 py-1 rounded-lg bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                              >
+                                Quitar
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => void setUserPremium(u.id, true)}
+                                className="text-[11px] font-bold px-2 py-1 rounded-lg bg-amber-500/20 text-amber-300 hover:bg-amber-500/30"
+                              >
+                                Premium
+                              </button>
+                            )}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                <div className="border border-amber-500/20 rounded-2xl p-4 space-y-3 bg-amber-500/5">
+                  <h3 className="text-white font-bold text-sm">Candidatos Ko-fi (modal donación ≥10 s)</h3>
+                  {premiumCandidates.length === 0 ? (
+                    <p className="text-xs text-zinc-500">Nadie en la lista todavía.</p>
+                  ) : (
+                    <ul className="space-y-2 max-h-52 overflow-y-auto">
+                      {premiumCandidates.map((c) => (
+                        <li
+                          key={c.id}
+                          className="flex items-center justify-between gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2"
+                        >
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-white truncate">{c.displayName || c.email || c.id}</p>
+                            <p className="text-[10px] text-zinc-500 truncate">
+                              {c.email || 'sin email'} ·{' '}
+                              {typeof c.updatedAt === 'number' && Number.isFinite(c.updatedAt)
+                                ? new Date(c.updatedAt).toLocaleString()
+                                : '—'}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => void setUserPremium(c.id, true)}
+                              className="text-[11px] font-bold px-2 py-1 rounded-lg bg-amber-500/20 text-amber-300 hover:bg-amber-500/30"
+                            >
+                              Marcar premium
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void removePremiumCandidate(c.id)}
+                              className="p-1.5 rounded-lg bg-zinc-800 text-zinc-400 hover:text-red-300"
+                              title="Quitar de candidatos"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {section === 'points' && (
+              <div className="space-y-4 max-w-lg">
+                <h3 className="text-white font-bold">Multiplicadores globales</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label className="text-sm text-zinc-300">
+                    Multiplicador base
+                    <input
+                      value={baseMultiplier}
+                      onChange={(e) => setBaseMultiplier(Number(e.target.value))}
+                      type="number"
+                      step="0.1"
+                      className="w-full mt-1 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2"
+                    />
+                  </label>
+                  <label className="text-sm text-zinc-300">
+                    Multiplicador distancia
+                    <input
+                      value={distanceMultiplier}
+                      onChange={(e) => setDistanceMultiplier(Number(e.target.value))}
+                      type="number"
+                      step="0.1"
+                      className="w-full mt-1 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2"
+                    />
+                  </label>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void saveConfig()}
+                  className="bg-orange-500 hover:bg-orange-600 text-white font-bold px-4 py-2 rounded-xl inline-flex items-center gap-2"
+                >
+                  <Save size={16} /> Guardar configuración
+                </button>
+              </div>
+            )}
+
+            {section === 'events' && (
+              <div className="space-y-5 max-w-2xl">
+                <div className="space-y-3">
+                  <h3 className="text-white font-bold">Crear evento global de puntos</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <input
+                      value={eventName}
+                      onChange={(e) => setEventName(e.target.value)}
+                      placeholder="Nombre evento"
+                      className="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-sm"
+                    />
+                    <input
+                      value={eventMultiplier}
+                      onChange={(e) => setEventMultiplier(Number(e.target.value))}
+                      type="number"
+                      step="0.1"
+                      placeholder="x1.5"
+                      className="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-sm"
+                    />
+                    <input
+                      value={eventHours}
+                      onChange={(e) => setEventHours(Number(e.target.value))}
+                      type="number"
+                      min={1}
+                      placeholder="Horas"
+                      className="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void createEvent()}
+                    className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-xl inline-flex items-center gap-2"
+                  >
+                    <PlusCircle size={16} /> Crear evento
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  <h4 className="text-sm font-bold text-zinc-400">Eventos activos / histórico</h4>
+                  {events.map((event) => (
+                    <div
+                      key={event.id}
+                      className="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 flex items-center justify-between gap-2"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-white truncate">{event.name}</p>
+                        <p className="text-xs text-zinc-500">
+                          x{event.multiplier} • {new Date(event.startAt).toLocaleString()} — {new Date(event.endAt).toLocaleString()}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void toggleEvent(event)}
+                        className={`shrink-0 px-3 py-1 rounded-lg text-xs font-bold ${
+                          event.active ? 'bg-emerald-500/20 text-emerald-300' : 'bg-zinc-700 text-zinc-300'
+                        }`}
+                      >
+                        {event.active ? 'Activo' : 'Inactivo'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {section === 'danger' && (
+              <div className="space-y-3 max-w-md">
+                <p className="text-sm text-zinc-400">
+                  Acción destructiva. Solo grupos en Firestore; no borra usuarios ni rutas guardadas en perfiles.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void resetGroupsOnly()}
+                  className="bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-2.5 rounded-xl w-full sm:w-auto"
+                >
+                  Reset global: solo grupos
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
