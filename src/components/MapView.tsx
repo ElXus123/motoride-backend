@@ -207,80 +207,6 @@ const MapInvalidateHelper = ({ layoutKey }: { layoutKey: string }) => {
   return null;
 };
 
-/**
- * Evita mapa en gris/blanco al entrar en ruta (especialmente esporádica sin GPX): flex sin min-h-0, barra URL móvil
- * y primer fix GPS cambian el layout después del primer paint — Leaflet debe recalcular tamaño y teselas.
- */
-const MapResizeSync = ({ gpsReady }: { gpsReady: boolean }) => {
-  const map = useMap();
-  const firstGpsInvalidateDone = useRef(false);
-
-  useEffect(() => {
-    const invalidate = () => {
-      try {
-        map.invalidateSize({ animate: false });
-      } catch {
-        /* ignore */
-      }
-    };
-
-    const container = map.getContainer();
-    const targets = [container, container.parentElement].filter(Boolean) as Element[];
-    const ro = new ResizeObserver(() => invalidate());
-    targets.forEach((el) => ro.observe(el));
-
-    invalidate();
-    const t1 = window.setTimeout(invalidate, 100);
-    const t2 = window.setTimeout(invalidate, 400);
-    const t3 = window.setTimeout(invalidate, 1000);
-    window.addEventListener('resize', invalidate);
-    window.addEventListener('orientationchange', invalidate);
-    window.visualViewport?.addEventListener('resize', invalidate);
-
-    return () => {
-      ro.disconnect();
-      window.clearTimeout(t1);
-      window.clearTimeout(t2);
-      window.clearTimeout(t3);
-      window.removeEventListener('resize', invalidate);
-      window.removeEventListener('orientationchange', invalidate);
-      window.visualViewport?.removeEventListener('resize', invalidate);
-    };
-  }, [map]);
-
-  useEffect(() => {
-    if (!gpsReady || firstGpsInvalidateDone.current) return;
-    firstGpsInvalidateDone.current = true;
-    const id0 = window.requestAnimationFrame(() => {
-      try {
-        map.invalidateSize({ animate: false });
-      } catch {
-        /* ignore */
-      }
-      window.requestAnimationFrame(() => {
-        try {
-          map.invalidateSize({ animate: false });
-        } catch {
-          /* ignore */
-        }
-      });
-    });
-    const t = window.setTimeout(() => {
-      try {
-        map.invalidateSize({ animate: false });
-      } catch {
-        /* ignore */
-      }
-    }, 200);
-    return () => {
-      window.cancelAnimationFrame(id0);
-      window.clearTimeout(t);
-    };
-  }, [gpsReady, map]);
-
-  return null;
-};
-
 // Component to handle map centering and rotation
 const MapController = ({ location, heading, isFollowing, showRanking, isRecording, speedKmh, hasActiveRoute }: { location: any, heading: number | null, isFollowing: boolean, showRanking: boolean, isRecording: boolean, speedKmh: number, hasActiveRoute: boolean }) => {
   const map = useMap();
@@ -440,7 +366,7 @@ export default function MapView({
     return () => window.removeEventListener('motoride:route-back', onRouteBack);
   }, []);
 
-  // Rain Viewer: load real tile path from API (paths are hashed; /v2/radar/0 is invalid). Refresh every 5 min.
+  // Rain Viewer: load real tile path from API (paths are hashed; /v2/radar/0 is invalid). Refresh every 10 min.
   useEffect(() => {
     if (!showWeather) {
       setRainRadar(null);
@@ -462,7 +388,7 @@ export default function MapView({
       }
     };
     load();
-    const id = window.setInterval(load, 5 * 60 * 1000);
+    const id = window.setInterval(load, 10 * 60 * 1000);
     return () => {
       cancelled = true;
       window.clearInterval(id);
@@ -1042,11 +968,10 @@ export default function MapView({
     }
   };
 
-  // Mantener pantalla encendida mientras el mapa con GPS está abierto (no solo grabación / bolsillo).
-  // Screen Wake Lock: Chrome/Android; Safari iOS 16.4+ (incl. PWA a pantalla completa). A veces hace falta un toque para que enganche.
+  // Keep screen awake while recording route or in pocket mode (Wake Lock API: iOS 16.4+ Safari / PWA; requiere gesto en muchos dispositivos).
   useEffect(() => {
     let cancelled = false;
-    const shouldKeepAwake = true;
+    const shouldKeepAwake = isRecording || isPocketMode;
     const nav = navigator as Navigator & { wakeLock?: { request: (type: 'screen') => Promise<any> } };
 
     const requestWakeLock = async () => {
@@ -1104,7 +1029,7 @@ export default function MapView({
         wakeLockRef.current = null;
       }
     };
-  }, []);
+  }, [isRecording, isPocketMode]);
 
   // Leave group when route view is closed/app is backgrounded or closed.
   useEffect(() => {
@@ -2188,7 +2113,7 @@ export default function MapView({
                 </button>
                 {showWeather && weatherFetchFailed && (
                   <p className="text-[11px] text-amber-400/90 px-3 -mt-2 mb-1 leading-snug">
-                    No se pudo cargar el radar ahora. Revisa la conexión; se reintentará al abrir ajustes o cada 5 min.
+                    No se pudo cargar el radar ahora. Revisa la conexión; se reintentará al abrir ajustes o cada 10 min.
                   </p>
                 )}
                 {showWeather && !weatherFetchFailed && rainRadar && !weatherTilesLoaded && (
@@ -2664,9 +2589,9 @@ export default function MapView({
         </div>
       )}
 
-      <div className="w-full flex-1 min-h-0 relative overflow-hidden bg-zinc-900">
+      <div className="w-full flex-1 relative overflow-hidden bg-zinc-900">
         <div 
-          className="w-full h-full min-h-0 transition-transform duration-500 ease-out"
+          className="w-full h-full transition-transform duration-500 ease-out"
           style={{
             transform: isRecording && currentSpeedKmh > 3 && localDistance >= 0.05 ? `rotate(${-navigationHeading}deg)` : 'none',
             transformOrigin: 'center center',
@@ -2685,7 +2610,6 @@ export default function MapView({
         <MapInvalidateHelper
           layoutKey={`${isRecording && currentSpeedKmh > 3 && localDistance >= 0.05 ? 1 : 0}_${isDarkMode ? 1 : 0}`}
         />
-        <MapResizeSync gpsReady={!!currentLocation} />
         <TileLayer 
           url={isDarkMode 
             ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"

@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useEffect, useState, Component, type ErrorInfo } from 'react';
+import { useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Login from './components/Login';
 import MainApp from './components/MainApp';
@@ -44,71 +44,7 @@ interface AppErrorBoundaryProps {
   children: React.ReactNode;
 }
 
-interface AppErrorBoundaryState {
-  hasError: boolean;
-  message: string | null;
-}
-
-/** Evita pantalla en blanco total si un componente lanza al renderizar (p. ej. al entrar en ruta). */
-class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorBoundaryState> {
-  state: AppErrorBoundaryState = { hasError: false, message: null };
-
-  static getDerivedStateFromError(error: Error): Partial<AppErrorBoundaryState> {
-    return { hasError: true, message: error?.message || 'Error desconocido' };
-  }
-
-  componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error('[MotoRide] Error de interfaz:', error, info.componentStack);
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div className="min-h-dvh bg-zinc-950 flex flex-col items-center justify-center p-6 text-center">
-          <div className="w-20 h-20 bg-orange-500/10 rounded-full flex items-center justify-center mb-6">
-            <AlertTriangle size={40} className="text-orange-500" />
-          </div>
-          <h1 className="text-xl font-bold text-white mb-2">Algo salió mal al cargar la pantalla</h1>
-          <p className="text-zinc-400 max-w-md mb-2 text-sm">
-            Suele pasar tras una actualización de la app o si el navegador quedó con datos viejos. Prueba recargar; si
-            sigue igual, limpia caché del sitio o reinstala la PWA.
-          </p>
-          {this.state.message && (
-            <p className="text-zinc-600 text-xs max-w-lg mb-6 font-mono break-all">{this.state.message}</p>
-          )}
-          <div className="flex flex-col sm:flex-row gap-3">
-            <button
-              type="button"
-              onClick={() => window.location.reload()}
-              className="flex items-center justify-center gap-2 bg-orange-500 hover:bg-orange-600 text-white px-6 py-3 rounded-xl font-semibold transition-colors"
-            >
-              <RefreshCcw size={18} />
-              Recargar página
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                void runOneShotRecoveryReload();
-              }}
-              className="flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-6 py-3 rounded-xl font-semibold transition-colors"
-            >
-              Limpiar caché y reintentar
-            </button>
-          </div>
-        </div>
-      );
-    }
-    const { children } = this as Component<AppErrorBoundaryProps, AppErrorBoundaryState>;
-    return children;
-  }
-}
-
-function shouldRunStaleBundleRecovery(reason: unknown): boolean {
-  const msg = reason instanceof Error ? reason.message : String(reason);
-  return /ChunkLoadError|Loading chunk|Loading CSS chunk|dynamically imported module|Importing a module script failed|Failed to fetch dynamically imported module/i.test(
-    msg
-  );
-}
+const AppErrorBoundary: React.FC<AppErrorBoundaryProps> = ({ children }) => <>{children}</>;
 
 const AppContent = () => {
   const { user, loading, error } = useAuth();
@@ -153,22 +89,15 @@ const AppContent = () => {
   }, []);
 
   useEffect(() => {
-    const onError = (e: ErrorEvent) => {
-      if (shouldRunStaleBundleRecovery(e.message || e.error)) {
-        void runOneShotRecoveryReload();
-      }
-    };
-    const onRejection = (e: PromiseRejectionEvent) => {
-      if (shouldRunStaleBundleRecovery(e.reason)) {
-        void runOneShotRecoveryReload();
-      }
+    const handleFatalError = () => {
+      runOneShotRecoveryReload();
     };
 
-    window.addEventListener('error', onError);
-    window.addEventListener('unhandledrejection', onRejection);
+    window.addEventListener('error', handleFatalError);
+    window.addEventListener('unhandledrejection', handleFatalError);
     return () => {
-      window.removeEventListener('error', onError);
-      window.removeEventListener('unhandledrejection', onRejection);
+      window.removeEventListener('error', handleFatalError);
+      window.removeEventListener('unhandledrejection', handleFatalError);
     };
   }, []);
 

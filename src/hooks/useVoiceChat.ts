@@ -18,12 +18,8 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
   });
 }
 
-function domExceptionName(err: unknown): string {
-  return err && typeof err === 'object' && 'name' in err ? String((err as DOMException).name) : '';
-}
-
 function micErrorMessage(err: unknown): string {
-  const name = domExceptionName(err);
+  const name = err && typeof err === 'object' && 'name' in err ? String((err as DOMException).name) : '';
   if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
     return 'Micrófono denegado o bloqueado. Toca el candado o ⋮ en la barra de direcciones → Permisos del sitio → Micrófono: Permitir. En iPhone: Ajustes → Safari → la web → Micrófono. Luego vuelve a pulsar el botón de voz.';
   }
@@ -37,57 +33,6 @@ function micErrorMessage(err: unknown): string {
     return err.message;
   }
   return 'No se pudo usar el micrófono. Abre MotoRide en el navegador (no dentro de Instagram/Facebook), con HTTPS o localhost, y no en modo incógnito si el navegador bloquea el mic ahí.';
-}
-
-/** Varios perfiles: en Android antiguo a veces solo acepta `audio: true` o el audio sale mudo con AEC/NS forzados. */
-const MIC_CONSTRAINT_TIERS: MediaStreamConstraints[] = [
-  {
-    audio: {
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true,
-    },
-    video: false,
-  },
-  { audio: true, video: false },
-  {
-    audio: {
-      echoCancellation: false,
-      noiseSuppression: false,
-      autoGainControl: false,
-    },
-    video: false,
-  },
-];
-
-async function acquireUserMediaWithTiers(
-  gUM: (c: MediaStreamConstraints) => Promise<MediaStream>,
-  timeoutMsg: string
-): Promise<MediaStream> {
-  let lastErr: unknown;
-  for (let i = 0; i < MIC_CONSTRAINT_TIERS.length; i++) {
-    try {
-      const stream = await withTimeout(gUM(MIC_CONSTRAINT_TIERS[i]), 20000, timeoutMsg);
-      if (import.meta.env.DEV && i > 0) {
-        console.warn('[voice] micrófono con perfil de compatibilidad', i + 1, '/', MIC_CONSTRAINT_TIERS.length);
-      }
-      return stream;
-    } catch (e: unknown) {
-      lastErr = e;
-      const n = domExceptionName(e);
-      if (n === 'NotAllowedError' || n === 'PermissionDeniedError' || n === 'SecurityError') {
-        throw e;
-      }
-      if (n === 'OverconstrainedError' || n === 'ConstraintNotSatisfiedError') {
-        continue;
-      }
-      if (i < MIC_CONSTRAINT_TIERS.length - 1) {
-        continue;
-      }
-      throw e;
-    }
-  }
-  throw lastErr;
 }
 
 /**
@@ -151,13 +96,11 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
 
   const addAudioStream = (peerId: string, stream: MediaStream) => {
     if (!audioRefs.current[peerId]) {
-      const audio = document.createElement('audio');
+      const audio = new Audio();
       audio.srcObject = stream;
       audio.autoplay = true;
-      audio.volume = 1;
-      audio.setAttribute('playsinline', 'true');
-      audio.setAttribute('webkit-playsinline', 'true');
       (audio as any).playsInline = true;
+      audio.setAttribute('playsinline', 'true');
       audio.play().catch(() => {});
       audioRefs.current[peerId] = audio;
     }
@@ -370,7 +313,28 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
 
     const timeoutMsg = 'El micrófono no respondió a tiempo. Reinicia la pestaña y vuelve a pulsar voz.';
 
-    acquireUserMediaWithTiers(gUM, timeoutMsg)
+    const constraintsIdeal: MediaStreamConstraints = {
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+      video: false,
+    };
+
+    const constraintsSimple: MediaStreamConstraints = { audio: true, video: false };
+
+    const acquire = (constraints: MediaStreamConstraints) =>
+      withTimeout(gUM(constraints), 20000, timeoutMsg);
+
+    acquire(constraintsIdeal)
+      .catch((e: unknown) => {
+        const n = e && typeof e === 'object' && 'name' in e ? String((e as DOMException).name) : '';
+        if (n === 'OverconstrainedError' || n === 'ConstraintNotSatisfiedError') {
+          return acquire(constraintsSimple);
+        }
+        throw e;
+      })
       .then((stream: MediaStream) => {
         if (!canUseVoiceRef.current) {
           stream.getTracks().forEach((t) => t.stop());

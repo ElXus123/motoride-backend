@@ -9,5 +9,7 @@
   Cache-Control: no-cache, no-store, must-revalidate
 
 # Hashes en nombre: seguros de cachear largo en navegador/edge
+# CORS explícito por si el navegador trata el módulo como petición CORS (p. ej. con crossorigin en HTML antiguo en caché).
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
+  Access-Control-Allow-Origin: *
