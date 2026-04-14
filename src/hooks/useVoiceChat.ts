@@ -21,7 +21,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
 function micErrorMessage(err: unknown): string {
   const name = err && typeof err === 'object' && 'name' in err ? String((err as DOMException).name) : '';
   if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-    return 'Micrófono denegado o bloqueado. Toca el candado o ⋮ en la barra de direcciones → Permisos del sitio → Micrófono: Permitir. En iPhone: Ajustes → Safari → la web → Micrófono. Luego vuelve a pulsar el botón de voz.';
+    return 'El micrófono está bloqueado. En iPhone: en Safari, toca «aA» a la izquierda de la barra de direcciones y permite el micrófono; si no ves esa opción, ve a Ajustes → Safari y revisa los permisos del sitio. En Android u ordenador: menú del navegador o candado en la barra → permite el micrófono. Luego pulsa otra vez el botón de voz.';
   }
   if (name === 'NotFoundError') {
     return 'No se detecta micrófono en el dispositivo.';
@@ -306,7 +306,7 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
     const gUM = md?.getUserMedia?.bind(md);
     if (!gUM) {
       setMicError(
-        'Tu navegador no expone el micrófono aquí. Actualiza Safari/Chrome o abre MotoRide en el navegador del sistema (no en un visor embebido).'
+        'Aquí no está disponible el micrófono. Abre MotoRide en Safari o Chrome del móvil (no dentro de Instagram, Facebook o WhatsApp).'
       );
       return;
     }

@@ -8,7 +8,8 @@ import { parseGPX, parseRouteData } from '../lib/gpx';
 import { calculateLevel } from '../lib/utils';
 import { requestJson } from '../lib/network';
 import { LEAFLET_TRANSPARENT_ERROR_TILE } from '../lib/leafletTiles';
-import { Users, Plus, LogOut, User as UserIcon, Activity, Trash2, Trophy, Calendar, MapPin, Search, Clock, ChevronRight, Upload, X, Map as MapIcon, Play, HeartHandshake, CircleDollarSign, Shield, CheckCircle2, AlertCircle, Mail } from 'lucide-react';
+import { Users, Plus, LogOut, User as UserIcon, Activity, Trash2, Trophy, Calendar, MapPin, Search, Clock, ChevronRight, Upload, X, Map as MapIcon, Play, HeartHandshake, CircleDollarSign, Shield, CheckCircle2, AlertCircle, Mail, Share2, Copy, Check } from 'lucide-react';
+import { copyTextToClipboard, getSupportMailtoHref } from '../lib/clientInfo';
 import FriendsModal from './FriendsModal';
 import AdminPointsPanel from './AdminPointsPanel';
 import PremiumBadge from './PremiumBadge';
@@ -111,6 +112,9 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     hasPreview: false,
   });
   const [indexBuilding, setIndexBuilding] = useState(false);
+  /** Tras crear ruta programada: mostrar código y enlaces de invitación (antes no se veía el código). */
+  const [postScheduleInvite, setPostScheduleInvite] = useState<{ code: string; name: string } | null>(null);
+  const [scheduleInviteCopied, setScheduleInviteCopied] = useState<'code' | 'link' | null>(null);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deletingType, setDeletingType] = useState<'history' | 'scheduled' | null>(null);
@@ -434,6 +438,9 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       setShowCreateModal(false);
       if (routeType === 'instant') {
         onJoinGroup(code);
+      } else {
+        setPostScheduleInvite({ code, name: finalRouteName });
+        setScheduleInviteCopied(null);
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, `groups/${code}`);
@@ -740,9 +747,9 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
               </button>
             )}
             <a
-              href="mailto:juarp123@gmail.com?subject=Soporte%20MotoRide&body=Describe%20tu%20problema%20%28dispositivo%2C%20pasos%20para%20reproducirlo%29%3A%0A%0A"
+              href={getSupportMailtoHref()}
               className="p-2 bg-zinc-900 border border-zinc-800 rounded-full hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-sky-400"
-              title="Contactar soporte"
+              title="Contactar soporte (se incluye sistema y navegador en el mensaje)"
             >
               <Mail size={20} />
             </a>
@@ -1481,6 +1488,96 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           </div>
         </div>
       )}
+
+      {postScheduleInvite && (
+        <div className="fixed inset-0 z-[55] flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm">
+          <div className="bg-zinc-900 border border-orange-500/40 w-full max-w-md rounded-3xl overflow-hidden shadow-2xl shadow-orange-500/10">
+            <div className="p-6 border-b border-zinc-800">
+              <h2 className="text-xl font-black text-white flex items-center gap-2">
+                <Users className="text-orange-500" size={22} />
+                Invita a tu ruta
+              </h2>
+              <p className="text-sm text-zinc-400 mt-2">
+                Ruta programada: <span className="text-white font-semibold">{postScheduleInvite.name}</span>
+              </p>
+              <p className="text-xs text-zinc-500 mt-1">
+                Comparte el <strong className="text-zinc-300">código</strong> o el <strong className="text-zinc-300">enlace</strong> para que se apunten desde la app.
+              </p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 text-center">
+                <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-1">Código</p>
+                <p className="text-3xl font-black text-orange-500 tracking-wider">{postScheduleInvite.code}</p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const ok = await copyTextToClipboard(postScheduleInvite.code);
+                    if (ok) {
+                      setScheduleInviteCopied('code');
+                      setTimeout(() => setScheduleInviteCopied(null), 2000);
+                    } else {
+                      window.prompt('Copia el código:', postScheduleInvite.code);
+                    }
+                  }}
+                  className="flex items-center justify-center gap-2 py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white font-bold text-sm"
+                >
+                  {scheduleInviteCopied === 'code' ? <Check size={18} className="text-green-500" /> : <Copy size={18} />}
+                  Copiar código
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const url = `${window.location.origin}${window.location.pathname}?join=${postScheduleInvite.code}`;
+                    const ok = await copyTextToClipboard(url);
+                    if (ok) {
+                      setScheduleInviteCopied('link');
+                      setTimeout(() => setScheduleInviteCopied(null), 2000);
+                    } else {
+                      window.prompt('Copia el enlace:', url);
+                    }
+                  }}
+                  className="flex items-center justify-center gap-2 py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white font-bold text-sm"
+                >
+                  {scheduleInviteCopied === 'link' ? <Check size={18} className="text-green-500" /> : <Copy size={18} />}
+                  Copiar enlace
+                </button>
+              </div>
+              {typeof navigator !== 'undefined' && typeof navigator.share === 'function' && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const url = `${window.location.origin}${window.location.pathname}?join=${postScheduleInvite.code}`;
+                    try {
+                      await navigator.share({
+                        title: `Ruta: ${postScheduleInvite.name}`,
+                        text: 'Apúntate a esta salida en MotoRide:',
+                        url,
+                      });
+                    } catch (e) {
+                      const err = e as { name?: string };
+                      if (err?.name !== 'AbortError') console.error(e);
+                    }
+                  }}
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-sm"
+                >
+                  <Share2 size={18} />
+                  Compartir…
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setPostScheduleInvite(null)}
+                className="w-full py-3 rounded-xl border border-zinc-700 text-zinc-300 font-semibold text-sm hover:bg-zinc-800"
+              >
+                Entendido
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Route Preview Modal */}
       {showPreviewModal && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">

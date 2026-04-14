@@ -6,6 +6,7 @@ import { db, logOut, handleFirestoreError, OperationType } from '../firebase';
 import { calculateLevel } from '../lib/utils';
 import { useAuth } from '../contexts/AuthContext';
 import { useLocationTracking } from '../hooks/useLocationTracking';
+import { useOpenMeteoWeather } from '../hooks/useOpenMeteoWeather';
 import { useLeanAngle } from '../hooks/useLeanAngle';
 import { useNavigation } from '../hooks/useNavigation';
 import { useNavigationHeading } from '../hooks/useNavigationHeading';
@@ -17,10 +18,12 @@ import { requestJson } from '../lib/network';
 import { getActivePointsConfig } from '../lib/pointsConfig';
 import { fetchRainViewerTileUrl } from '../lib/rainviewer';
 import { LEAFLET_TRANSPARENT_ERROR_TILE } from '../lib/leafletTiles';
+import { weatherWmoToLucide } from '../lib/weatherWmo';
 import socket from '../lib/socket';
 import { useVoiceChat } from '../hooks/useVoiceChat';
 import PremiumBadge from './PremiumBadge';
 import { Upload, ArrowLeft, Copy, Check, Navigation, AlertTriangle, Play, Square, ArrowUp, MapPin, Trophy, Bell, AlertCircle, Wrench, Fuel, X, Maximize, Minimize, Search, Share2, Menu, Moon, Sun, Target, LogOut, Users, Mic, MicOff, ShieldAlert, Activity, Layers, Lock, LockOpen, Smartphone, RotateCw, Crown, WifiOff } from 'lucide-react';
+import { copyTextToClipboard } from '../lib/clientInfo';
 import { motion, AnimatePresence } from 'motion/react';
 
 // Tile prefetching helpers
@@ -711,6 +714,7 @@ export default function MapView({
     level: userLevel,
     isHost
   });
+  const mapWeather = useOpenMeteoWeather(currentLocation?.lat, currentLocation?.lng);
   const {
     leanAngle: sensorLeanAngle,
     maxLeanLeft,
@@ -1566,7 +1570,7 @@ export default function MapView({
         retries: 1,
         backoffMs: 600,
         headers: {
-          'User-Agent': 'MoteroApp/1.0 (contact: juarp123@gmail.com)'
+          'User-Agent': 'MoteroApp/1.0 (contact: motorideapp1@gmail.com)'
         }
       });
       
@@ -1628,28 +1632,39 @@ export default function MapView({
     return () => clearTimeout(timer);
   }, [showSearchModal, searchDestination]);
 
-  const copyCode = () => {
-    navigator.clipboard.writeText(groupId);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const copyCode = async () => {
+    const ok = await copyTextToClipboard(groupId);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } else {
+      window.prompt('Copia el código del grupo:', groupId);
+    }
   };
 
-  const shareRoute = () => {
+  const shareRoute = async () => {
     const url = `${window.location.origin}${window.location.pathname}?join=${groupId}`;
-    navigator.clipboard.writeText(url);
+    const copied = await copyTextToClipboard(url);
+    if (!copied) {
+      window.prompt('Copia este enlace para invitar a tu ruta:', url);
+      return;
+    }
     setShared(true);
     setTimeout(() => setShared(false), 2000);
-    
-    if (navigator.share) {
-      navigator.share({
-        title: `Únete a mi ruta: ${group?.name || 'Ruta Motera'}`,
-        text: `¡Hola! Únete a mi ruta en tiempo real usando este enlace:`,
-        url: url,
-      }).catch((err) => {
-        if (err.name !== 'AbortError' && err.message !== 'Share canceled') {
+
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try {
+        await navigator.share({
+          title: `Únete a mi ruta: ${group?.name || 'Ruta Motera'}`,
+          text: `¡Hola! Únete a mi ruta en tiempo real usando este enlace:`,
+          url,
+        });
+      } catch (err: unknown) {
+        const e = err as { name?: string; message?: string };
+        if (e?.name !== 'AbortError' && e?.message !== 'Share canceled') {
           console.error('Share failed:', err);
         }
-      });
+      }
     }
   };
 
@@ -1694,6 +1709,11 @@ export default function MapView({
 
   const currentSpeedKmh = speed ? Math.round(speed * 3.6) : 0;
   const isMoving = currentSpeedKmh > 2;
+
+  const DayWeatherIcon = useMemo(
+    () => weatherWmoToLucide(mapWeather.dailyWeatherCode),
+    [mapWeather.dailyWeatherCode]
+  );
 
   // Fall detection
   useEffect(() => {
@@ -2297,7 +2317,7 @@ export default function MapView({
           role="status"
         >
           <span className="font-medium leading-snug">
-            En iPhone hay que <strong>permitir acceso al movimiento</strong> para el inclinómetro. Pulsa el botón (o usa Calibrar inclinación en ajustes).
+            En iPhone MotoRide necesita <strong>permiso de movimiento</strong> para mostrar la inclinación. Toca el botón de abajo. Si ya lo rechazaste antes, entra en los ajustes del mapa y usa <strong>Calibrar inclinación</strong>.
           </span>
           <button
             type="button"
@@ -2573,16 +2593,36 @@ export default function MapView({
 
       {/* HUD Overlay */}
       <div className={`absolute left-0 right-0 z-[1000] pointer-events-none flex justify-center px-2 sm:px-4 landscape:justify-start landscape:left-4 landscape:right-auto ${isLandscape ? 'landscape:bottom-3' : 'bottom-5'}`}>
-        <div className="bg-zinc-950/90 backdrop-blur-3xl rounded-[2rem] sm:rounded-[2.5rem] p-1.5 border border-white/10 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.8)] flex items-center gap-0.5 sm:gap-1 pointer-events-auto max-w-full overflow-hidden landscape:scale-90 landscape:origin-bottom-left">
+        <div className="bg-zinc-950/90 backdrop-blur-3xl rounded-[2.1rem] sm:rounded-[2.65rem] p-2 sm:p-2.5 border border-white/10 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.8)] flex items-stretch gap-1 sm:gap-1.5 pointer-events-auto max-w-full overflow-hidden landscape:scale-90 landscape:origin-bottom-left">
           
-          {/* Speed Section */}
-          <div className="flex flex-col items-center justify-center min-w-[80px] sm:min-w-[120px] py-2 sm:py-3 px-3 sm:px-6 bg-white/5 rounded-[1.5rem] sm:rounded-[2rem] border border-white/5 shrink-0 landscape:min-w-[80px] landscape:px-3">
+          {/* Speed + tiempo en ubicación */}
+          <div className="flex flex-col items-center justify-center min-w-[92px] sm:min-w-[136px] py-2.5 sm:py-4 pl-5 sm:pl-8 pr-3 sm:pr-6 ml-1 sm:ml-2 bg-white/5 rounded-[1.6rem] sm:rounded-[2.1rem] border border-white/5 shrink-0 landscape:min-w-[86px] landscape:pl-4 landscape:pr-2.5 landscape:ml-1">
+            <div
+              className="flex items-center justify-center gap-1 sm:gap-1.5 mb-1 sm:mb-1.5 min-h-[1.15rem] sm:min-h-[1.35rem]"
+              title="Temperatura ahora e icono según la previsión del día (Open-Meteo)"
+            >
+              {mapWeather.loading && mapWeather.tempC == null ? (
+                <span className="inline-block h-3.5 w-3.5 sm:h-4 sm:w-4 border-2 border-sky-400/30 border-t-sky-300 rounded-full animate-spin" aria-hidden />
+              ) : (
+                <>
+                  <DayWeatherIcon
+                    className="shrink-0 text-sky-200"
+                    size={isLandscape ? 15 : 19}
+                    strokeWidth={2.25}
+                    aria-hidden
+                  />
+                  <span className="text-[11px] sm:text-sm font-black tabular-nums text-zinc-100 leading-none">
+                    {mapWeather.tempC != null ? `${Math.round(mapWeather.tempC)}°` : '—'}
+                  </span>
+                </>
+              )}
+            </div>
             <span className="text-3xl sm:text-5xl font-black leading-none tracking-tighter text-white tabular-nums">{currentSpeedKmh}</span>
             <span className="text-[8px] sm:text-[9px] font-black uppercase tracking-[0.1em] sm:tracking-[0.2em] text-blue-400 mt-0.5 sm:mt-1">km/h</span>
           </div>
 
           {/* Lean Angle & Stats Section */}
-          <div className="flex items-center gap-3 sm:gap-6 px-3 sm:px-6 py-1 sm:py-2 min-w-0">
+          <div className="flex items-center gap-3 sm:gap-6 px-3 sm:px-6 py-2 sm:py-3 min-w-0">
             {/* Lean Angle Display */}
             <div className="flex flex-col items-center shrink-0">
               <div className="flex justify-between w-full text-[8px] sm:text-[9px] font-black uppercase tracking-widest px-1 mb-0.5 sm:mb-1">
@@ -2609,7 +2649,7 @@ export default function MapView({
             </div>
 
             {/* Vertical Divider */}
-            <div className="w-px h-10 sm:h-12 bg-white/10 shrink-0" />
+            <div className="w-px h-12 sm:h-14 bg-white/10 shrink-0 self-center" />
 
             {/* Score & Stop Recording */}
             <div className="flex flex-col gap-1 sm:gap-1.5 min-w-[80px] sm:min-w-[100px]">

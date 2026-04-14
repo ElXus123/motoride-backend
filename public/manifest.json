@@ -1,15 +1,18 @@
 {
   "name": "MotoRide",
   "short_name": "MotoRide",
-  "description": "Navegador y telemetria para moteros con inclinometro y radares.",
+  "description": "Navegación y telemetría para moteros: mapa en grupo, GPS, inclinómetro y avisos en ruta.",
+  "lang": "es",
+  "dir": "ltr",
   "id": "/",
   "scope": "/",
   "start_url": "/",
-  "display": "fullscreen",
-  "display_override": ["fullscreen", "standalone"],
+  "display": "standalone",
+  "display_override": ["standalone", "fullscreen", "minimal-ui"],
   "background_color": "#09090b",
   "theme_color": "#09090b",
   "prefer_related_applications": false,
+  "categories": ["navigation", "lifestyle"],
   "icons": [
     {
       "src": "/icon-192.png",
@@ -21,7 +24,13 @@
       "src": "/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ],
   "orientation": "any"

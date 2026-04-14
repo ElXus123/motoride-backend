@@ -129,11 +129,11 @@ const AppContent = () => {
       } else if (el.webkitRequestFullscreen) {
         await el.webkitRequestFullscreen();
       } else {
-        alert('Tu navegador no permite pantalla completa directa. En Safari: Compartir -> Añadir a pantalla de inicio para abrirla a pantalla completa.');
+        alert('En iPhone no funciona la pantalla completa dentro del navegador. Instala la app desde Safari: abajo, Compartir → Añadir a pantalla de inicio. Luego ábrela desde el icono en tu pantalla de inicio.');
       }
     } catch (err) {
       console.error('Fullscreen not available:', err);
-      alert('No se pudo activar pantalla completa automáticamente. En Safari usa: Compartir -> Añadir a pantalla de inicio.');
+      alert('No se pudo usar pantalla completa aquí. En iPhone: instala MotoRide desde Safari (Compartir → Añadir a pantalla de inicio) y ábrela desde el icono.');
     }
   };
   
@@ -187,12 +187,15 @@ const AppContent = () => {
 
             {(deferredPrompt || isSafari) && (
             <div className="rounded-2xl border border-zinc-700 bg-zinc-900/60 p-3 mb-3 text-sm text-zinc-200">
-              <p className="font-semibold mb-1">Como instalarla en 20 segundos:</p>
+              <p className="font-semibold mb-2">Cómo ponerla en tu móvil</p>
               {isSafari ? (
                 <>
-                  <p className="text-zinc-300">1) Abrela en Safari.</p>
-                  <p className="text-zinc-300">2) Pulsa Compartir (icono cuadrado con flecha).</p>
-                  <p className="text-zinc-300">3) Toca Anadir a pantalla de inicio para usarla en modo app.</p>
+                  <p className="text-zinc-300 mb-2">Si tienes <strong className="text-zinc-200">iPhone</strong>, usa el navegador <strong className="text-zinc-200">Safari</strong> (el que viene por defecto).</p>
+                  <ol className="list-decimal list-inside space-y-1.5 text-zinc-300">
+                    <li>Abre esta página en Safari.</li>
+                    <li>Abajo, toca el botón <strong className="text-zinc-200">Compartir</strong> (cuadrado con una flecha hacia arriba).</li>
+                    <li>Toca <strong className="text-zinc-200">Añadir a pantalla de inicio</strong> y luego <strong className="text-zinc-200">Añadir</strong>. Ya tendrás el icono como una app normal.</li>
+                  </ol>
                 </>
               ) : (
                 <>
@@ -206,13 +209,13 @@ const AppContent = () => {
 
             {(isSafari || isIOS) && (
               <div className="rounded-2xl border border-blue-500/30 bg-blue-500/10 p-3 mb-3 text-sm text-zinc-200">
-                <p className="font-semibold mb-2">Recomendado en Safari/iPhone</p>
-                <p className="text-zinc-300 mb-3">Para mejor visibilidad en ruta, usa pantalla completa.</p>
+                <p className="font-semibold mb-2">En iPhone: mapa a pantalla llena</p>
+                <p className="text-zinc-300 mb-3">Lo más cómodo es abrir MotoRide desde el <strong className="text-zinc-200">icono que añadiste</strong> (no desde Safari). Si aún la tienes solo en el navegador, puedes probar este botón; si no hace nada, sigue los pasos de arriba para instalarla.</p>
                 <button
                   onClick={requestFullscreen}
                   className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl py-2.5 transition-colors"
                 >
-                  Activar pantalla completa
+                  Intentar pantalla completa
                 </button>
               </div>
             )}
