@@ -22,7 +22,7 @@ import { parseGPX, parseRouteData } from '../lib/gpx';
 import { calculateLevel, formatDurationHoursMinutes } from '../lib/utils';
 import { requestJson } from '../lib/network';
 import { LEAFLET_LIGHT_ERROR_TILE } from '../lib/leafletTiles';
-import { Users, Plus, LogOut, User as UserIcon, Activity, Trash2, Trophy, Calendar, MapPin, Search, Clock, ChevronRight, Upload, X, Map as MapIcon, HeartHandshake, CircleDollarSign, Shield, CheckCircle2, AlertCircle, Mail, Share2, Copy, Check, Loader2, Globe, Lock, Inbox, UserPlus } from 'lucide-react';
+import { Users, Plus, LogOut, User as UserIcon, Activity, Trash2, Trophy, Calendar, MapPin, Search, Clock, ChevronRight, Upload, X, Map as MapIcon, HeartHandshake, CircleDollarSign, Shield, CheckCircle2, AlertCircle, Mail, Share2, Copy, Check, Loader2, Globe, Lock, Inbox, UserPlus, ListOrdered } from 'lucide-react';
 import { copyTextToClipboard, getSupportMailtoHref } from '../lib/clientInfo';
 import { generateGroupCode } from '../lib/groupCode';
 import {
@@ -63,7 +63,6 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   const { user } = useAuth();
   const showMessage = useAppMessage();
   const [userData, setUserData] = useState<any>(null);
-  const [pointsFixError, setPointsFixError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -72,45 +71,6 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     });
     return unsub;
   }, [user]);
-
-  useEffect(() => {
-    if (!user || !userData) return;
-    let cancelled = false;
-
-    const normalizePointsLevelFields = async () => {
-      try {
-        setPointsFixError(null);
-        const rawPoints = Number(userData.points ?? 0);
-        const rawLevel = Number(userData.level ?? 1);
-
-        if (!Number.isFinite(rawPoints)) {
-          await updateDoc(doc(db, 'users', user.uid), { points: 0, level: 1 });
-          return;
-        }
-
-        const safePoints = Math.max(0, Math.floor(rawPoints));
-        const calculatedLevel = calculateLevel(safePoints).level;
-        const safeLevel = Number.isFinite(rawLevel) ? Math.max(1, Math.floor(rawLevel)) : calculatedLevel;
-
-        if (safePoints !== rawPoints || safeLevel !== calculatedLevel) {
-          await updateDoc(doc(db, 'users', user.uid), {
-            points: safePoints,
-            level: calculatedLevel
-          });
-        }
-      } catch (error) {
-        if (cancelled) return;
-        console.error('Error normalizando puntos/nivel:', error);
-        setPointsFixError('Error corrigiendo puntos. Se reintentara automaticamente.');
-        handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
-      }
-    };
-
-    normalizePointsLevelFields();
-    return () => {
-      cancelled = true;
-    };
-  }, [user, userData?.points, userData?.level]);
 
   const points = Math.max(0, Number(userData?.points || 0));
   const pendingFriendRequestCount = Array.isArray(userData?.friendRequestsIncoming)
@@ -155,7 +115,15 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   const [deletingType, setDeletingType] = useState<'scheduled' | null>(null);
   const exploreGpsFilledRef = useRef(false);
   const [exploreFromGpsHint, setExploreFromGpsHint] = useState(false);
-  
+  /** Abrir bloque «Apuntados» desde el botón inferior (por id de ruta/grupo). */
+  const [attendeesExpandNonceByRouteId, setAttendeesExpandNonceByRouteId] = useState<Record<string, number>>({});
+  const bumpAttendeesList = (routeId: string) => {
+    setAttendeesExpandNonceByRouteId((prev) => ({
+      ...prev,
+      [routeId]: (prev[routeId] ?? 0) + 1,
+    }));
+  };
+
   // Create Route Form State
   const [routeName, setRouteName] = useState('');
   const [routeType, setRouteType] = useState<'instant' | 'scheduled'>('instant');
@@ -998,12 +966,6 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       </header>
 
       <main className="max-w-5xl mx-auto space-y-8 py-6 pl-[max(1.5rem,env(safe-area-inset-left,0px))] pr-[max(1.5rem,env(safe-area-inset-right,0px))]">
-        {pointsFixError && (
-          <div className="bg-red-500/10 border border-red-500/30 rounded-2xl px-4 py-3 text-sm text-red-200">
-            {pointsFixError}
-          </div>
-        )}
-
         {/* Quick Actions */}
         <div className="grid grid-cols-1 gap-6">
           <div className="bg-gradient-to-br from-orange-500 to-orange-600 p-8 rounded-[2rem] shadow-xl shadow-orange-500/10 relative overflow-hidden group">
@@ -1138,6 +1100,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                     memberUids={Array.isArray(route.members) ? route.members : []}
                     compact
                     className="mb-3"
+                    expandNonce={attendeesExpandNonceByRouteId[route.id] ?? 0}
                   />
                     <div className="flex gap-2">
                       {route.routeGeoJSON && (
@@ -1169,16 +1132,14 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                         );
                       })()}
                     </div>
-                    {canInviteToScheduledRoute(route, user?.uid) && (
-                      <button
-                        type="button"
-                        onClick={() => openScheduledInvite(route)}
-                        className="w-full py-2 rounded-xl border border-orange-500/30 bg-orange-500/10 text-orange-200 text-xs font-bold flex items-center justify-center gap-2 hover:bg-orange-500/18"
-                      >
-                        <UserPlus size={14} />
-                        Invitar amigos (bandeja)
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => bumpAttendeesList(route.id)}
+                      className="w-full py-2 rounded-xl border border-zinc-600/60 bg-zinc-800/50 text-zinc-100 text-xs font-bold flex items-center justify-center gap-2 hover:bg-zinc-800 hover:border-zinc-500 transition-colors"
+                    >
+                      <ListOrdered size={14} className="text-orange-400 shrink-0" />
+                      Ver lista de apuntados
+                    </button>
                 </div>
               ))}
             </div>
@@ -1252,6 +1213,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                     <ScheduledRouteAttendees
                       memberUids={Array.isArray(route.members) ? route.members : []}
                       compact
+                      expandNonce={attendeesExpandNonceByRouteId[route.id] ?? 0}
                     />
                     <div className="flex gap-2">
                       {route.routeGeoJSON && (
@@ -1295,16 +1257,14 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                               : 'Apuntarse'}
                       </button>
                     </div>
-                    {canInviteToScheduledRoute(route, user?.uid) && (
-                      <button
-                        type="button"
-                        onClick={() => openScheduledInvite(route)}
-                        className="w-full py-2 rounded-xl border border-orange-500/35 bg-orange-500/10 text-orange-300 text-xs font-bold flex items-center justify-center gap-1.5 hover:bg-orange-500/20"
-                      >
-                        <UserPlus size={14} />
-                        Invitar amigos (bandeja)
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => bumpAttendeesList(route.id)}
+                      className="w-full py-2 rounded-xl border border-zinc-600/60 bg-zinc-800/50 text-zinc-100 text-xs font-bold flex items-center justify-center gap-2 hover:bg-zinc-800 hover:border-zinc-500 transition-colors"
+                    >
+                      <ListOrdered size={14} className="text-orange-400 shrink-0" />
+                      Ver lista de apuntados
+                    </button>
                   </div>
                 );
               })}
@@ -1387,6 +1347,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                       <ScheduledRouteAttendees
                         memberUids={Array.isArray(route.members) ? route.members : []}
                         compact
+                        expandNonce={attendeesExpandNonceByRouteId[route.id] ?? 0}
                       />
                       
                       <div className="flex gap-2">
@@ -1432,16 +1393,14 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                           </button>
                         )}
                       </div>
-                      {canInviteToScheduledRoute(route, user?.uid) && (
-                        <button
-                          type="button"
-                          onClick={() => openScheduledInvite(route)}
-                          className="w-full py-2 rounded-xl border border-orange-500/30 bg-orange-500/10 text-orange-200 text-[10px] font-bold flex items-center justify-center gap-1.5 hover:bg-orange-500/18"
-                        >
-                          <UserPlus size={12} />
-                          Invitar amigos (bandeja)
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => bumpAttendeesList(route.id)}
+                        className="w-full py-2 rounded-xl border border-zinc-600/60 bg-zinc-800/50 text-zinc-100 text-[10px] font-bold flex items-center justify-center gap-1.5 hover:bg-zinc-800 hover:border-zinc-500 transition-colors"
+                      >
+                        <ListOrdered size={12} className="text-orange-400 shrink-0" />
+                        Ver lista de apuntados
+                      </button>
                     </div>
                   );
                 })

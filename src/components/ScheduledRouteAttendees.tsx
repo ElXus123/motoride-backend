@@ -16,12 +16,19 @@ type Props = {
   /** Clases del botón desplegable */
   className?: string;
   compact?: boolean;
+  /** Cada vez que el padre incrementa este número, se abre la lista y se cargan perfiles (p. ej. botón "Ver lista de apuntados"). */
+  expandNonce?: number;
 };
 
 /**
  * Lista desplegable de apuntados a una ruta programada (nombre, nivel, moto opcional).
  */
-export default function ScheduledRouteAttendees({ memberUids, className = '', compact }: Props) {
+export default function ScheduledRouteAttendees({
+  memberUids,
+  className = '',
+  compact,
+  expandNonce = 0,
+}: Props) {
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<AttendeeRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -79,6 +86,12 @@ export default function ScheduledRouteAttendees({ memberUids, className = '', co
       setLoading(false);
     }
   }, [memberUids, uidKey, loadedForUidKey]);
+
+  useEffect(() => {
+    if (expandNonce < 1) return;
+    setOpen(true);
+    void load();
+  }, [expandNonce, load]);
 
   const toggle = () => {
     const next = !open;
