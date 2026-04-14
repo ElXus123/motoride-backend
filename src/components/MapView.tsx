@@ -22,7 +22,7 @@ import { weatherWmoToLucide } from '../lib/weatherWmo';
 import socket from '../lib/socket';
 import { useVoiceChat } from '../hooks/useVoiceChat';
 import PremiumBadge from './PremiumBadge';
-import { Upload, ArrowLeft, Copy, Check, Navigation, AlertTriangle, Play, Square, ArrowUp, MapPin, Trophy, Bell, AlertCircle, Wrench, Fuel, X, Maximize, Minimize, Search, Share2, Menu, Moon, Sun, Target, LogOut, Users, Mic, MicOff, ShieldAlert, Activity, Layers, Lock, LockOpen, Smartphone, RotateCw, Crown, WifiOff } from 'lucide-react';
+import { Upload, ArrowLeft, Copy, Check, Navigation, AlertTriangle, Play, Square, ArrowUp, MapPin, Trophy, Bell, AlertCircle, Wrench, Fuel, X, Maximize, Minimize, Search, Share2, Menu, Target, LogOut, Users, Mic, MicOff, ShieldAlert, Activity, Layers, Lock, LockOpen, Smartphone, RotateCw, Crown, WifiOff, Monitor } from 'lucide-react';
 import { copyTextToClipboard } from '../lib/clientInfo';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -337,8 +337,9 @@ export default function MapView({
   const [recordedPath, setRecordedPath] = useState<{lat: number, lng: number}[]>([]);
   const [showSearchModal, setShowSearchModal] = useState(false);
   
-  // Pocket Mode State
-  const [isPocketMode, setIsPocketMode] = useState(false);
+  type TouchLockKind = 'pocket' | 'mirrorlink';
+  // Modo bolsillo (retrato) o MirrorLink (paisaje + pantalla táctil protegida)
+  const [touchLockKind, setTouchLockKind] = useState<TouchLockKind | null>(null);
   const [pocketCountdown, setPocketCountdown] = useState(30);
   const [isPocketLocked, setIsPocketLocked] = useState(false);
   const [pocketTaps, setPocketTaps] = useState(0);
@@ -346,6 +347,8 @@ export default function MapView({
   const [isLongPressing, setIsLongPressing] = useState(false);
   const [pocketDist, setPocketDist] = useState(0);
   const [hasCalibratedInPocket, setHasCalibratedInPocket] = useState(false);
+  /** Tras la cuenta atrás de MirrorLink: calibrando antes de mostrar mapa + bloqueo táctil */
+  const [mirrorLinkCalibrating, setMirrorLinkCalibrating] = useState(false);
   const longPressTimerRef = useRef<any>(null);
   const tapResetTimerRef = useRef<any>(null);
   const pocketTapsRef = useRef(0);
@@ -398,30 +401,14 @@ export default function MapView({
     };
   }, [showWeather]);
 
-  // Pocket Mode Countdown
+  // Cuenta atrás 30 s (bolsillo / MirrorLink); al llegar a 0 ver efectos posteriores a useLeanAngle
   useEffect(() => {
-    let timer: any;
-    if (isPocketMode && !isPocketLocked && pocketCountdown > 0) {
-      timer = setInterval(() => {
-        setPocketCountdown(prev => (prev > 0 ? prev - 1 : 0));
-      }, 1000);
-    } else if (pocketCountdown === 0 && !isPocketLocked) {
-      setIsPocketLocked(true);
-      // Vibrate and sound
-      if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const oscillator = audioCtx.createOscillator();
-      const gainNode = audioCtx.createGain();
-      oscillator.connect(gainNode);
-      gainNode.connect(audioCtx.destination);
-      oscillator.type = 'sine';
-      oscillator.frequency.setValueAtTime(880, audioCtx.currentTime);
-      gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
-      oscillator.start();
-      oscillator.stop(audioCtx.currentTime + 0.5);
-    }
-    return () => clearInterval(timer);
-  }, [isPocketMode, isPocketLocked, pocketCountdown]);
+    if (!touchLockKind || isPocketLocked || mirrorLinkCalibrating || pocketCountdown <= 0) return;
+    const timer = window.setInterval(() => {
+      setPocketCountdown((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [touchLockKind, isPocketLocked, pocketCountdown, mirrorLinkCalibrating]);
 
   useEffect(() => {
     pocketTapsRef.current = pocketTaps;
@@ -433,13 +420,14 @@ export default function MapView({
     longPressTimerRef.current = setTimeout(() => {
       // Unlock!
       setIsPocketLocked(false);
-      setIsPocketMode(false);
+      setTouchLockKind(null);
       setPocketCountdown(30);
       setPocketTaps(0);
       pocketTapsRef.current = 0;
       setIsLongPressing(false);
       setPocketDist(0);
       setHasCalibratedInPocket(false);
+      setMirrorLinkCalibrating(false);
       if (navigator.vibrate) navigator.vibrate(100);
       releaseOrientationLockUi();
     }, 1500);
@@ -519,47 +507,56 @@ export default function MapView({
     setRotationLocked(false);
   };
 
-  const enterPocketMode = async () => {
+  const enterTouchLockMode = async (kind: TouchLockKind) => {
     setPocketRingSession((s) => s + 1);
-    setIsPocketMode(true);
+    setTouchLockKind(kind);
     setPocketCountdown(30);
     setIsPocketLocked(false);
     setPocketTaps(0);
     pocketTapsRef.current = 0;
-    setPocketDist(0);
-    setHasCalibratedInPocket(false);
+    setMirrorLinkCalibrating(false);
+    if (kind === 'pocket') {
+      setPocketDist(0);
+      setHasCalibratedInPocket(false);
+    }
     if (tapResetTimerRef.current) clearTimeout(tapResetTimerRef.current);
     setShowSettings(false);
 
-    // Request fullscreen first (required for orientation lock on many devices)
     if (!document.fullscreenElement) {
       try {
         await containerRef.current?.requestFullscreen();
         setIsFullscreen(true);
-        // Small delay to allow fullscreen transition
-        await new Promise(resolve => setTimeout(resolve, 300));
+        await new Promise((resolve) => setTimeout(resolve, 300));
       } catch (e) {
-        console.warn("Fullscreen failed for pocket mode", e);
+        console.warn('Fullscreen failed for touch lock mode', e);
       }
     }
 
-    // Lock to portrait for pocket mode
-    // @ts-ignore
-    if (screen.orientation && screen.orientation.lock) {
-      // @ts-ignore
-      screen.orientation.lock('portrait').catch(e => {
-        console.warn("Pocket mode orientation lock failed", e);
-        if (e.message && e.message.includes('sandboxed')) {
-          alert("⚠️ Limitación del Navegador: El bloqueo de orientación está restringido dentro de la vista previa de AI Studio.\n\nPara que el Modo Bolsillo y el Modo Horizontal funcionen correctamente, pulsa el botón de 'Abrir en pestaña nueva' (arriba a la derecha).");
+    const so = screen.orientation as ScreenOrientation & {
+      lock?: (orientation: ScreenOrientationLockArg) => Promise<void>;
+    };
+    const lockArg: ScreenOrientationLockArg = kind === 'pocket' ? 'portrait' : 'landscape-primary';
+    if (so?.lock) {
+      so.lock(lockArg).catch((e: Error) => {
+        console.warn('Touch lock orientation failed', e);
+        if (kind === 'mirrorlink') {
+          so.lock!('landscape').catch(() => {});
+        }
+        if (e?.message?.includes('sandboxed')) {
+          alert(
+            "⚠️ Limitación del Navegador: El bloqueo de orientación está restringido dentro de la vista previa de AI Studio.\n\nPara que el Modo Bolsillo y MirrorLink funcionen correctamente, pulsa el botón de 'Abrir en pestaña nueva' (arriba a la derecha)."
+          );
         }
       });
     }
   };
+
+  const enterPocketMode = () => void enterTouchLockMode('pocket');
+  const enterMirrorLinkMode = () => void enterTouchLockMode('mirrorlink');
   const [searchDestination, setSearchDestination] = useState('');
   const [searchSuggestions, setSearchSuggestions] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [shared, setShared] = useState(false);
-  const [isDarkMode, setIsDarkMode] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
@@ -618,7 +615,7 @@ export default function MapView({
     baseMapTileErrorTsRef.current = [];
     weakMapNoticeDismissedRef.current = false;
     setWeakMapTilesNotice(false);
-  }, [groupId, isDarkMode]);
+  }, [groupId]);
 
   const [isLandscape, setIsLandscape] = useState(window.innerWidth > window.innerHeight);
   const [isCompactUI, setIsCompactUI] = useState(window.innerWidth < 420 || window.innerHeight < 760);
@@ -725,6 +722,53 @@ export default function MapView({
     calibrate,
     applyCalibrationStep,
   } = useLeanAngle();
+
+  const calibrateRef = useRef(calibrate);
+  calibrateRef.current = calibrate;
+
+  const playTouchLockReadyFeedback = () => {
+    if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const oscillator = audioCtx.createOscillator();
+      const gainNode = audioCtx.createGain();
+      oscillator.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(880, audioCtx.currentTime);
+      gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+      oscillator.start();
+      oscillator.stop(audioCtx.currentTime + 0.5);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  // Bolsillo: al terminar 30 s, bloqueo inmediato
+  useEffect(() => {
+    if (touchLockKind !== 'pocket' || pocketCountdown !== 0 || isPocketLocked || mirrorLinkCalibrating) return;
+    setIsPocketLocked(true);
+    playTouchLockReadyFeedback();
+  }, [touchLockKind, pocketCountdown, isPocketLocked, mirrorLinkCalibrating]);
+
+  // MirrorLink: 30 s → calibrar inclinación → mostrar mapa (GPS) con capa táctil bloqueada
+  useEffect(() => {
+    if (touchLockKind !== 'mirrorlink' || pocketCountdown !== 0 || isPocketLocked) return;
+    let cancelled = false;
+    setMirrorLinkCalibrating(true);
+    calibrateRef.current();
+    const t = window.setTimeout(() => {
+      if (cancelled) return;
+      setIsPocketLocked(true);
+      setMirrorLinkCalibrating(false);
+      playTouchLockReadyFeedback();
+    }, 800);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+      setMirrorLinkCalibrating(false);
+    };
+  }, [touchLockKind, pocketCountdown, isPocketLocked]);
 
   const needsOrientationUserGesture =
     typeof DeviceOrientationEvent !== 'undefined' &&
@@ -1176,9 +1220,7 @@ export default function MapView({
         for (let x = Math.min(minX, maxX); x <= Math.max(minX, maxX); x++) {
           for (let y = Math.min(minY, maxY); y <= Math.max(minY, maxY); y++) {
             tileUrls.push(
-              isDarkMode
-                ? `https://a.basemaps.cartocdn.com/dark_all/${z}/${x}/${y}.png`
-                : `https://a.basemaps.cartocdn.com/rastertiles/voyager/${z}/${x}/${y}.png`
+              `https://a.basemaps.cartocdn.com/rastertiles/voyager/${z}/${x}/${y}.png`
             );
           }
         }
@@ -1214,7 +1256,7 @@ export default function MapView({
       prefetch();
       (window as any)._lastPrefetchDist = localDistance;
     }
-  }, [currentLocation, isDarkMode, localDistance]);
+  }, [currentLocation, localDistance]);
 
   // Use sensor data if available, otherwise fallback to GPS estimate
   const leanAngle = Math.abs(sensorLeanAngle) > 2 ? sensorLeanAngle : estimatedLeanAngle;
@@ -1506,7 +1548,7 @@ export default function MapView({
           const newDist = prev + d;
           
           // Pocket Mode Auto-Calibration after 20m
-          if (isPocketMode && !hasCalibratedInPocket) {
+          if (touchLockKind === 'pocket' && !hasCalibratedInPocket) {
             setPocketDist(p => {
               const next = p + d;
               if (next >= 0.02) { // 20 meters
@@ -1533,7 +1575,7 @@ export default function MapView({
       }
       lastLocRef.current = currentLocation;
     }
-  }, [currentLocation, isRecording, isHost, autoStarted]);
+  }, [currentLocation, isRecording, isHost, autoStarted, touchLockKind]);
 
   const handleFileUpload = async (e: any) => {
     const file = e.target.files?.[0];
@@ -2186,16 +2228,6 @@ export default function MapView({
                    </button>
                  )}
 
-                 <button 
-                   onClick={() => { setIsDarkMode(!isDarkMode); setShowSettings(false); }}
-                   className="flex items-center gap-3 text-white hover:bg-zinc-800 p-3 rounded-2xl text-sm font-bold transition-colors"
-                 >
-                   <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${isDarkMode ? 'bg-yellow-500/20 text-yellow-500' : 'bg-blue-500/20 text-blue-500'}`}>
-                     {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
-                   </div>
-                   Modo {isDarkMode ? 'Claro' : 'Oscuro'}
-                 </button>
-
                 <button 
                   onClick={() => { setShowWeather(!showWeather); setShowSettings(false); }}
                   className="flex items-center gap-3 text-white hover:bg-zinc-800 p-3 rounded-2xl text-sm font-bold transition-colors"
@@ -2274,8 +2306,21 @@ export default function MapView({
                    Modo Bolsillo
                  </button>
 
+                <button 
+                  onClick={() => {
+                    setShowSettings(false);
+                    enterMirrorLinkMode();
+                  }}
+                  className="flex items-center gap-3 text-white hover:bg-zinc-800 p-3 rounded-2xl text-sm font-bold transition-colors"
+                >
+                  <div className="w-8 h-8 rounded-xl bg-indigo-500/20 flex items-center justify-center text-indigo-300">
+                    <Monitor size={18} />
+                  </div>
+                  MirrorLink
+                </button>
+
                  <button 
-                   onClick={() => { setShowRanking(!showRanking); setShowSettings(false); }}
+                  onClick={() => { setShowRanking(!showRanking); setShowSettings(false); }}
                    className="flex items-center gap-3 text-white hover:bg-zinc-800 p-3 rounded-2xl text-sm font-bold transition-colors"
                  >
                    <div className="w-8 h-8 rounded-xl bg-yellow-500/20 flex items-center justify-center text-yellow-500">
@@ -2433,16 +2478,43 @@ export default function MapView({
         </div>
       )}
 
-      {/* Pocket Mode Overlay */}
+      {/* Modo bolsillo / MirrorLink: cuenta atrás y bloqueo táctil */}
       <AnimatePresence>
-        {isPocketMode && (
-          <motion.div 
+        {touchLockKind && (
+          <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 z-[5000] bg-black flex flex-col items-center justify-center select-none touch-none"
+            className={`absolute inset-0 z-[5000] select-none ${
+              touchLockKind === 'mirrorlink' && isPocketLocked
+                ? 'touch-none bg-transparent pointer-events-auto'
+                : 'touch-none flex flex-col items-center justify-center pointer-events-auto bg-black'
+            }`}
+            onPointerDown={touchLockKind === 'mirrorlink' && isPocketLocked ? handlePocketTouchStart : undefined}
+            onPointerUp={touchLockKind === 'mirrorlink' && isPocketLocked ? handlePocketTouchEnd : undefined}
           >
-            {!isPocketLocked ? (
+            {!isPocketLocked && touchLockKind === 'mirrorlink' && mirrorLinkCalibrating ? (
+              <div className="text-center space-y-6 p-8 max-w-xs mx-auto">
+                <RotateCw className="w-12 h-12 mx-auto text-orange-500 animate-spin" strokeWidth={2.5} aria-hidden />
+                <div className="space-y-2">
+                  <h2 className="text-xl font-black text-white uppercase tracking-tight">Calibrando inclinación</h2>
+                  <p className="text-zinc-500 text-sm leading-snug">
+                    Ajustando el sensor. En un momento verás el mapa y el GPS con la pantalla protegida de toques.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    releaseOrientationLockUi();
+                    setMirrorLinkCalibrating(false);
+                    setTouchLockKind(null);
+                  }}
+                  className="px-6 py-3 bg-zinc-800 text-white rounded-2xl font-bold text-sm"
+                >
+                  Cancelar
+                </button>
+              </div>
+            ) : !isPocketLocked ? (
               <div className="text-center space-y-8 p-8">
                 <div
                   key={pocketRingSession}
@@ -2476,25 +2548,79 @@ export default function MapView({
                   <span className="relative z-10 text-5xl font-black text-white tabular-nums">{pocketCountdown}</span>
                 </div>
                 <div className="space-y-2">
-                  <h2 className="text-2xl font-black text-white uppercase tracking-tighter">Modo Bolsillo</h2>
-                  <p className="text-zinc-400 text-sm max-w-[200px] mx-auto">Guarda el móvil en tu bolsillo. Se bloqueará automáticamente.</p>
+                  <h2 className="text-2xl font-black text-white uppercase tracking-tighter">
+                    {touchLockKind === 'mirrorlink' ? 'MirrorLink' : 'Modo Bolsillo'}
+                  </h2>
+                  <p className="text-zinc-400 text-sm max-w-[260px] mx-auto leading-snug">
+                    {touchLockKind === 'mirrorlink'
+                      ? '30 segundos en horizontal. Luego se calibra la inclinación y se muestra el mapa con GPS; los toques quedarán bloqueados (mismo desbloqueo que el modo bolsillo).'
+                      : 'Guarda el móvil en tu bolsillo. Se bloqueará automáticamente.'}
+                  </p>
                 </div>
-                <button 
+                <button
+                  type="button"
                   onClick={() => {
                     releaseOrientationLockUi();
-                    setIsPocketMode(false);
+                    setMirrorLinkCalibrating(false);
+                    setTouchLockKind(null);
                   }}
                   className="px-6 py-3 bg-zinc-800 text-white rounded-2xl font-bold text-sm"
                 >
                   Cancelar
                 </button>
               </div>
+            ) : touchLockKind === 'mirrorlink' ? (
+              <div
+                className="pointer-events-none absolute z-[5001] flex flex-col items-start gap-1"
+                style={{
+                  top: 'calc(0.45rem + env(safe-area-inset-top, 0px))',
+                  left: 'calc(0.45rem + env(safe-area-inset-left, 0px))',
+                }}
+              >
+                <motion.div
+                  animate={{
+                    scale: isLongPressing ? 1.08 : 1,
+                    opacity: isLongPressing ? 0.85 : 0.42,
+                  }}
+                  transition={{ duration: 0.2 }}
+                  className="flex flex-col items-start gap-2"
+                >
+                  {isLongPressing ? (
+                    <div className="relative">
+                      <motion.div
+                        initial={{ scale: 0 }}
+                        animate={{ scale: 1 }}
+                        transition={{ duration: 1.5, ease: 'linear' }}
+                        className="absolute -inset-2 bg-orange-500/25 rounded-full"
+                      />
+                      <LockOpen size={34} className="relative text-orange-400/95" strokeWidth={2.25} />
+                    </div>
+                  ) : (
+                    <Lock size={34} className="text-white/45" strokeWidth={2.25} />
+                  )}
+                  {!isLongPressing && (
+                    <div className="flex gap-1.5">
+                      {[1, 2, 3].map((i) => (
+                        <div
+                          key={i}
+                          className={`w-2.5 h-2.5 rounded-full transition-colors duration-200 ${
+                            pocketTaps >= i ? 'bg-orange-500/75' : 'bg-white/22'
+                          }`}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </motion.div>
+                <p className="text-[9px] font-bold text-white/32 uppercase tracking-wider max-w-[130px] leading-tight">
+                  3 toques + mantener
+                </p>
+              </div>
             ) : (
               <div className="flex flex-col items-center gap-12">
                 <motion.div
-                  animate={{ 
+                  animate={{
                     scale: isLongPressing ? 1.2 : 1,
-                    opacity: isLongPressing ? 1 : 0.5
+                    opacity: isLongPressing ? 1 : 0.5,
                   }}
                   className="text-white p-2 rounded-full touch-none"
                   onPointerDown={handlePocketTouchStart}
@@ -2502,10 +2628,10 @@ export default function MapView({
                 >
                   {isLongPressing ? (
                     <div className="relative w-24 h-24">
-                      <motion.div 
+                      <motion.div
                         initial={{ scale: 0 }}
                         animate={{ scale: 1 }}
-                        transition={{ duration: 1.5, ease: "linear" }}
+                        transition={{ duration: 1.5, ease: 'linear' }}
                         className="absolute inset-0 bg-orange-500 rounded-full opacity-20"
                       />
                       <div className="absolute inset-0 flex items-center justify-center">
@@ -2516,17 +2642,19 @@ export default function MapView({
                     <div className="flex flex-col items-center gap-4">
                       <Lock size={64} className="text-zinc-700" />
                       <div className="flex gap-2">
-                        {[1, 2, 3].map(i => (
-                          <div 
-                            key={i} 
-                            className={`w-3 h-3 rounded-full transition-colors duration-200 ${pocketTaps >= i ? 'bg-orange-500' : 'bg-zinc-800'}`} 
+                        {[1, 2, 3].map((i) => (
+                          <div
+                            key={i}
+                            className={`w-3 h-3 rounded-full transition-colors duration-200 ${
+                              pocketTaps >= i ? 'bg-orange-500' : 'bg-zinc-800'
+                            }`}
                           />
                         ))}
                       </div>
                     </div>
                   )}
                 </motion.div>
-                
+
                 <p className="text-zinc-800 text-[10px] font-black uppercase tracking-[0.3em] absolute bottom-12">
                   3 toques + 1 largo para desbloquear
                 </p>
@@ -2766,13 +2894,10 @@ export default function MapView({
             zoomAnimation
           >
         <MapInvalidateHelper
-          layoutKey={`${isRecording && currentSpeedKmh > 3 && localDistance >= 0.05 ? 1 : 0}_${isDarkMode ? 1 : 0}`}
+          layoutKey={`${isRecording && currentSpeedKmh > 3 && localDistance >= 0.05 ? 1 : 0}`}
         />
         <TileLayer 
-          url={isDarkMode 
-            ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-            : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-          } 
+          url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
           subdomains="abcd"
           keepBuffer={280}
           updateWhenIdle={false}
