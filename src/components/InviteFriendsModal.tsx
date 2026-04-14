@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { doc, onSnapshot, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, onSnapshot, getDoc, updateDoc, writeBatch, arrayUnion } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { X, UserPlus, Check, Loader2, User as UserIcon } from 'lucide-react';
@@ -64,25 +64,52 @@ export default function InviteFriendsModal({ open, onClose, groupId, groupName, 
       );
       return;
     }
+    const safeName = (groupName || 'Ruta').trim().slice(0, 120) || 'Ruta';
     setSendingId(targetUid);
     try {
-      const safeName = (groupName || 'Ruta').trim().slice(0, 120) || 'Ruta';
-      await updateDoc(doc(db, 'users', targetUid), {
-        rideInvitePending: {
-          fromUid: user.uid,
-          groupId: gid,
-          groupName: safeName,
-          sentAt: Date.now(),
-        },
+      const invitePayload = {
+        fromUid: user.uid,
+        groupId: gid,
+        groupName: safeName,
+        sentAt: Date.now(),
+      };
+      const targetRef = doc(db, 'users', targetUid);
+      await updateDoc(targetRef, {
+        rideInvitePending: invitePayload,
       });
       setSentIds((s) => ({ ...s, [targetUid]: Date.now() }));
     } catch (e: unknown) {
       const code = typeof e === 'object' && e && 'code' in e ? String((e as { code: string }).code) : '';
       if (code === 'permission-denied') {
-        window.alert(
-          'No se pudo enviar la invitación. Comprueba que esa persona está en tu lista de amigos (amistad aceptada en ambos sentidos).'
-        );
-        return;
+        // Fallback: si mi lista de amigos quedó desincronizada localmente/reglas, la reparamos y reintentamos.
+        try {
+          const myRef = doc(db, 'users', user.uid);
+          const [mySnap, targetSnap] = await Promise.all([getDoc(myRef), getDoc(doc(db, 'users', targetUid))]);
+          if (!mySnap.exists() || !targetSnap.exists()) {
+            window.alert('No se pudo enviar la invitación. El usuario de destino no está disponible.');
+            return;
+          }
+          const myData = mySnap.data() as any;
+          const myFriends = Array.isArray(myData?.friends) ? myData.friends : [];
+          if (!myFriends.includes(targetUid)) {
+            await updateDoc(myRef, { friends: arrayUnion(targetUid) });
+          }
+          await updateDoc(doc(db, 'users', targetUid), {
+            rideInvitePending: {
+              fromUid: user.uid,
+              groupId: gid,
+              groupName: safeName,
+              sentAt: Date.now(),
+            },
+          });
+          setSentIds((s) => ({ ...s, [targetUid]: Date.now() }));
+          return;
+        } catch {
+          window.alert(
+            'No se pudo enviar la invitación. Comprueba que esa persona está en tu lista de amigos (amistad aceptada en ambos sentidos).'
+          );
+          return;
+        }
       }
       handleFirestoreError(e, OperationType.UPDATE, `users/${targetUid}`);
     } finally {

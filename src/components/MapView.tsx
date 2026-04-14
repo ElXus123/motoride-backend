@@ -2055,8 +2055,17 @@ export default function MapView({
       return;
     }
 
+    const isiPhone =
+      typeof navigator !== 'undefined' && /iPhone|iPod/i.test(navigator.userAgent);
+
     if (!so?.lock) {
-      alert('Tu navegador no soporta bloquear la orientación.');
+      if (isiPhone) {
+        alert(
+          'En iPhone Safari el bloqueo de orientación del navegador suele estar limitado. Usa "Añadir a pantalla de inicio", abre la app desde el icono y activa "Bloquear giro" tras ponerla en horizontal.'
+        );
+      } else {
+        alert('Tu navegador no soporta bloquear la orientación.');
+      }
       return;
     }
 
@@ -2089,6 +2098,10 @@ export default function MapView({
       const msg = firstErr && typeof firstErr === 'object' && 'message' in firstErr ? String((firstErr as Error).message) : '';
       if (msg.includes('sandboxed')) {
         alert("⚠️ El bloqueo de orientación no está disponible en esta vista previa. Abre la app en una pestaña normal del navegador.");
+      } else if (isiPhone) {
+        alert(
+          'iPhone: para bloquear giro, abre MotoRide desde el icono (Añadir a pantalla de inicio), entra en pantalla completa y pon el móvil en horizontal antes de pulsar "Bloquear giro".'
+        );
       } else {
         alert('No se pudo bloquear el giro. Prueba en pantalla completa o comprueba que la rotación no esté bloqueada a nivel del sistema.');
       }
@@ -2319,12 +2332,12 @@ export default function MapView({
   if (!isOnline) belowBanners += C + 8;
   if (hostLeftRoute && !isHost) belowBanners += 64 + 8;
 
-  const peerAlertRowH = 54;
+  const peerAlertRowH = 84;
   const peerAlertsStripHeight =
-    activeAlerts.length > 0 ? Math.min(activeAlerts.length, 5) * peerAlertRowH + 10 : 0;
+    activeAlerts.length > 0 ? Math.min(activeAlerts.length, 3) * peerAlertRowH + 12 : 0;
 
   const peerAlertsTop = topBelowSafe(belowBanners);
-  const headerTopOffset = topBelowSafe(belowBanners + peerAlertsStripHeight);
+  const headerTopOffset = topBelowSafe(belowBanners + peerAlertsStripHeight + (activeAlerts.length > 0 ? 6 : 0));
 
   const blockBelowHeader = belowBanners + peerAlertsStripHeight;
   const gpsErrorTop = topBelowSafe(blockBelowHeader + navHeaderPad);
@@ -2377,8 +2390,8 @@ export default function MapView({
             style={{ top: peerAlertsTop }}
           >
             <div
-              className="w-full max-w-md flex flex-col gap-1.5 pointer-events-auto overflow-y-auto overscroll-contain"
-              style={{ maxHeight: Math.min(280, peerAlertsStripHeight + 8) }}
+              className="w-full max-w-md flex flex-col gap-2 pointer-events-auto overflow-y-auto overscroll-contain pr-1"
+              style={{ maxHeight: Math.min(260, peerAlertsStripHeight + 10) }}
             >
               {activeAlerts.map((loc) => {
                 const dist =
@@ -2395,7 +2408,7 @@ export default function MapView({
                 return (
                   <div
                     key={`${loc.uid}-${loc.alert?.timestamp ?? 0}`}
-                    className={`${alertUi.card} p-2.5 sm:p-3 rounded-2xl shadow-xl border flex items-center gap-3`}
+                    className={`${alertUi.card} p-3 sm:p-3.5 rounded-2xl shadow-xl border flex items-center gap-3`}
                   >
                     <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-black/15 flex items-center justify-center shrink-0">
                       {getAlertIcon(loc.alert?.type || '')}
@@ -2408,7 +2421,7 @@ export default function MapView({
                         </span>
                       </div>
                       <p className="font-bold text-sm truncate">{loc.displayName || 'Motero'}</p>
-                      <p className={`text-[11px] ${subTone}`}>Aviso de otro usuario en la ruta</p>
+                      <p className={`text-[11px] ${subTone} truncate`}>Aviso de otro usuario en la ruta</p>
                     </div>
                   </div>
                 );
