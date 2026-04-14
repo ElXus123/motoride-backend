@@ -5,9 +5,9 @@ import { doc, setDoc, getDoc, updateDoc, arrayUnion, arrayRemove, collection, qu
 import { db, logOut, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { parseGPX, parseRouteData } from '../lib/gpx';
-import { calculateLevel } from '../lib/utils';
+import { calculateLevel, formatDurationHoursMinutes } from '../lib/utils';
 import { requestJson } from '../lib/network';
-import { LEAFLET_TRANSPARENT_ERROR_TILE } from '../lib/leafletTiles';
+import { LEAFLET_LIGHT_ERROR_TILE } from '../lib/leafletTiles';
 import { Users, Plus, LogOut, User as UserIcon, Activity, Trash2, Trophy, Calendar, MapPin, Search, Clock, ChevronRight, Upload, X, Map as MapIcon, Play, HeartHandshake, CircleDollarSign, Shield, CheckCircle2, AlertCircle, Mail, Share2, Copy, Check, Loader2 } from 'lucide-react';
 import { copyTextToClipboard, getSupportMailtoHref } from '../lib/clientInfo';
 import { generateGroupCode } from '../lib/groupCode';
@@ -40,8 +40,8 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
 
   useEffect(() => {
     if (!user) return;
-    const unsub = onSnapshot(doc(db, 'users', user.uid), (doc) => {
-      setUserData(doc.data());
+    const unsub = onSnapshot(doc(db, 'users', user.uid), (snap) => {
+      setUserData(snap.exists() ? snap.data() : null);
     });
     return unsub;
   }, [user]);
@@ -743,7 +743,16 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       await updateDoc(gRef, { members: arrayUnion(user.uid) });
       await updateDoc(doc(db, 'users', user.uid), { rideInvitePending: deleteField() });
       onJoinGroup(code);
-    } catch (error) {
+    } catch (error: unknown) {
+      const codeErr = typeof error === 'object' && error && 'code' in error ? String((error as { code: string }).code) : '';
+      if (codeErr === 'permission-denied') {
+        setRouteGenFeedback({
+          kind: 'error',
+          title: 'No se pudo unir a la ruta',
+          detail: 'Comprueba tu conexión y que sigas siendo miembro de ese grupo. Si el problema continúa, pide al anfitrión que te vuelva a invitar.',
+        });
+        return;
+      }
       handleFirestoreError(error, OperationType.WRITE, `groups/${inv.groupId}`);
     } finally {
       setRideInviteJoining(false);
@@ -843,37 +852,6 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
         {pointsFixError && (
           <div className="bg-red-500/10 border border-red-500/30 rounded-2xl px-4 py-3 text-sm text-red-200">
             {pointsFixError}
-          </div>
-        )}
-
-        {rideInv?.groupId && (
-          <div className="bg-gradient-to-r from-blue-600/25 to-orange-500/20 border border-blue-500/40 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center gap-3">
-            <div className="flex-1 min-w-0">
-              <p className="text-[10px] font-black uppercase tracking-widest text-blue-300 mb-1">Invitación a ruta</p>
-              <p className="text-white font-bold text-sm sm:text-base leading-snug">
-                <span className="text-blue-200">{inviteFromName || 'Un amigo'}</span> te invita a{' '}
-                <span className="text-orange-300">{rideInv.groupName || 'una ruta'}</span>
-              </p>
-              <p className="text-xs text-zinc-400 mt-1 font-mono">Código: {rideInv.groupId}</p>
-            </div>
-            <div className="flex gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={() => void dismissRideInvite()}
-                className="px-4 py-2.5 rounded-xl bg-zinc-800 text-zinc-300 text-sm font-bold hover:bg-zinc-700"
-              >
-                Ignorar
-              </button>
-              <button
-                type="button"
-                disabled={rideInviteJoining}
-                onClick={() => void acceptRideInvite()}
-                className="px-4 py-2.5 rounded-xl bg-orange-500 text-white text-sm font-black hover:bg-orange-400 disabled:opacity-60 flex items-center justify-center gap-2 min-w-[7rem]"
-              >
-                {rideInviteJoining ? <Loader2 size={16} className="animate-spin" /> : null}
-                Unirme
-              </button>
-            </div>
           </div>
         )}
 
@@ -1459,7 +1437,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                             </div>
                             <div className="bg-zinc-900 p-3 rounded-xl border border-zinc-800">
                               <p className="text-[10px] text-zinc-500 uppercase font-bold">Duración</p>
-                              <p className="text-lg font-black text-white">{Math.round(routeStats.duration)} min</p>
+                              <p className="text-lg font-black text-white">{formatDurationHoursMinutes(routeStats.duration)}</p>
                             </div>
                           </div>
                           <button 
@@ -1682,7 +1660,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                 <X size={20} />
               </button>
             </div>
-            <div className="flex-1 relative bg-zinc-950">
+            <div className="flex-1 relative bg-[#dfe0e6]">
               <MapContainer 
                 center={[40.4168, -3.7038]} 
                 zoom={6} 
@@ -1691,15 +1669,15 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                 fadeAnimation={false}
               >
                 <TileLayer 
-                  url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" 
+                  url="https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png"
                   attribution='&copy; OpenStreetMap'
-                  subdomains="abcd"
-                  keepBuffer={160}
+                  keepBuffer={200}
                   updateWhenIdle={false}
-                  updateWhenZooming={false}
+                  updateWhenZooming
+                  detectRetina={false}
                   crossOrigin
                   className="motoride-base-tiles"
-                  errorTileUrl={LEAFLET_TRANSPARENT_ERROR_TILE}
+                  errorTileUrl={LEAFLET_LIGHT_ERROR_TILE}
                 />
                 {showPreviewModal.routeGeoJSON && parseRouteData(showPreviewModal.routeGeoJSON) && (
                   <GeoJSON 
@@ -1722,6 +1700,49 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           </div>
         </div>
       )}
+
+      {rideInv?.groupId &&
+        !showCreateModal &&
+        !showFriendsModal &&
+        !showSupportModal &&
+        !showPreviewModal &&
+        !postScheduleInvite && (
+          <div
+            className="fixed inset-0 z-[180] flex items-center justify-center p-4 sm:p-6 bg-black/75 backdrop-blur-md"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="ride-invite-popup-title"
+          >
+            <div className="w-full max-w-md bg-zinc-900 border border-blue-500/50 rounded-3xl shadow-2xl shadow-blue-900/20 overflow-hidden">
+              <div className="px-6 pt-6 pb-4 border-b border-zinc-800 bg-gradient-to-br from-blue-600/20 to-orange-500/10">
+                <p className="text-[10px] font-black uppercase tracking-widest text-blue-300 mb-2">Invitación a ruta</p>
+                <h2 id="ride-invite-popup-title" className="text-lg font-black text-white leading-snug">
+                  <span className="text-blue-200">{inviteFromName || 'Un amigo'}</span> te invita a{' '}
+                  <span className="text-orange-400">{rideInv.groupName || 'una ruta'}</span>
+                </h2>
+                <p className="text-xs text-zinc-400 mt-2 font-mono">Código: {rideInv.groupId}</p>
+              </div>
+              <div className="p-6 flex flex-col-reverse sm:flex-row gap-3 sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => void dismissRideInvite()}
+                  className="w-full sm:w-auto px-5 py-3 rounded-2xl bg-zinc-800 text-zinc-200 text-sm font-bold hover:bg-zinc-700"
+                >
+                  Ignorar
+                </button>
+                <button
+                  type="button"
+                  disabled={rideInviteJoining}
+                  onClick={() => void acceptRideInvite()}
+                  className="w-full sm:w-auto px-5 py-3 rounded-2xl bg-orange-500 text-white text-sm font-black hover:bg-orange-400 disabled:opacity-60 flex items-center justify-center gap-2 min-w-[8rem]"
+                >
+                  {rideInviteJoining ? <Loader2 size={18} className="animate-spin" /> : null}
+                  Unirme a la ruta
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
     </div>
   );
 }

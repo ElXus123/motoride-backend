@@ -1,4 +1,5 @@
 const CACHE_NAME = 'ruta-motera-v4';
+/** Mismo nombre que MAP_TILE_CACHE_NAME en src/lib/mapTileCache.ts */
 const TILE_CACHE = 'map-tiles-v3';
 const CORE_ASSETS = ['/', '/index.html'];
 
@@ -63,7 +64,7 @@ self.addEventListener('fetch', (event) => {
         }
 
         const response = await fetch(event.request);
-        if (response) cache.put(event.request, response.clone());
+        if (response && response.ok) cache.put(event.request, response.clone());
         return response;
       })
     );

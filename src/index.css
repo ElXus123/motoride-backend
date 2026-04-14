@@ -37,17 +37,19 @@ html, body, #root {
   }
 }
 
-/* Custom Leaflet overrides */
+/* Custom Leaflet overrides — mapa base Carto Voyager (claro): placeholders claros = no “cuadros negros” */
 .leaflet-container {
   font-family: inherit;
-  /* Mismo tono que el “relleno” de teselas: si falla la imagen, no se ve negro puro */
-  background: #222228 !important;
+  background: #dfe0e6 !important;
 }
 
-/* Teselas: hasta que el PNG llega (o si hay error + errorTileUrl transparente), color sólido tipo Carto oscuro */
 .leaflet-tile-pane img.leaflet-tile {
-  background-color: #2e2e38 !important;
+  background-color: #e2e2e8 !important;
   background-image: none;
+  image-rendering: auto;
+  /* Evita artefactos negros al componer con transformaciones (Android / WebView) */
+  mix-blend-mode: normal;
+  opacity: 1;
 }
 .leaflet-tile-pane img.leaflet-tile.leaflet-tile-loaded {
   background-color: transparent !important;

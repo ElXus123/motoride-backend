@@ -1,5 +1,5 @@
-import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, GeoJSON, useMap, Pane } from 'react-leaflet';
+import { useEffect, useState, useRef, useMemo, useCallback, type MutableRefObject } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, GeoJSON, useMap, useMapEvents, Pane } from 'react-leaflet';
 import L from 'leaflet';
 import { doc, onSnapshot, updateDoc, collection, query, where, addDoc, getDoc, setDoc, arrayRemove } from 'firebase/firestore';
 import { db, logOut, handleFirestoreError, OperationType } from '../firebase';
@@ -17,20 +17,17 @@ import { getDistance, offsetByMeters } from '../lib/geoUtils';
 import { requestJson } from '../lib/network';
 import { getActivePointsConfig } from '../lib/pointsConfig';
 import { fetchRainViewerTileUrl } from '../lib/rainviewer';
-import { LEAFLET_TRANSPARENT_ERROR_TILE } from '../lib/leafletTiles';
+import { LEAFLET_LIGHT_ERROR_TILE, LEAFLET_TRANSPARENT_ERROR_TILE } from '../lib/leafletTiles';
+import { prefetchAroundUser } from '../lib/mapTileCache';
 import { weatherWmoToLucide } from '../lib/weatherWmo';
 import socket from '../lib/socket';
 import { useVoiceChat } from '../hooks/useVoiceChat';
 import PremiumBadge from './PremiumBadge';
 import InviteFriendsModal from './InviteFriendsModal';
-import { Upload, ArrowLeft, Copy, Check, Navigation, AlertTriangle, Play, Square, ArrowUp, MapPin, Trophy, Bell, AlertCircle, Wrench, Fuel, X, Maximize, Minimize, Search, Share2, Menu, Target, LogOut, Users, UserPlus, Mic, MicOff, ShieldAlert, Activity, Layers, Lock, LockOpen, Smartphone, RotateCw, Crown, WifiOff, Monitor, Loader2 } from 'lucide-react';
-import { copyTextToClipboard } from '../lib/clientInfo';
+import { Upload, ArrowLeft, Copy, Check, Navigation, AlertTriangle, Play, Square, ArrowUp, MapPin, Trophy, Bell, AlertCircle, Wrench, Fuel, X, Maximize, Minimize, Search, Share2, Menu, Target, LogOut, Users, UserPlus, Mic, MicOff, ShieldAlert, Activity, Layers, Lock, LockOpen, Smartphone, RotateCw, Crown, WifiOff, Monitor, Loader2, Mail } from 'lucide-react';
+import { copyTextToClipboard, getSupportMailtoHref } from '../lib/clientInfo';
 import { generateGroupCode } from '../lib/groupCode';
 import { motion, AnimatePresence } from 'motion/react';
-
-// Tile prefetching helpers
-const lon2tile = (lon: number, zoom: number) => Math.floor((lon + 180) / 360 * Math.pow(2, zoom));
-const lat2tile = (lat: number, zoom: number) => Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, zoom));
 
 /**
  * Modo bolsillo / MirrorLink: el móvil no va fijado al chasis → el IMU no mide la inclinación de la moto.
@@ -231,6 +228,45 @@ const MapInvalidateHelper = ({ layoutKey }: { layoutKey: string }) => {
   return null;
 };
 
+/** Actualiza zoom/centro del mapa y dispara precarga de teselas (misma caché que el SW). */
+function MapTilePrefetchBridge({
+  mapZoomRef,
+  mapCenterRef,
+  onSchedulePrefetch,
+}: {
+  mapZoomRef: MutableRefObject<number>;
+  mapCenterRef: MutableRefObject<{ lat: number; lng: number } | null>;
+  onSchedulePrefetch: () => void;
+}) {
+  const map = useMap();
+  const debounceRef = useRef<number>();
+
+  const syncAndSchedule = useCallback(() => {
+    const c = map.getCenter();
+    mapCenterRef.current = { lat: c.lat, lng: c.lng };
+    mapZoomRef.current = map.getZoom();
+    if (debounceRef.current) window.clearTimeout(debounceRef.current);
+    debounceRef.current = window.setTimeout(() => {
+      onSchedulePrefetch();
+    }, 420);
+  }, [map, mapZoomRef, mapCenterRef, onSchedulePrefetch]);
+
+  useMapEvents({
+    zoomend: syncAndSchedule,
+    moveend: syncAndSchedule,
+    load: syncAndSchedule,
+  });
+
+  useEffect(() => {
+    syncAndSchedule();
+    return () => {
+      if (debounceRef.current) window.clearTimeout(debounceRef.current);
+    };
+  }, [syncAndSchedule]);
+
+  return null;
+}
+
 // Component to handle map centering and rotation
 const MapController = ({
   location,
@@ -353,6 +389,7 @@ export default function MapView({
   const [customPhotoURL, setCustomPhotoURL] = useState<string | null>(null);
   const [group, setGroup] = useState<any>(null);
   const [memberPremiumByUid, setMemberPremiumByUid] = useState<Record<string, boolean>>({});
+  const [memberDisplayNameByUid, setMemberDisplayNameByUid] = useState<Record<string, string>>({});
 
   const groupMembersKey = useMemo(() => {
     if (!Array.isArray(group?.members)) return '';
@@ -362,6 +399,7 @@ export default function MapView({
   useEffect(() => {
     if (!groupMembersKey) {
       setMemberPremiumByUid({});
+      setMemberDisplayNameByUid({});
       return;
     }
     const ids = groupMembersKey.split('|').filter(Boolean);
@@ -370,10 +408,18 @@ export default function MapView({
         doc(db, 'users', uid),
         (snap) => {
           const v = snap.exists() && snap.data()?.isPremium === true;
+          const dn = snap.exists() ? String(snap.data()?.displayName || 'Motero').slice(0, 80) || 'Motero' : 'Motero';
           setMemberPremiumByUid((prev) => (prev[uid] === v ? prev : { ...prev, [uid]: v }));
+          setMemberDisplayNameByUid((prev) => (prev[uid] === dn ? prev : { ...prev, [uid]: dn }));
         },
         () => {
           setMemberPremiumByUid((prev) => (uid in prev ? { ...prev, [uid]: false } : prev));
+          setMemberDisplayNameByUid((prev) => {
+            if (!(uid in prev)) return prev;
+            const next = { ...prev };
+            delete next[uid];
+            return next;
+          });
         }
       )
     );
@@ -403,10 +449,13 @@ export default function MapView({
   const [isFollowing, setIsFollowing] = useState(true);
   const lastHeadingRef = useRef<number | null>(null);
   const lastHeadingTimeRef = useRef<number>(Date.now());
-  /** Prefetch de teselas: posición viva (no re-disparar el debounce en cada fix GPS). */
+  /** Prefetch de teselas: posición GPS y centro del mapa (misma caché persistente que el SW). */
   const lastKnownLocForPrefetchRef = useRef<{ lat: number; lng: number } | null>(null);
-  const lastPrefetchDistRef = useRef(0);
+  const mapZoomRef = useRef(16);
+  const mapViewportCenterRef = useRef<{ lat: number; lng: number } | null>(null);
   const tilePrefetchGenRef = useRef(0);
+  const [tilePrefetchEpoch, setTilePrefetchEpoch] = useState(0);
+  const bumpTilePrefetch = useCallback(() => setTilePrefetchEpoch((n) => n + 1), []);
   const [showTraffic, setShowTraffic] = useState(false);
   const [showWeather, setShowWeather] = useState(false);
   const [rainRadar, setRainRadar] = useState<{ url: string; maxNativeZoom: number } | null>(null);
@@ -448,6 +497,7 @@ export default function MapView({
   const leaveInProgressRef = useRef(false);
   const wakeLockRef = useRef<any>(null);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const [showLeanBetaNotice, setShowLeanBetaNotice] = useState(false);
 
   // Ensure score is always an integer, rounding up if necessary
   useEffect(() => {
@@ -462,6 +512,16 @@ export default function MapView({
     };
     window.addEventListener('motoride:route-back', onRouteBack);
     return () => window.removeEventListener('motoride:route-back', onRouteBack);
+  }, []);
+
+  useEffect(() => {
+    try {
+      if (localStorage.getItem('motoride_lean_beta_dismissed_v1') === '1') return;
+    } catch {
+      return;
+    }
+    const t = window.setTimeout(() => setShowLeanBetaNotice(true), 800);
+    return () => clearTimeout(t);
   }, []);
 
   // Rain Viewer: load real tile path from API (paths are hashed; /v2/radar/0 is invalid). Refresh cada 5 min.
@@ -1290,70 +1350,25 @@ export default function MapView({
     }
   }, [currentLocation?.lat, currentLocation?.lng]);
 
-  // Pre-fetch tiles (debounced): al avanzar ~1 km; el debounce evita tormentas de fetch si `localDistance` oscila.
+  // Precarga ~5 km alrededor del usuario en el zoom actual (±1) y rellena map-tiles-v3 (igual que el service worker).
   useEffect(() => {
-    if (Math.abs(localDistance - lastPrefetchDistRef.current) <= 1) return;
-    const loc = lastKnownLocForPrefetchRef.current;
+    const loc =
+      displayLocation &&
+      typeof displayLocation.lat === 'number' &&
+      typeof displayLocation.lng === 'number' &&
+      Number.isFinite(displayLocation.lat) &&
+      Number.isFinite(displayLocation.lng)
+        ? { lat: displayLocation.lat, lng: displayLocation.lng }
+        : lastKnownLocForPrefetchRef.current ?? mapViewportCenterRef.current;
     if (!loc) return;
 
     const gen = ++tilePrefetchGenRef.current;
-    const debounceMs = 2600;
     const id = window.setTimeout(() => {
       if (tilePrefetchGenRef.current !== gen) return;
-      lastPrefetchDistRef.current = localDistance;
-      const center = lastKnownLocForPrefetchRef.current ?? loc;
-
-      const prefetch = async () => {
-        const zoomLevels = [13, 14, 15, 16];
-        const radiusKm = 5;
-        const latDelta = radiusKm / 111;
-        const lngDelta = radiusKm / (111 * Math.max(Math.cos((center.lat * Math.PI) / 180), 0.2));
-
-        const tileUrls: string[] = [];
-        for (const z of zoomLevels) {
-          const minX = lon2tile(center.lng - lngDelta, z);
-          const maxX = lon2tile(center.lng + lngDelta, z);
-          const minY = lat2tile(center.lat + latDelta, z);
-          const maxY = lat2tile(center.lat - latDelta, z);
-
-          for (let x = Math.min(minX, maxX); x <= Math.max(minX, maxX); x++) {
-            for (let y = Math.min(minY, maxY); y <= Math.max(minY, maxY); y++) {
-              tileUrls.push(
-                `https://a.basemaps.cartocdn.com/rastertiles/voyager/${z}/${x}/${y}.png`
-              );
-            }
-          }
-        }
-
-        try {
-          if ('caches' in window) {
-            const cache = await caches.open('map-tiles-v1');
-            await Promise.all(
-              tileUrls.map(async (url) => {
-                const req = new Request(url, { mode: 'no-cors' });
-                const cached = await cache.match(req);
-                if (!cached) {
-                  const res = await fetch(req);
-                  if (res) await cache.put(req, res.clone());
-                }
-              })
-            );
-          } else {
-            tileUrls.forEach((url) => {
-              const img = new Image();
-              img.src = url;
-            });
-          }
-        } catch {
-          // Prefetch is best-effort; ignore failures.
-        }
-      };
-
-      void prefetch();
-    }, debounceMs);
-
+      void prefetchAroundUser(loc.lat, loc.lng, mapZoomRef.current, 5000);
+    }, 520);
     return () => clearTimeout(id);
-  }, [localDistance]);
+  }, [tilePrefetchEpoch, displayLocation, localDistance]);
 
   // Use sensor data if available, otherwise fallback to GPS estimate
   /**
@@ -2046,12 +2061,23 @@ export default function MapView({
 
   const getAlertIcon = (type: string) => {
     switch (type) {
-      case 'Peligro': return <AlertTriangle size={24} className="shrink-0" />;
-      case 'Accidente': return <Activity size={24} className="shrink-0" />;
-      case 'Policía': return <ShieldAlert size={24} className="shrink-0" />;
-      case 'Repostar': return <Fuel size={24} className="shrink-0" />;
-      case 'Caída': return <Activity size={24} className="shrink-0 text-red-100 animate-pulse" />;
-      default: return <AlertCircle size={24} className="shrink-0" />;
+      case 'Parado':
+        return <AlertCircle size={22} className="shrink-0 text-yellow-950" />;
+      case 'Averiado':
+        return <Wrench size={22} className="shrink-0 text-white" />;
+      case 'Repostar':
+      case 'Repostando':
+        return <Fuel size={22} className="shrink-0 text-white" />;
+      case 'Peligro':
+        return <AlertTriangle size={24} className="shrink-0" />;
+      case 'Accidente':
+        return <Activity size={24} className="shrink-0" />;
+      case 'Policía':
+        return <ShieldAlert size={24} className="shrink-0" />;
+      case 'Caída':
+        return <Activity size={24} className="shrink-0 text-red-100 animate-pulse" />;
+      default:
+        return <AlertCircle size={24} className="shrink-0" />;
     }
   };
 
@@ -2059,52 +2085,60 @@ export default function MapView({
     switch (type) {
       case 'Parado':
         return {
-          title: 'PARADA EN MARGEN',
-          card: 'bg-zinc-600 border-zinc-200/35',
-          badge: 'bg-zinc-900/60 text-zinc-100'
+          title: 'PARADO / MARGEN',
+          card: 'bg-yellow-400 border-yellow-700/60 text-zinc-900',
+          badge: 'bg-yellow-900 text-yellow-50',
+          sub: 'text-zinc-800',
         };
-      case 'Caída':
+      case 'Averiado':
         return {
-          title: 'CAÍDA DETECTADA',
-          card: 'bg-red-600 border-red-300/40',
-          badge: 'bg-red-800/70 text-red-100'
-        };
-      case 'Accidente':
-        return {
-          title: 'ACCIDENTE',
-          card: 'bg-orange-600 border-orange-200/40',
-          badge: 'bg-orange-900/60 text-orange-100'
-        };
-      case 'Peligro':
-        return {
-          title: 'PELIGRO EN VÍA',
-          card: 'bg-amber-500 border-amber-200/40',
-          badge: 'bg-amber-900/55 text-amber-100'
-        };
-      case 'Policía':
-        return {
-          title: 'CONTROL / POLICÍA',
-          card: 'bg-blue-600 border-blue-200/40',
-          badge: 'bg-blue-900/60 text-blue-100'
+          title: 'AVERÍA',
+          card: 'bg-red-600 border-red-400/60 text-white',
+          badge: 'bg-red-950/90 text-red-50',
+          sub: 'text-red-50/90',
         };
       case 'Repostar':
       case 'Repostando':
         return {
           title: 'PARADA A REPOSTAR',
-          card: 'bg-emerald-600 border-emerald-200/40',
-          badge: 'bg-emerald-900/60 text-emerald-100'
+          card: 'bg-blue-600 border-blue-300/55 text-white',
+          badge: 'bg-blue-950/90 text-blue-50',
+          sub: 'text-blue-50/90',
         };
-      case 'Averiado':
+      case 'Caída':
         return {
-          title: 'MOTO AVERIADA',
-          card: 'bg-fuchsia-600 border-fuchsia-200/40',
-          badge: 'bg-fuchsia-900/60 text-fuchsia-100'
+          title: 'CAÍDA DETECTADA',
+          card: 'bg-red-600 border-red-300/40 text-white',
+          badge: 'bg-red-800/70 text-red-100',
+          sub: 'text-red-50/90',
+        };
+      case 'Accidente':
+        return {
+          title: 'ACCIDENTE',
+          card: 'bg-orange-600 border-orange-200/40 text-white',
+          badge: 'bg-orange-900/60 text-orange-100',
+          sub: 'text-orange-50/90',
+        };
+      case 'Peligro':
+        return {
+          title: 'PELIGRO EN VÍA',
+          card: 'bg-amber-500 border-amber-200/40 text-zinc-900',
+          badge: 'bg-amber-900/55 text-amber-100',
+          sub: 'text-zinc-900/80',
+        };
+      case 'Policía':
+        return {
+          title: 'CONTROL / POLICÍA',
+          card: 'bg-sky-600 border-sky-200/40 text-white',
+          badge: 'bg-sky-950/80 text-sky-50',
+          sub: 'text-sky-50/90',
         };
       default:
         return {
           title: type?.toUpperCase() || 'ALERTA',
-          card: 'bg-red-500 border-white/25',
-          badge: 'bg-zinc-900/40 text-white'
+          card: 'bg-red-500 border-white/25 text-white',
+          badge: 'bg-zinc-900/40 text-white',
+          sub: 'text-white/90',
         };
     }
   };
@@ -2143,6 +2177,23 @@ export default function MapView({
     [locations, user?.uid]
   );
 
+  /** Miembros del grupo en Firestore aún sin posición en tiempo real (sin GPS o primer fix pendiente). */
+  const membersWaitingGps = useMemo(() => {
+    if (!Array.isArray(group?.members) || !user?.uid) return [];
+    const withLoc = new Set(locations.map((l) => l.uid).filter(Boolean));
+    return group.members
+      .filter((uid: string) => typeof uid === 'string' && uid.length > 0 && uid !== user.uid && !withLoc.has(uid))
+      .map((uid: string) => ({
+        uid,
+        displayName: memberDisplayNameByUid[uid] || 'Motero',
+        score: 0,
+        photoURL: '',
+        level: 1,
+        isPremium: memberPremiumByUid[uid] === true,
+        waitingGps: true as const,
+      }));
+  }, [group?.members, locations, user?.uid, memberDisplayNameByUid, memberPremiumByUid]);
+
   const markerLocations = useMemo(
     () =>
       otherLocations
@@ -2151,40 +2202,67 @@ export default function MapView({
     [otherLocations, memberPremiumByUid]
   );
 
-  // Find active alerts from other users
+  // Avisos de otros usuarios (ventana algo mayor para leer distancia y actuar).
   const activeAlerts = useMemo(
-    () => otherLocations.filter(loc => loc.alert && Date.now() - loc.alert.timestamp < 60000),
+    () => otherLocations.filter((loc) => loc.alert && Date.now() - loc.alert.timestamp < 90000),
     [otherLocations]
   );
 
-  const rankingLocations = useMemo(
-    () =>
-      [
-        ...otherLocations.map((l) => ({
-          ...l,
-          isPremium: memberPremiumByUid[l.uid] === true
-        })),
-        {
-          uid: user?.uid,
-          displayName: user?.displayName || 'Tú',
-          score: score,
-          photoURL: user?.photoURL,
-          level: userLevel,
-          isPremium: user?.isPremium === true
-        }
-      ]
-        .filter((row) => row.uid)
-        .sort((a, b) => (b.score || 0) - (a.score || 0)),
-    [otherLocations, user?.uid, user?.displayName, user?.photoURL, user?.isPremium, score, userLevel, memberPremiumByUid]
-  );
+  const rankingLocations = useMemo(() => {
+    type RankRow = {
+      uid: string;
+      displayName?: string;
+      score?: number;
+      photoURL?: string;
+      level?: number;
+      isPremium?: boolean;
+      waitingGps?: boolean;
+    };
+    const rows: RankRow[] = [
+      ...otherLocations.map((l) => ({
+        ...l,
+        isPremium: memberPremiumByUid[l.uid] === true,
+      })),
+      ...membersWaitingGps,
+      {
+        uid: user?.uid || '',
+        displayName: user?.displayName || 'Tú',
+        score,
+        photoURL: user?.photoURL,
+        level: userLevel,
+        isPremium: user?.isPremium === true,
+      },
+    ];
+    return rows
+      .filter((row) => row.uid)
+      .sort((a, b) => {
+        const aw = a.waitingGps ? 1 : 0;
+        const bw = b.waitingGps ? 1 : 0;
+        if (aw !== bw) return aw - bw;
+        return (b.score || 0) - (a.score || 0);
+      });
+  }, [
+    otherLocations,
+    membersWaitingGps,
+    user?.uid,
+    user?.displayName,
+    user?.photoURL,
+    user?.isPremium,
+    score,
+    userLevel,
+    memberPremiumByUid,
+  ]);
 
-  // Real participant count: unique UIDs, counting current user once.
+  // Real participant count: prefer lista de miembros del grupo (incluye quien aún no tiene GPS).
   const uniqueOtherUsersCount = new Set(
     locations
       .filter(loc => loc.uid && loc.uid !== user?.uid)
       .map(loc => loc.uid)
   ).size;
-  const participantCount = (user ? 1 : 0) + uniqueOtherUsersCount;
+  const participantCount =
+    Array.isArray(group?.members) && group.members.filter(Boolean).length > 0
+      ? group.members.filter(Boolean).length
+      : (user ? 1 : 0) + uniqueOtherUsersCount;
 
   // Espaciado superior: env(safe-area-inset-top) vía CSS var (notch / Dynamic Island). Antes headerTop=0 en línea dejaba el HUD bajo el reloj.
   const edgeGap = 8;
@@ -2201,21 +2279,29 @@ export default function MapView({
   const firstRowTop = topBelowSafe(edgeGap);
   const hostBannerTop = topBelowSafe(edgeGap + (!isOnline ? C + 8 : 8));
 
-  let headerOffsetBelowSafe = edgeGap;
-  if (!isOnline) headerOffsetBelowSafe += C + 8;
-  if (hostLeftRoute && !isHost) headerOffsetBelowSafe += 64 + 8;
-  const headerTopOffset = topBelowSafe(headerOffsetBelowSafe);
+  let belowBanners = edgeGap;
+  if (!isOnline) belowBanners += C + 8;
+  if (hostLeftRoute && !isHost) belowBanners += 64 + 8;
 
-  const gpsErrorTop = topBelowSafe(edgeGap + C + H + navHeaderPad);
-  const weakTilesBannerTop = topBelowSafe(edgeGap + C + H + navHeaderPad + (gpsError ? 58 : 0) + 6);
-  const leanIosBannerTop = topBelowSafe(edgeGap + C + H + navHeaderPad + (gpsError ? 58 : 0) + 8);
+  const peerAlertRowH = 54;
+  const peerAlertsStripHeight =
+    activeAlerts.length > 0 ? Math.min(activeAlerts.length, 5) * peerAlertRowH + 10 : 0;
+
+  const peerAlertsTop = topBelowSafe(belowBanners);
+  const headerTopOffset = topBelowSafe(belowBanners + peerAlertsStripHeight);
+
+  const blockBelowHeader = belowBanners + peerAlertsStripHeight;
+  const gpsErrorTop = topBelowSafe(blockBelowHeader + navHeaderPad);
+  const weakTilesBannerTop = topBelowSafe(blockBelowHeader + navHeaderPad + (gpsError ? 58 : 0) + 6);
+  const leanIosBannerTop = topBelowSafe(blockBelowHeader + navHeaderPad + (gpsError ? 58 : 0) + 8);
 
   const topStackBelowSafe = edgeGap + C + H;
-  const screenFreeForAlerts = !parsedRoute;
-  const headerBlockForAlerts = screenFreeForAlerts ? 56 : headerOverlayHeight;
-  const activeAlertsExtra = topStackBelowSafe + headerBlockForAlerts + 10;
-  const gpsErrRankingExtra = edgeGap + C + H + navHeaderPad + (gpsError ? 72 : 0);
-  const rankingExtra = Math.max(activeAlertsExtra, gpsErrRankingExtra, edgeGap + 68);
+  const headerBlockForRanking = !parsedRoute ? 56 : headerOverlayHeight;
+  const rankingExtra = Math.max(
+    topStackBelowSafe + peerAlertsStripHeight + headerBlockForRanking + 10,
+    edgeGap + C + H + peerAlertsStripHeight + navHeaderPad + (gpsError ? 72 : 0),
+    edgeGap + 68
+  );
   const rankingTop = topBelowSafe(rankingExtra);
 
   return (
@@ -2248,6 +2334,51 @@ export default function MapView({
           >
             El host ha abandonado la ruta. No se guardará progreso nuevo; se sumarán solo los puntos logrados hasta ese momento.
           </motion.div>
+        )}
+        {activeAlerts.length > 0 && (
+          <div
+            className="absolute left-0 right-0 z-[1002] flex justify-center px-2 sm:px-3 pointer-events-none"
+            style={{ top: peerAlertsTop }}
+          >
+            <div
+              className="w-full max-w-md flex flex-col gap-1.5 pointer-events-auto overflow-y-auto overscroll-contain"
+              style={{ maxHeight: Math.min(280, peerAlertsStripHeight + 8) }}
+            >
+              {activeAlerts.map((loc) => {
+                const dist =
+                  currentLocation &&
+                  typeof loc.lat === 'number' &&
+                  typeof loc.lng === 'number' &&
+                  Number.isFinite(loc.lat) &&
+                  Number.isFinite(loc.lng)
+                    ? getDistance(currentLocation.lat, currentLocation.lng, loc.lat, loc.lng)
+                    : null;
+                const distStr = dist != null ? (dist > 1000 ? `${(dist / 1000).toFixed(1)} km` : `${Math.round(dist)} m`) : 'Distancia…';
+                const alertUi = getAlertUi(loc.alert?.type);
+                const subTone = 'sub' in alertUi && alertUi.sub ? alertUi.sub : 'text-white/90';
+                return (
+                  <div
+                    key={`${loc.uid}-${loc.alert?.timestamp ?? 0}`}
+                    className={`${alertUi.card} p-2.5 sm:p-3 rounded-2xl shadow-xl border flex items-center gap-3`}
+                  >
+                    <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-black/15 flex items-center justify-center shrink-0">
+                      {getAlertIcon(loc.alert?.type || '')}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <p className="font-black text-[10px] sm:text-[11px] tracking-wide uppercase">{alertUi.title}</p>
+                        <span className={`text-[10px] font-black px-2 py-0.5 rounded-full shrink-0 ${alertUi.badge}`}>
+                          {distStr}
+                        </span>
+                      </div>
+                      <p className="font-bold text-sm truncate">{loc.displayName || 'Motero'}</p>
+                      <p className={`text-[11px] ${subTone}`}>Aviso de otro usuario en la ruta</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         )}
         {(
           <motion.div 
@@ -2631,46 +2762,6 @@ export default function MapView({
         </div>
       )}
 
-      {/* Avisos de otros: abajo, encima del HUD velocidad — no tapa cabecera ni menús (z por debajo de z-[1001]). */}
-      {activeAlerts.length > 0 && (
-        <div
-          className="absolute left-1/2 -translate-x-1/2 z-[990] flex flex-col-reverse gap-2 w-full max-w-sm px-4 pointer-events-none"
-          style={{
-            bottom: isLandscape
-              ? 'calc(10rem + env(safe-area-inset-bottom, 0px))'
-              : 'calc(12.5rem + env(safe-area-inset-bottom, 0px))',
-          }}
-        >
-          {activeAlerts.map((loc) => {
-            const dist =
-              currentLocation &&
-              typeof loc.lat === 'number' &&
-              typeof loc.lng === 'number' &&
-              Number.isFinite(loc.lat) &&
-              Number.isFinite(loc.lng)
-                ? getDistance(currentLocation.lat, currentLocation.lng, loc.lat, loc.lng)
-                : null;
-            const distStr = dist ? (dist > 1000 ? `${(dist / 1000).toFixed(1)}km` : `${Math.round(dist)}m`) : '';
-            const alertUi = getAlertUi(loc.alert?.type);
-            return (
-              <div key={loc.uid} className={`${alertUi.card} text-white p-3 rounded-2xl shadow-2xl border flex items-center gap-3`}>
-                <div className="w-10 h-10 rounded-xl bg-black/20 flex items-center justify-center shrink-0">
-                  {getAlertIcon(loc.alert?.type || '')}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="font-black text-[11px] tracking-wide">{alertUi.title}</p>
-                    {distStr && <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${alertUi.badge}`}>{distStr}</span>}
-                  </div>
-                  <p className="font-semibold truncate">{loc.displayName || 'Motero'}</p>
-                  <p className="text-xs opacity-90">Aviso en tu ruta</p>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
       {showExitConfirm && (
         <div
           className="fixed inset-0 z-[6000] flex items-center justify-center p-6 bg-black/75 backdrop-blur-sm"
@@ -2701,6 +2792,49 @@ export default function MapView({
                 Salir
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {showLeanBetaNotice && (
+        <div
+          className="fixed inset-0 z-[6100] flex items-center justify-center p-4 sm:p-6 bg-black/80 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="lean-beta-title"
+        >
+          <div className="bg-zinc-900 border border-orange-500/40 rounded-3xl p-5 sm:p-6 max-w-md w-full shadow-2xl">
+            <div className="flex items-center gap-2 mb-3">
+              <Activity className="text-orange-400 shrink-0" size={22} aria-hidden />
+              <h2 id="lean-beta-title" className="text-lg font-black text-white leading-tight">
+                Inclinómetro en fase de pruebas
+              </h2>
+            </div>
+            <p className="text-sm text-zinc-300 leading-relaxed mb-4">
+              La estimación de inclinación (sensor en manillar y modelo por GPS en bolsillo / MirrorLink) está en mejora
+              continua. Si notas valores extraños, retrasos o diferencias según cómo lleves el móvil,{' '}
+              <strong className="text-white">agradecemos cualquier informe</strong> para corregir fallos o proponer mejoras.
+            </p>
+            <a
+              href={getSupportMailtoHref()}
+              className="flex items-center justify-center gap-2 w-full py-3 rounded-2xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-sm mb-3 transition-colors"
+            >
+              <Mail size={18} aria-hidden /> Enviar informe o sugerencia
+            </a>
+            <button
+              type="button"
+              onClick={() => {
+                try {
+                  localStorage.setItem('motoride_lean_beta_dismissed_v1', '1');
+                } catch {
+                  /* ignore */
+                }
+                setShowLeanBetaNotice(false);
+              }}
+              className="w-full py-3 rounded-2xl font-black text-white bg-orange-500 hover:bg-orange-400 transition-colors"
+            >
+              Entendido, continuar al mapa
+            </button>
           </div>
         </div>
       )}
@@ -2915,7 +3049,9 @@ export default function MapView({
                         <span className="truncate">{loc.displayName}</span>
                         {loc.isPremium ? <PremiumBadge compact /> : null}
                       </p>
-                      <p className="text-[10px] text-zinc-500 font-mono">{loc.score || 0} pts</p>
+                      <p className="text-[10px] text-zinc-500 font-mono">
+                        {loc.waitingGps ? 'Esperando señal GPS…' : `${loc.score || 0} pts`}
+                      </p>
                     </div>
                   </div>
                 ))}
@@ -3080,13 +3216,15 @@ export default function MapView({
         </div>
       )}
 
-      <div className="w-full flex-1 relative overflow-hidden bg-zinc-900">
-        <div 
-          className="w-full h-full transition-transform duration-500 ease-out"
+      <div className="w-full flex-1 relative overflow-hidden bg-[#dfe0e6]">
+        <div
+          className="w-full h-full transition-transform duration-500 ease-out isolate"
           style={{
             transform: isRecording && currentSpeedKmh > 3 && localDistance >= 0.05 ? `rotate(${-navigationHeading}deg)` : 'none',
             transformOrigin: 'center center',
             willChange: isRecording && currentSpeedKmh > 5 ? 'transform' : 'auto',
+            WebkitBackfaceVisibility: 'hidden',
+            backfaceVisibility: 'hidden',
           }}
         >
           <MapContainer
@@ -3101,17 +3239,22 @@ export default function MapView({
         <MapInvalidateHelper
           layoutKey={`${isRecording && currentSpeedKmh > 3 && localDistance >= 0.05 ? 1 : 0}`}
         />
-        <TileLayer 
-          url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-          subdomains="abcd"
-          keepBuffer={280}
+        <MapTilePrefetchBridge
+          mapZoomRef={mapZoomRef}
+          mapCenterRef={mapViewportCenterRef}
+          onSchedulePrefetch={bumpTilePrefetch}
+        />
+        <TileLayer
+          url="https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png"
+          keepBuffer={320}
           updateWhenIdle={false}
-          updateWhenZooming={false}
+          updateWhenZooming
           maxZoom={20}
           maxNativeZoom={19}
+          detectRetina={false}
           crossOrigin
           className="motoride-base-tiles"
-          errorTileUrl={LEAFLET_TRANSPARENT_ERROR_TILE}
+          errorTileUrl={LEAFLET_LIGHT_ERROR_TILE}
           eventHandlers={{
             tileerror: recordBaseMapTileError,
           }}

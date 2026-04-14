@@ -41,20 +41,28 @@ export const useLocationTracking = (isActive: boolean, groupId: string, extraDat
     };
   }, [groupId, user]);
 
-  // Join group room on socket
+  // Unir a la sala Socket en cuanto hay grupo + usuario (no esperar al primer fix GPS).
   useEffect(() => {
-    if (groupId && groupId !== 'REPEATED' && user) {
-      socket.emit('join-group', { groupId, uid: user.uid, isHost: !!extraDataRef.current?.isHost });
-    }
+    if (!groupId || groupId === 'REPEATED' || !user) return;
 
-    const rejoinOnConnect = () => {
-      if (groupId && groupId !== 'REPEATED' && user) {
-        socket.emit('join-group', { groupId, uid: user.uid, isHost: !!extraDataRef.current?.isHost });
-      }
+    const join = () => {
+      socket.emit('join-group', {
+        groupId,
+        uid: user.uid,
+        isHost: !!extraDataRef.current?.isHost,
+      });
     };
-    socket.on('connect', rejoinOnConnect);
+
+    // Emisión inmediata (socket.io encola si aún no hay conexión) + cada reconexión.
+    join();
+    socket.on('connect', join);
+    const ioMgr = (socket as { io?: { on?: (ev: string, fn: () => void) => void; off?: (ev: string, fn: () => void) => void } }).io;
+    const onReconnect = () => join();
+    ioMgr?.on?.('reconnect', onReconnect);
+
     return () => {
-      socket.off('connect', rejoinOnConnect);
+      socket.off('connect', join);
+      ioMgr?.off?.('reconnect', onReconnect);
     };
   }, [groupId, user]);
 

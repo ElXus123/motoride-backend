@@ -34,8 +34,10 @@ export default function InviteFriendsModal({ open, onClose, groupId, groupName, 
       try {
         const rows: any[] = [];
         for (const id of ids) {
-          const r = await getDoc(doc(db, 'users', id));
-          if (r.exists()) rows.push({ uid: id, ...r.data() });
+          const cleanId = String(id || '').trim();
+          if (!cleanId) continue;
+          const r = await getDoc(doc(db, 'users', cleanId));
+          if (r.exists()) rows.push({ uid: cleanId, ...r.data() });
         }
         setFriends(rows);
       } catch (e) {
@@ -50,6 +52,8 @@ export default function InviteFriendsModal({ open, onClose, groupId, groupName, 
 
   const invite = async (friendUid: string) => {
     if (!user) return;
+    const targetUid = String(friendUid || '').trim();
+    if (!targetUid || targetUid === user.uid) return;
     const gid = groupId.toUpperCase().trim();
     if (gid === 'REPEATED' || gid.length !== 6) {
       window.alert(
@@ -57,10 +61,10 @@ export default function InviteFriendsModal({ open, onClose, groupId, groupName, 
       );
       return;
     }
-    setSendingId(friendUid);
+    setSendingId(targetUid);
     try {
       const safeName = (groupName || 'Ruta').trim().slice(0, 120) || 'Ruta';
-      await updateDoc(doc(db, 'users', friendUid), {
+      await updateDoc(doc(db, 'users', targetUid), {
         rideInvitePending: {
           fromUid: user.uid,
           groupId: gid,
@@ -68,9 +72,16 @@ export default function InviteFriendsModal({ open, onClose, groupId, groupName, 
           sentAt: Date.now(),
         },
       });
-      setSentIds((s) => ({ ...s, [friendUid]: Date.now() }));
-    } catch (e) {
-      handleFirestoreError(e, OperationType.UPDATE, `users/${friendUid}`);
+      setSentIds((s) => ({ ...s, [targetUid]: Date.now() }));
+    } catch (e: unknown) {
+      const code = typeof e === 'object' && e && 'code' in e ? String((e as { code: string }).code) : '';
+      if (code === 'permission-denied') {
+        window.alert(
+          'No se pudo enviar la invitación. Comprueba que esa persona está en tu lista de amigos (amistad aceptada en ambos sentidos).'
+        );
+        return;
+      }
+      handleFirestoreError(e, OperationType.UPDATE, `users/${targetUid}`);
     } finally {
       setSendingId(null);
     }
@@ -127,8 +138,10 @@ export default function InviteFriendsModal({ open, onClose, groupId, groupName, 
                 </p>
               ) : (
                 <ul className="space-y-2">
-                  {friends.map((f) => {
-                    const fid = f.uid || f.id;
+                  {friends
+                    .filter((f) => Boolean(String(f.uid || f.id || '').trim()))
+                    .map((f) => {
+                    const fid = String(f.uid || f.id || '').trim();
                     const inRoute = memberSet.has(fid);
                     const sent = sentIds[fid];
                     return (
