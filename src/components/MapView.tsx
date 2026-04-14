@@ -1910,24 +1910,44 @@ export default function MapView({
   ).size;
   const participantCount = (user ? 1 : 0) + uniqueOtherUsersCount;
 
-  // Dynamic spacing so top overlays never overlap each other.
-  const isiOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
-  const topInset = (isiOS ? 28 : 16) + viewportTopInset;
+  // Espaciado superior: env(safe-area-inset-top) vía CSS var (notch / Dynamic Island). Antes headerTop=0 en línea dejaba el HUD bajo el reloj.
+  const edgeGap = 8;
+  const topBelowSafe = (extraPx: number) =>
+    `calc(var(--motoride-safe-top, env(safe-area-inset-top, 0px)) + ${extraPx + viewportTopInset}px)`;
+
   const connectionBannerHeight = !isOnline ? 58 : 0;
   const hostBannerHeight = hostLeftRoute && !isHost ? 64 : 0;
   const headerOverlayHeight = parsedRoute ? 220 : (!isMoving ? 98 : 0);
-  const headerTopOffset = !isOnline ? topInset + 56 : 0;
-  const gpsErrorTop = topInset + connectionBannerHeight + hostBannerHeight + (!isMoving ? 86 : 8);
-  const weakTilesBannerTop = gpsErrorTop + (gpsError ? 58 : 0) + 6;
-  const topStack = topInset + connectionBannerHeight + hostBannerHeight;
-  // Sin navegación paso a paso: avisos lo más arriba posible (solo bajo bandas/barras). Con ruta: bajo el panel azul.
+  const C = connectionBannerHeight;
+  const H = hostBannerHeight;
+  const navHeaderPad = !isMoving ? 86 : 8;
+
+  const firstRowTop = topBelowSafe(edgeGap);
+  const hostBannerTop = topBelowSafe(edgeGap + (!isOnline ? C + 8 : 8));
+
+  let headerOffsetBelowSafe = edgeGap;
+  if (!isOnline) headerOffsetBelowSafe += C + 8;
+  if (hostLeftRoute && !isHost) headerOffsetBelowSafe += 64 + 8;
+  const headerTopOffset = topBelowSafe(headerOffsetBelowSafe);
+
+  const gpsErrorTop = topBelowSafe(edgeGap + C + H + navHeaderPad);
+  const weakTilesBannerTop = topBelowSafe(edgeGap + C + H + navHeaderPad + (gpsError ? 58 : 0) + 6);
+  const leanIosBannerTop = topBelowSafe(edgeGap + C + H + navHeaderPad + (gpsError ? 58 : 0) + 8);
+
+  const topStackBelowSafe = edgeGap + C + H;
   const screenFreeForAlerts = !parsedRoute;
   const headerBlockForAlerts = screenFreeForAlerts ? 56 : headerOverlayHeight;
-  const activeAlertsTop = topStack + headerBlockForAlerts + 10;
-  const rankingTop = Math.max(activeAlertsTop, gpsErrorTop + (gpsError ? 72 : 0), topInset + 68);
+  const activeAlertsExtra = topStackBelowSafe + headerBlockForAlerts + 10;
+  const gpsErrRankingExtra = edgeGap + C + H + navHeaderPad + (gpsError ? 72 : 0);
+  const rankingExtra = Math.max(activeAlertsExtra, gpsErrRankingExtra, edgeGap + 68);
+  const rankingTop = topBelowSafe(rankingExtra);
 
   return (
-    <div ref={containerRef} className="relative w-full min-h-dvh h-dvh flex flex-col bg-zinc-900 overflow-hidden" style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
+    <div
+      ref={containerRef}
+      className="relative w-full min-h-dvh h-dvh flex flex-col bg-zinc-900 overflow-hidden"
+      style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+    >
       {/* Header overlay */}
       <AnimatePresence>
         {!isOnline && (
@@ -1936,7 +1956,7 @@ export default function MapView({
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: -100, opacity: 0 }}
             className="absolute left-1/2 -translate-x-1/2 z-[3000] bg-red-500 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 font-black text-sm border-2 border-white/20 backdrop-blur-md"
-            style={{ top: `${topInset}px` }}
+            style={{ top: firstRowTop }}
           >
             <ShieldAlert size={20} className="animate-pulse" />
             SIN CONEXIÓN - RECONECTANDO...
@@ -1948,7 +1968,7 @@ export default function MapView({
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: -100, opacity: 0 }}
             className="absolute left-1/2 -translate-x-1/2 z-[3000] bg-amber-500 text-black px-4 py-3 rounded-2xl shadow-2xl font-black text-xs sm:text-sm border-2 border-white/30 backdrop-blur-md max-w-[92vw] text-center"
-            style={{ top: `${topInset + connectionBannerHeight + 8}px` }}
+            style={{ top: hostBannerTop }}
           >
             El host ha abandonado la ruta. No se guardará progreso nuevo; se sumarán solo los puntos logrados hasta ese momento.
           </motion.div>
@@ -1958,8 +1978,8 @@ export default function MapView({
             initial={{ y: -100, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: -100, opacity: 0 }}
-            className="absolute left-0 right-0 z-[1001] p-4 flex justify-between items-start pointer-events-none"
-            style={{ top: `${headerTopOffset}px` }}
+            className="absolute left-0 right-0 z-[1001] flex justify-between items-start pointer-events-none pl-[max(1rem,var(--motoride-safe-left,env(safe-area-inset-left,0px)))] pr-[max(1rem,var(--motoride-safe-right,env(safe-area-inset-right,0px)))] pb-4 pt-0"
+            style={{ top: headerTopOffset }}
           >
          <div className="pointer-events-auto flex flex-col gap-2 min-w-0 max-w-[calc(100vw-6.5rem)] sm:max-w-sm">
         {(
@@ -2253,7 +2273,14 @@ export default function MapView({
       </AnimatePresence>
 
       {gpsError && (
-        <div className="absolute left-4 right-4 z-[1000] bg-red-500 text-white p-3 rounded-xl shadow-xl text-sm font-medium flex items-center gap-2" style={{ top: `${gpsErrorTop}px` }}>
+        <div
+          className="absolute z-[1000] bg-red-500 text-white p-3 rounded-xl shadow-xl text-sm font-medium flex items-center gap-2"
+          style={{
+            top: gpsErrorTop,
+            left: 'max(1rem, env(safe-area-inset-left, 0px))',
+            right: 'max(1rem, env(safe-area-inset-right, 0px))',
+          }}
+        >
           <AlertTriangle size={18} className="shrink-0" />
           <span>Sin señal GPS, reconectando...</span>
         </div>
@@ -2261,8 +2288,12 @@ export default function MapView({
 
       {needsOrientationUserGesture && leanPermissionGranted !== true && (
         <div
-          className="absolute left-4 right-4 z-[1001] bg-indigo-600 text-white p-3 rounded-xl shadow-xl text-sm flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
-          style={{ top: `${gpsErrorTop + (gpsError ? 58 : 0) + 8}px` }}
+          className="absolute z-[1001] bg-indigo-600 text-white p-3 rounded-xl shadow-xl text-sm flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
+          style={{
+            top: leanIosBannerTop,
+            left: 'max(1rem, env(safe-area-inset-left, 0px))',
+            right: 'max(1rem, env(safe-area-inset-right, 0px))',
+          }}
           role="status"
         >
           <span className="font-medium leading-snug">
@@ -2280,8 +2311,12 @@ export default function MapView({
 
       {isOnline && weakMapTilesNotice && (
         <div
-          className="absolute left-4 right-4 z-[1000] bg-amber-600/95 text-black p-3 rounded-xl shadow-xl text-xs sm:text-sm font-semibold flex items-start gap-3 border border-amber-400/40"
-          style={{ top: `${weakTilesBannerTop}px` }}
+          className="absolute z-[1000] bg-amber-600/95 text-black p-3 rounded-xl shadow-xl text-xs sm:text-sm font-semibold flex items-start gap-3 border border-amber-400/40"
+          style={{
+            top: weakTilesBannerTop,
+            left: 'max(1rem, env(safe-area-inset-left, 0px))',
+            right: 'max(1rem, env(safe-area-inset-right, 0px))',
+          }}
           role="status"
         >
           <WifiOff size={18} className="shrink-0 mt-0.5" />
@@ -2489,12 +2524,15 @@ export default function MapView({
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -20 }}
-            className={`absolute left-4 z-[1001] bg-zinc-950/95 backdrop-blur-md border border-zinc-800 rounded-2xl p-4 shadow-2xl w-64 pointer-events-auto transition-all duration-500 ${
+            className={`absolute z-[1001] bg-zinc-950/95 backdrop-blur-md border border-zinc-800 rounded-2xl p-4 shadow-2xl w-64 pointer-events-auto transition-all duration-500 ${
               isLandscape 
                 ? 'bottom-40 flex flex-col max-h-[46vh]' 
                 : ''
             }`}
-            style={{ top: isLandscape ? undefined : `${rankingTop}px` }}
+            style={{
+              top: isLandscape ? undefined : rankingTop,
+              left: 'max(1rem, env(safe-area-inset-left, 0px))',
+            }}
           >
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-white font-bold flex items-center gap-2">

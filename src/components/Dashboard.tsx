@@ -697,9 +697,9 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   };
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-white overflow-x-hidden">
-      {/* Header */}
-      <header className="sticky top-0 z-30 bg-zinc-950/80 backdrop-blur-md border-b border-zinc-900 px-6 py-4">
+    <div className="min-h-dvh bg-zinc-950 text-white overflow-x-hidden pb-[env(safe-area-inset-bottom,0px)]">
+      {/* Header — respeta notch / Dynamic Island (pt = max padding, safe-area) */}
+      <header className="sticky top-0 z-30 bg-zinc-950/80 backdrop-blur-md border-b border-zinc-900 pl-[max(1.5rem,env(safe-area-inset-left,0px))] pr-[max(1.5rem,env(safe-area-inset-right,0px))] pt-[max(1rem,env(safe-area-inset-top,0px))] pb-4">
         <div className="max-w-5xl mx-auto grid grid-cols-[auto_1fr_auto] items-center gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <button 
@@ -757,7 +757,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto p-6 space-y-8">
+      <main className="max-w-5xl mx-auto space-y-8 py-6 pl-[max(1.5rem,env(safe-area-inset-left,0px))] pr-[max(1.5rem,env(safe-area-inset-right,0px))]">
         <div className="flex justify-end">
           <button
             onClick={() => setShowSupportModal(true)}

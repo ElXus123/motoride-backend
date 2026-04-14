@@ -1,1 +1,1 @@
-Registro completo: CONTEXTO_APP.txt (raiz del proyecto).
+Ver CONTEXTO_APP.txt en la raiz del proyecto.
