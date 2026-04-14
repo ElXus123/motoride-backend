@@ -31,3 +31,88 @@ Ultima actualizacion: 2026-04-14
 - contexto_app.txt remite a este archivo.
 
 (contexto_app.txt -> ver este archivo)
+
+=== RESUMEN COMPLETO DE CAMBIOS (PARA CONTINUIDAD EN ESCRITORIO) ===
+Fecha: 2026-04-14
+
+1) ESTADO GENERAL
+- Se revisaron y corrigieron incidencias en invitaciones, inclinometro, planificador de rutas, reconexion de voz y UI en iPhone.
+- La app compila correctamente en local con `npm run build`.
+- Se dejo lista la configuracion de deploy con Wrangler para publicar assets de `dist`.
+
+2) INVITACIONES DE AMISTAD / RUTA
+- Archivo: `src/components/FriendsModal.tsx`
+  - Unificacion de IDs para usar siempre el ID canonico de Firestore (`doc.id`) como `id` y `uid`.
+- Archivo: `src/components/InviteFriendsModal.tsx`
+  - Misma normalizacion de IDs al cargar amigos.
+  - Fallback robusto al invitar:
+    - Si da `permission-denied` por desincronizacion de amistad, intenta resincronizar `friends` y reintenta el envio.
+    - Mensaje claro al usuario si no se puede completar.
+
+3) MAPA / PLANIFICADOR / AVISOS
+- Archivo: `src/components/MapView.tsx`
+  - Rutas: se usa referencia de sugerencia seleccionada para evitar destinos equivocados por texto ambiguo.
+  - Avisos: ajuste de stacking y alturas para que no se pisen ni corten la interfaz.
+  - iPhone: se agrego modo de UI horizontal forzada cuando falla el lock nativo.
+  - Mejoras de layout para que, con uno o varios avisos, el HUD no quede tapado.
+
+4) INCLINOMETRO (SIMETRIA, ESTABILIDAD, FLUIDEZ)
+- Archivo: `src/hooks/useLeanAngle.ts`
+  - Fusion de roll de `deviceorientation` + `devicemotion` (gravedad) para reducir sesgo lateral.
+  - `dynamicBiasRef` para autocentrado progresivo en parado y relajacion al moverse.
+  - Ajuste de deadzones y umbrales para deteccion mas equilibrada.
+  - A altas velocidades aumenta ligeramente sensibilidad.
+  - Salida con precision decimal (mas fluida en pantalla).
+  - `calibrate()` reinicia tambien el bias dinamico.
+- Archivo: `src/components/MapView.tsx`
+  - Eliminada ventana de maximos de 60 segundos.
+  - Se muestran solo maximos globales: izquierda (azul) y derecha (rojo).
+  - En modo tipo screen-share, parado y casi neutro, fuerza a 0 para evitar deriva espuria.
+  - Autocalibracion tambien en uso normal GPS (sin bolsillo/mirrorlink), condicionada por estabilidad de rumbo/angulo.
+
+5) CURVAS (CONTEO)
+- Archivo: `src/components/MapView.tsx`
+  - Minimo de velocidad para contar: 15 km/h.
+  - Inicio de curva: inclinacion > 15º.
+  - Fin de curva con umbral de salida mas bajo para evitar rebotes.
+  - Puntuacion/registro condicionado por velocidad minima.
+
+6) VOZ (RECONEXION AUTOMATICA)
+- Archivo: `src/hooks/useVoiceChat.ts`
+  - Se anade `joinedVoiceRoomRef` para recordar intencion de estar en sala.
+  - `rebuildVoiceRoom` para reconstruir peers y reemitir join de forma segura.
+  - Reconexion automatica en eventos de `connect/reconnect` de socket.
+  - Limpieza controlada en `disconnect` manteniendo estado para recuperar.
+  - Listener de `visibilitychange` para rearmar voz al volver a primer plano (especialmente iOS/Safari).
+
+7) BUILD / ENTORNO
+- Se ejecuto instalacion de dependencias (`npm ci`) al faltar herramientas en entorno.
+- Se corrigieron errores TypeScript puntuales aparecidos durante refactor:
+  - `Cannot find name 'y'` en `useLeanAngle.ts`.
+  - `Cannot find name 'viewportSize'` en `MapView.tsx`.
+- Build final verificado OK.
+
+8) DEPLOY CLOUDFLARE (ULTIMO CAMBIO)
+- Problema observado en CI/CD:
+  - `npx wrangler versions upload` fallaba por:
+    - `Missing entry-point to Worker script or to assets directory`
+- Solucion aplicada:
+  - Archivo nuevo: `wrangler.jsonc`
+  - Contenido configurado para assets estaticos:
+    - `"assets": { "directory": "./dist" }`
+    - `compatibility_date` definida.
+- Estado de verificacion:
+  - El error de entry-point/assets queda resuelto.
+  - En entorno no interactivo ahora exige `CLOUDFLARE_API_TOKEN` para desplegar.
+  - Para que despliegue automatico funcione, definir variable de entorno `CLOUDFLARE_API_TOKEN` en CI/hosting.
+
+9) GIT (ULTIMO TRAMO RELACIONADO CON DEPLOY)
+- Rama: `cursor/fix-wrangler-assets-upload-eb2a`
+- Commit deploy Wrangler:
+  - `7d818b8` - Add wrangler config for dist assets upload
+- Push realizado a remoto.
+
+10) SIGUIENTE PASO RECOMENDADO EN ESCRITORIO
+- Abrir este archivo (`CONTEXTO_APP.txt`) y continuar desde la rama actual.
+- Verificar variable `CLOUDFLARE_API_TOKEN` en el proveedor de CI/deploy.
+- Reintentar deploy con `npx wrangler versions upload` (o pipeline equivalente).
