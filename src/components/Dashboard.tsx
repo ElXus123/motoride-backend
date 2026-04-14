@@ -148,19 +148,15 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     highway: false
   });
 
-  // Debounce destination for preview
+  // Debounce: sugerencias al escribir (sin bloquear tras el primer resultado: antes el efecto no volvía a geocodificar y la ruta usaba siempre el primer hit de Nominatim).
   useEffect(() => {
     if (destination.length < 3) {
       setDestinationPreview(null);
       setDestinationSuggestions([]);
       return;
     }
-    // Only fetch if it's not already previewed
-    if (destinationPreview && destinationPreview !== 'Demasiadas peticiones, espera un poco...' && destinationPreview !== 'Error al buscar' && destinationPreview !== 'No encontrado') {
-      return;
-    }
     const timer = setTimeout(async () => {
-      const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(destination)}&limit=5&countrycodes=es&addressdetails=1`;
+      const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(destination.trim())}&limit=5&countrycodes=es&addressdetails=1`;
       try {
         const geoData = await requestJson<any[]>(geocodeUrl, { timeoutMs: 8000, retries: 0, backoffMs: 400 });
         if (geoData && geoData.length > 0) {

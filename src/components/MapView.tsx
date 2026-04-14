@@ -700,6 +700,8 @@ export default function MapView({
   const [searchDestination, setSearchDestination] = useState('');
   const [searchSuggestions, setSearchSuggestions] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  /** Coordenadas del resultado elegido en la lista (evita volver a geocodificar y quedarse con otro hit). */
+  const searchDestinationPickedRef = useRef<{ displayName: string; lat: number; lon: number } | null>(null);
   const [shared, setShared] = useState(false);
   const [showInviteFriends, setShowInviteFriends] = useState(false);
   const [inviteBusy, setInviteBusy] = useState(false);
@@ -1790,23 +1792,68 @@ export default function MapView({
     if (!searchDestination || !user) return;
     setIsSearching(true);
     try {
-      const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchDestination)}&limit=1&countrycodes=es&addressdetails=1`;
-      const geoData = await requestJson<any[]>(geocodeUrl, {
-        timeoutMs: 10000,
-        retries: 1,
-        backoffMs: 600,
-        headers: {
-          'User-Agent': 'MoteroApp/1.0 (contact: motorideapp1@gmail.com)'
+      const trimmed = searchDestination.trim();
+      let destCoords = '';
+
+      const pick = searchDestinationPickedRef.current;
+      if (
+        pick &&
+        pick.displayName === trimmed &&
+        Number.isFinite(pick.lat) &&
+        Number.isFinite(pick.lon)
+      ) {
+        destCoords = `${pick.lon},${pick.lat}`;
+      } else if (trimmed.includes(',')) {
+        const parts = trimmed.split(',').map((s) => s.trim());
+        if (parts.length >= 2) {
+          const a = parseFloat(parts[0]!);
+          const b = parseFloat(parts[1]!);
+          if (Number.isFinite(a) && Number.isFinite(b)) {
+            let lat: number;
+            let lon: number;
+            if (Math.abs(a) > 90) {
+              lon = a;
+              lat = b;
+            } else if (Math.abs(b) > 90) {
+              lon = b;
+              lat = a;
+            } else if (a >= 36 && a <= 44 && b >= -9 && b <= 4) {
+              lat = a;
+              lon = b;
+            } else if (b >= 36 && b <= 44 && a >= -9 && a <= 4) {
+              lat = b;
+              lon = a;
+            } else {
+              lon = a;
+              lat = b;
+            }
+            if (Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+              destCoords = `${lon},${lat}`;
+            }
+          }
         }
-      });
-      
-      let destCoords = "";
-      if (geoData && geoData.length > 0) {
-        destCoords = `${geoData[0].lon},${geoData[0].lat}`;
-      } else if (searchDestination.includes(',')) {
-        destCoords = searchDestination;
-      } else {
-        alert('No se ha podido encontrar el destino. Intenta ser más específico.');
+        if (!destCoords) {
+          destCoords = trimmed;
+        }
+      }
+
+      if (!destCoords) {
+        const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(trimmed)}&limit=1&countrycodes=es&addressdetails=1`;
+        const geoData = await requestJson<any[]>(geocodeUrl, {
+          timeoutMs: 10000,
+          retries: 1,
+          backoffMs: 600,
+          headers: {
+            'User-Agent': 'MoteroApp/1.0 (contact: motorideapp1@gmail.com)'
+          }
+        });
+        if (geoData && geoData.length > 0) {
+          destCoords = `${geoData[0].lon},${geoData[0].lat}`;
+        }
+      }
+
+      if (!destCoords) {
+        alert('No se ha podido encontrar el destino. Intenta ser más específico o elige un resultado de la lista.');
         setIsSearching(false);
         return;
       }
@@ -1826,6 +1873,7 @@ export default function MapView({
           });
           setShowSearchModal(false);
           setSearchDestination('');
+          searchDestinationPickedRef.current = null;
           setSearchSuggestions([]);
         } catch (error) {
           handleFirestoreError(error, OperationType.UPDATE, `groups/${groupId}`);
@@ -3163,7 +3211,14 @@ export default function MapView({
                       <input 
                         placeholder="¿A dónde quieres ir?" 
                         value={searchDestination}
-                        onChange={(e) => setSearchDestination(e.target.value)}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setSearchDestination(v);
+                          const p = searchDestinationPickedRef.current;
+                          if (p && v.trim() !== p.displayName) {
+                            searchDestinationPickedRef.current = null;
+                          }
+                        }}
                         onKeyDown={(e) => e.key === 'Enter' && generateRouteFromSearch()}
                         className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-3 text-sm text-white outline-none focus:border-orange-500 transition-all"
                       />
@@ -3182,8 +3237,16 @@ export default function MapView({
                         <button
                           key={`${item.place_id || idx}`}
                           onClick={() => {
-                            setSearchDestination(item.display_name || '');
+                            const name = (item.display_name || '').trim();
+                            setSearchDestination(name);
                             setSearchSuggestions([]);
+                            const lat = parseFloat(item.lat);
+                            const lon = parseFloat(item.lon);
+                            if (name && Number.isFinite(lat) && Number.isFinite(lon)) {
+                              searchDestinationPickedRef.current = { displayName: name, lat, lon };
+                            } else {
+                              searchDestinationPickedRef.current = null;
+                            }
                           }}
                           className="w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800 transition-colors"
                         >

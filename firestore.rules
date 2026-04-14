@@ -174,8 +174,11 @@ service cloud.firestore {
     function crossUserSetRideInviteOnFriend(friendId) {
       let me = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
       let friends = ('friends' in me && me.friends is list) ? me.friends : [];
+      let them = get(/databases/$(database)/documents/users/$(friendId)).data;
+      let theirFriends = ('friends' in them && them.friends is list) ? them.friends : [];
       return request.auth.uid != friendId &&
         friendId in friends &&
+        request.auth.uid in theirFriends &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rideInvitePending']) &&
         request.resource.data.rideInvitePending is map &&
         request.resource.data.rideInvitePending.fromUid == request.auth.uid &&

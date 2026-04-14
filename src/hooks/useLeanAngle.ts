@@ -226,16 +226,8 @@ export const useLeanAngle = (speedMps?: number | null) => {
 
     const handleMotion = (event: DeviceMotionEvent) => {
       updateMotionStationary(event);
-      if (Date.now() - lastOrientationUpdateRef.current < 1500) return;
-      const acc = event.accelerationIncludingGravity;
-      if (!acc) return;
-      const x = acc.x ?? 0;
-      const y = acc.y ?? 0;
-      const z = acc.z ?? 0;
-      const norm = Math.sqrt(x * x + y * y + z * z);
-      if (!norm) return;
-      const roll = Math.max(-60, Math.min(60, (Math.asin(x / norm) * 180) / Math.PI));
-      processRollSample(roll);
+      // No usar aceleración como roll de respaldo: el eje X del IMU no es el “ladeo” en todos los
+      // dispositivos (unos solo ven izquierda, otros solo derecha). Solo `deviceorientation` da gamma/beta coherentes.
     };
 
     window.addEventListener('deviceorientation', handleOrientation);
