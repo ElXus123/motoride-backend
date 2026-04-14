@@ -19,6 +19,8 @@ export const useLeanAngle = (speedMps?: number | null) => {
   const motionStationaryScoreRef = useRef(0);
   const motionStationaryRef = useRef(false);
   const prevGravUnitRef = useRef<{ x: number; y: number; z: number } | null>(null);
+  const dynamicBiasRef = useRef(0);
+  const lastGravityRollRef = useRef<number | null>(null);
 
   useEffect(() => {
     speedRef.current = speedMps;
@@ -138,8 +140,14 @@ export const useLeanAngle = (speedMps?: number | null) => {
       motionStationaryRef.current = motionStationaryScoreRef.current >= 14;
     };
 
-    const processRollSample = (rollRaw: number) => {
+    const processRollSample = (rollRaw: number, secondaryRoll?: number | null) => {
       let roll = rollRaw;
+      if (secondaryRoll != null && Number.isFinite(secondaryRoll)) {
+        // Fusión suave con estimación por gravedad para reducir sesgos de un lado (izq/der).
+        const delta = secondaryRoll - roll;
+        const clampedDelta = Math.max(-18, Math.min(18, delta));
+        roll += clampedDelta * 0.28;
+      }
       if (roll > 60) roll = 60;
       if (roll < -60) roll = -60;
 
@@ -180,14 +188,30 @@ export const useLeanAngle = (speedMps?: number | null) => {
       angleHistoryRef.current.push(smoothedAngleRef.current);
       if (angleHistoryRef.current.length > 30) angleHistoryRef.current.shift();
 
-      let finalAngle = smoothedAngleRef.current - calibrationOffset;
-      const deadDeg = physicallyStill ? 6.5 : speedUnknown ? 2.5 : 1.2;
+      const shouldAutoZero =
+        physicallyStill &&
+        (typeof v !== 'number' || !Number.isFinite(v) || Math.abs(v) < 1.6) &&
+        Math.abs(smoothedAngleRef.current) < 18;
+      if (shouldAutoZero) {
+        // Compensación lenta de deriva para que en reposo quede realmente centrado (0°).
+        dynamicBiasRef.current = Math.max(
+          -12,
+          Math.min(12, dynamicBiasRef.current * 0.96 + smoothedAngleRef.current * 0.04)
+        );
+      } else {
+        // Relajación suave del sesgo al volver a rodar.
+        dynamicBiasRef.current *= 0.995;
+        if (Math.abs(dynamicBiasRef.current) < 0.05) dynamicBiasRef.current = 0;
+      }
+
+      let finalAngle = smoothedAngleRef.current - calibrationOffset - dynamicBiasRef.current;
+      const deadDeg = physicallyStill ? 4.8 : speedUnknown ? 2.2 : 1.0;
       if (Math.abs(finalAngle) < deadDeg) finalAngle = 0;
 
       const roundedAngle = Math.round(finalAngle);
       setLeanAngle(roundedAngle);
 
-      const minMaxThreshold = physicallyStill ? 12 : 0;
+      const minMaxThreshold = physicallyStill ? 10 : 0;
       if (roundedAngle < 0 && Math.abs(roundedAngle) >= minMaxThreshold) {
         setMaxLeanLeft((prev) => Math.max(prev, Math.abs(roundedAngle)));
       } else if (roundedAngle > 0 && roundedAngle >= minMaxThreshold) {
@@ -222,12 +246,12 @@ export const useLeanAngle = (speedMps?: number | null) => {
         roll = event.gamma || 0;
       }
 
-      processRollSample(roll);
+      processRollSample(roll, lastGravityRollRef.current);
     };
 
     const handleMotion = (event: DeviceMotionEvent) => {
       updateMotionStationary(event);
-      if (Date.now() - lastOrientationUpdateRef.current < 1500) return;
+      const isLandscape = window.innerWidth > window.innerHeight;
       const acc = event.accelerationIncludingGravity;
       if (!acc) return;
       const x = acc.x ?? 0;
@@ -242,12 +266,14 @@ export const useLeanAngle = (speedMps?: number | null) => {
             ? window.orientation
             : 0;
       const normalizedOrientation = ((orientationAngle % 360) + 360) % 360;
-      let roll = (Math.asin(x / norm) * 180) / Math.PI;
-      if (window.innerWidth > window.innerHeight && normalizedOrientation === 270) {
-        roll = -roll;
+      let gravityRoll = (Math.atan2(x, z) * 180) / Math.PI;
+      if (isLandscape && normalizedOrientation === 270) {
+        gravityRoll = -gravityRoll;
       }
-      roll = Math.max(-60, Math.min(60, roll));
-      processRollSample(roll);
+      gravityRoll = Math.max(-60, Math.min(60, gravityRoll));
+      lastGravityRollRef.current = gravityRoll;
+      if (Date.now() - lastOrientationUpdateRef.current < 1500) return;
+      processRollSample(gravityRoll);
     };
 
     window.addEventListener('deviceorientation', handleOrientation);
@@ -264,6 +290,7 @@ export const useLeanAngle = (speedMps?: number | null) => {
   };
 
   const calibrate = useCallback(() => {
+    dynamicBiasRef.current = 0;
     const samples = angleHistoryRef.current.slice(-15);
     if (!samples.length) {
       setCalibrationOffset(smoothedAngleRef.current);
