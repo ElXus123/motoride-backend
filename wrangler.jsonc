@@ -1,0 +1,7 @@
+{
+  "name": "react-example",
+  "compatibility_date": "2026-04-14",
+  "assets": {
+    "directory": "./dist"
+  }
+}
