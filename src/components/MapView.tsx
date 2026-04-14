@@ -1470,8 +1470,12 @@ export default function MapView({
   // Curve detection & scoring
   useEffect(() => {
     if (!isRecording) return;
+    const currentSpeed = (speed || 0) * 3.6;
+    const MIN_CURVE_SPEED_KMH = 15;
+    const CURVE_START_DEG = 15;
+    const CURVE_END_DEG = 5;
     const absAngle = Math.abs(leanAngle);
-    if (absAngle > 20) {
+    if (currentSpeed >= MIN_CURVE_SPEED_KMH && absAngle >= CURVE_START_DEG) {
       if (!inCurve) {
         setInCurve(true);
         if (leanAngle > 0) {
@@ -1481,10 +1485,9 @@ export default function MapView({
         }
       }
       if (absAngle > currentCurveMax) setCurrentCurveMax(absAngle);
-    } else if (absAngle < 5 && inCurve) {
+    } else if ((currentSpeed < MIN_CURVE_SPEED_KMH || absAngle <= CURVE_END_DEG) && inCurve) {
       setInCurve(false);
-      const currentSpeed = (speed || 0) * 3.6;
-      if (currentSpeed >= 20) {
+      if (currentSpeed >= MIN_CURVE_SPEED_KMH) {
         setScore(prev => Math.ceil(prev + currentCurveMax));
       }
       setCurrentCurveMax(0);
