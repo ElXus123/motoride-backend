@@ -45,6 +45,19 @@ function blendLeanPocketMirror(sensorDeg: number, gpsDeg: number, speedMps: numb
   return Math.max(-60, Math.min(60, Math.round(blended)));
 }
 
+/**
+ * En pruebas de compartir pantalla algunos dispositivos subestiman la inclinación a derechas.
+ * Aplicamos una compensación suave solo cuando hay giro real y señal de velocidad.
+ */
+function compensateRightLeanForScreenShare(rawLeanDeg: number, speedMps: number | null): number {
+  const speed = speedMps ?? 0;
+  if (!Number.isFinite(rawLeanDeg)) return 0;
+  if (rawLeanDeg <= 0) return rawLeanDeg;
+  if (speed < 3) return rawLeanDeg;
+  const extraFactor = speed >= 14 ? 1.18 : speed >= 9 ? 1.14 : 1.1;
+  return Math.min(60, rawLeanDeg * extraFactor);
+}
+
 /** Por debajo de esto el modelo v·ω/g pierde sentido; alineado con bolsillo (blend desde 3 m/s). */
 const MIN_SPEED_MPS_GPS_LEAN = 3.2;
 
@@ -471,6 +484,9 @@ export default function MapView({
   const [score, setScore] = useState(0);
   const [inCurve, setInCurve] = useState(false);
   const [currentCurveMax, setCurrentCurveMax] = useState(0);
+  const [minuteMaxLeanLeft, setMinuteMaxLeanLeft] = useState(0);
+  const [minuteMaxLeanRight, setMinuteMaxLeanRight] = useState(0);
+  const [minuteWindowStartedAt, setMinuteWindowStartedAt] = useState(() => Date.now());
   const [alertType, setAlertType] = useState<string | null>(null);
   const [hostLeftRoute, setHostLeftRoute] = useState(false);
   const [showRanking, setShowRanking] = useState(false);
@@ -1414,13 +1430,42 @@ export default function MapView({
       isPocketLocked && isRecording && (touchLockKind === 'pocket' || touchLockKind === 'mirrorlink');
     if (telemetryFromPocket) {
       if (speed !== null && speed >= 3) {
-        return blendLeanPocketMirror(sensorLeanAngle, estimatedLeanAngle, speed);
+        const blended = blendLeanPocketMirror(sensorLeanAngle, estimatedLeanAngle, speed);
+        const compensated = blended > 0 ? compensateRightLeanForScreenShare(blended, speed) : blended;
+        return Math.round(compensated);
       }
       return 0;
     }
-    if (Math.abs(sensorLeanAngle) > 2) return sensorLeanAngle;
-    return estimatedLeanAngle;
+    const base = Math.abs(sensorLeanAngle) > 2 ? sensorLeanAngle : estimatedLeanAngle;
+    const compensated = base > 0 ? compensateRightLeanForScreenShare(base, speed) : base;
+    return Math.round(compensated);
   }, [touchLockKind, isPocketLocked, isRecording, speed, estimatedLeanAngle, sensorLeanAngle]);
+
+  useEffect(() => {
+    if (!isRecording) return;
+    const id = window.setInterval(() => {
+      setMinuteMaxLeanLeft(0);
+      setMinuteMaxLeanRight(0);
+      setMinuteWindowStartedAt(Date.now());
+    }, 60_000);
+    return () => window.clearInterval(id);
+  }, [isRecording]);
+
+  useEffect(() => {
+    if (!isRecording) {
+      setMinuteMaxLeanLeft(0);
+      setMinuteMaxLeanRight(0);
+      setMinuteWindowStartedAt(Date.now());
+      return;
+    }
+    const abs = Math.abs(leanAngle);
+    if (abs < 1) return;
+    if (leanAngle < 0) {
+      setMinuteMaxLeanLeft((prev) => (abs > prev ? abs : prev));
+      return;
+    }
+    setMinuteMaxLeanRight((prev) => (abs > prev ? abs : prev));
+  }, [leanAngle, isRecording]);
 
   // Curve detection & scoring
   useEffect(() => {
@@ -1723,6 +1768,9 @@ export default function MapView({
       recordingStartTimeRef.current = group?.startTime ?? Date.now();
       clearRideDraft();
       resetMaxLean();
+      setMinuteMaxLeanLeft(0);
+      setMinuteMaxLeanRight(0);
+      setMinuteWindowStartedAt(Date.now());
       setLocalDistance(0);
       setScore(0);
       setRecordedPath([]);
@@ -3226,11 +3274,15 @@ export default function MapView({
             <div className="flex flex-col items-center shrink-0">
               <div className="flex justify-between w-full text-[8px] sm:text-[9px] font-black uppercase tracking-widest px-1 mb-0.5 sm:mb-1">
                 <div className="flex flex-col items-center">
-                  <span className={maxLeanLeft > 35 ? "text-red-500" : "text-blue-400"}>Izq. {maxLeanLeft}°</span>
+                  <span className={maxLeanLeft > 35 ? "text-red-500" : "text-blue-400"}>
+                    Izq. {maxLeanLeft}° <span className="text-[8px] text-zinc-500">1m {minuteMaxLeanLeft}°</span>
+                  </span>
                   <span className="text-zinc-500">{leftTurnsRef.current}</span>
                 </div>
                 <div className="flex flex-col items-center">
-                  <span className={maxLeanRight > 35 ? "text-red-500" : "text-orange-400"}>Der. {maxLeanRight}°</span>
+                  <span className={maxLeanRight > 35 ? "text-red-500" : "text-orange-400"}>
+                    Der. {maxLeanRight}° <span className="text-[8px] text-zinc-500">1m {minuteMaxLeanRight}°</span>
+                  </span>
                   <span className="text-zinc-500">{rightTurnsRef.current}</span>
                 </div>
               </div>
@@ -3243,6 +3295,9 @@ export default function MapView({
                 </div>
                 <div className="mt-1 flex flex-col items-center">
                   <span className="text-lg sm:text-2xl font-black leading-none text-white tabular-nums">{Math.abs(leanAngle)}°</span>
+                  <span className="text-[8px] text-zinc-500 uppercase tracking-[0.14em]">
+                    ventana {(Math.max(0, 60 - Math.floor((Date.now() - minuteWindowStartedAt) / 1000))).toString().padStart(2, '0')}s
+                  </span>
                 </div>
               </div>
             </div>
