@@ -7,6 +7,7 @@ import WhatsNewModal from './WhatsNewModal';
 import { useAuth } from '../contexts/AuthContext';
 import { doc, getDoc, updateDoc, arrayUnion } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
+import { syncUserPointsAndLevelFromServer } from '../lib/userPointsSync';
 
 export default function MainApp() {
   const { user } = useAuth();
@@ -94,6 +95,25 @@ export default function MainApp() {
   useEffect(() => {
     if (showProfile) window.history.pushState({ layer: 'profile' }, '');
   }, [showProfile]);
+
+  /** Menú principal (Dashboard): leer puntos/nivel desde el servidor y corregir en BDD si toca subir de nivel o normalizar. */
+  const mainMenuVisible =
+    !!user?.uid && !autoJoining && !showProfile && !activeGroupId && !repeatedRoute;
+
+  useEffect(() => {
+    if (!mainMenuVisible) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        await syncUserPointsAndLevelFromServer(user.uid);
+      } catch (e) {
+        if (!cancelled) console.error('syncUserPointsAndLevelFromServer:', e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [mainMenuVisible, user?.uid]);
 
   const inviteOverlay =
     user?.rideInvitePending?.groupId ? (

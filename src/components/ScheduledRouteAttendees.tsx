@@ -1,35 +1,35 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { doc, getDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { calculateLevel } from '../lib/utils';
-import { ChevronDown, ChevronUp, ListOrdered, Loader2 } from 'lucide-react';
+import { ListOrdered, Loader2, User as UserIcon, X } from 'lucide-react';
 
 export type AttendeeRow = {
   uid: string;
   displayName: string;
   level: number;
   motorcycle?: string;
+  photoURL?: string;
 };
 
 type Props = {
   memberUids: string[];
-  /** Clases del botón desplegable */
+  /** Margen/espaciado donde antes iba el bloque desplegable (p. ej. `mb-3`). */
   className?: string;
-  compact?: boolean;
-  /** Cada vez que el padre incrementa este número, se abre la lista y se cargan perfiles (p. ej. botón "Ver lista de apuntados"). */
+  /** Cada incremento abre el popup y carga perfiles (botón «Ver lista de apuntados»). */
   expandNonce?: number;
 };
 
 /**
- * Lista desplegable de apuntados a una ruta programada (nombre, nivel, moto opcional).
+ * Solo popup de apuntados (sin lista desplegable en la tarjeta). Fotos de perfil desde Firestore.
  */
 export default function ScheduledRouteAttendees({
   memberUids,
   className = '',
-  compact,
   expandNonce = 0,
 }: Props) {
-  const [open, setOpen] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
   const [rows, setRows] = useState<AttendeeRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadedForUidKey, setLoadedForUidKey] = useState<string | null>(null);
@@ -76,7 +76,10 @@ export default function ScheduledRouteAttendees({
         const rawMoto = d.motorcycle;
         const motorcycle =
           typeof rawMoto === 'string' && rawMoto.trim().length > 0 ? rawMoto.trim() : undefined;
-        out.push({ uid, displayName, level, motorcycle });
+        const rawPhoto = d.photoURL;
+        const photoURL =
+          typeof rawPhoto === 'string' && rawPhoto.trim().length > 0 ? rawPhoto.trim() : undefined;
+        out.push({ uid, displayName, level, motorcycle, photoURL });
       });
       setRows(out);
       setLoadedForUidKey(uidKey);
@@ -89,68 +92,107 @@ export default function ScheduledRouteAttendees({
 
   useEffect(() => {
     if (expandNonce < 1) return;
-    setOpen(true);
+    setModalOpen(true);
     void load();
   }, [expandNonce, load]);
 
-  const toggle = () => {
-    const next = !open;
-    setOpen(next);
-    if (next) void load();
-  };
+  useEffect(() => {
+    if (!modalOpen || typeof document === 'undefined') return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [modalOpen]);
+
+  const closeModal = () => setModalOpen(false);
 
   const count = memberUids.length;
 
-  return (
-    <div className={`rounded-xl border border-zinc-800 bg-zinc-950/50 overflow-hidden ${className}`}>
-      <button
-        type="button"
-        onClick={toggle}
-        className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left hover:bg-zinc-800/60 transition-colors"
+  const modal =
+    modalOpen &&
+    typeof document !== 'undefined' &&
+    createPortal(
+      <div
+        className="fixed inset-0 z-[85] flex items-center justify-center p-4 bg-zinc-950/92"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="attendees-modal-title"
+        onClick={closeModal}
       >
-        <span className="flex items-center gap-2 min-w-0">
-          <ListOrdered size={compact ? 14 : 16} className="text-orange-400 shrink-0" />
-          <span className={`font-bold text-zinc-200 truncate ${compact ? 'text-[10px]' : 'text-xs'}`}>
-            Apuntados ({count})
-          </span>
-        </span>
-        {open ? (
-          <ChevronUp size={compact ? 14 : 16} className="text-zinc-500 shrink-0" />
-        ) : (
-          <ChevronDown size={compact ? 14 : 16} className="text-zinc-500 shrink-0" />
-        )}
-      </button>
-      {open && (
-        <div className="border-t border-zinc-800 px-3 py-2 space-y-2 max-h-[40vh] overflow-y-auto">
-          {loading ? (
-            <div className="flex items-center justify-center gap-2 py-4 text-zinc-500">
-              <Loader2 size={18} className="animate-spin" />
-              <span className={compact ? 'text-[10px]' : 'text-xs'}>Cargando…</span>
+        <div
+          className="w-full max-w-md max-h-[min(85dvh,560px)] flex flex-col bg-zinc-900 border border-zinc-800 rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-zinc-800 bg-gradient-to-b from-orange-500/10 to-transparent shrink-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <ListOrdered size={20} className="text-orange-400 shrink-0" />
+              <h2 id="attendees-modal-title" className="text-lg font-black text-white truncate">
+                Apuntados ({count})
+              </h2>
             </div>
-          ) : count === 0 ? (
-            <p className={`text-zinc-500 text-center py-2 ${compact ? 'text-[10px]' : 'text-xs'}`}>
-              Nadie se ha apuntado aún.
-            </p>
-          ) : (
-            rows.map((r) => (
-              <div
-                key={r.uid}
-                className={`rounded-lg bg-zinc-900/80 border border-zinc-800/80 px-2.5 py-2 ${compact ? 'text-[10px]' : 'text-xs'}`}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <p className="font-bold text-white truncate min-w-0">{r.displayName}</p>
-                  <span className="shrink-0 font-black text-orange-400 bg-orange-500/15 rounded-full px-2 py-0.5">
-                    Lv.{r.level}
-                  </span>
-                </div>
-                {r.motorcycle && (
-                  <p className="text-zinc-400 mt-1 leading-snug line-clamp-2">{r.motorcycle}</p>
-                )}
+            <button
+              type="button"
+              onClick={closeModal}
+              className="p-2 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors shrink-0"
+              aria-label="Cerrar"
+            >
+              <X size={22} />
+            </button>
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-4 space-y-2 [transform:translateZ(0)]">
+            {loading ? (
+              <div className="flex flex-col items-center justify-center gap-2 py-12 text-zinc-500">
+                <Loader2 size={28} className="animate-spin text-orange-500" />
+                <span className="text-sm">Cargando…</span>
               </div>
-            ))
-          )}
+            ) : count === 0 ? (
+              <p className="text-center text-sm text-zinc-500 py-10">Nadie se ha apuntado aún.</p>
+            ) : (
+              rows.map((r) => (
+                <div
+                  key={r.uid}
+                  className="rounded-2xl border border-zinc-800 bg-zinc-950/80 px-3 py-3 text-sm flex gap-3 items-start"
+                >
+                  <div className="w-11 h-11 shrink-0 rounded-full overflow-hidden bg-zinc-800 border border-zinc-700 ring-1 ring-zinc-700/50">
+                    {r.photoURL ? (
+                      <img
+                        src={r.photoURL}
+                        alt=""
+                        className="w-full h-full object-cover"
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <UserIcon size={22} className="text-zinc-500" />
+                      </div>
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="font-bold text-white truncate min-w-0">{r.displayName}</p>
+                      <span className="shrink-0 font-black text-orange-400 bg-orange-500/15 rounded-full px-2.5 py-0.5 text-xs">
+                        Lv.{r.level}
+                      </span>
+                    </div>
+                    {r.motorcycle && (
+                      <p className="text-zinc-400 mt-1.5 text-xs leading-snug line-clamp-2">{r.motorcycle}</p>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </div>
-      )}
-    </div>
+      </div>,
+      document.body
+    );
+
+  return (
+    <>
+      {/* Espaciado opcional (p. ej. mb-3) sin fila «Apuntados» desplegable */}
+      {className ? <div className={className} aria-hidden /> : null}
+      {modal}
+    </>
   );
 }

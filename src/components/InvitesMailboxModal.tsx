@@ -1,7 +1,19 @@
 import { useEffect, useState } from 'react';
-import { collection, deleteDoc, doc, onSnapshot, query, limit } from 'firebase/firestore';
+import {
+  collection,
+  deleteDoc,
+  deleteField,
+  doc,
+  getDoc,
+  onSnapshot,
+  query,
+  limit,
+  updateDoc,
+  arrayUnion,
+} from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppMessage } from '../contexts/AppMessageContext';
 import { X, Inbox, ChevronRight, Trash2, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -22,9 +34,11 @@ type Props = {
 
 export default function InvitesMailboxModal({ open, onClose, onJoinGroup }: Props) {
   const { user } = useAuth();
+  const showMessage = useAppMessage();
   const [items, setItems] = useState<RideInviteDoc[]>([]);
   const [loading, setLoading] = useState(true);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [joiningId, setJoiningId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open || !user?.uid) return;
@@ -65,13 +79,49 @@ export default function InvitesMailboxModal({ open, onClose, onJoinGroup }: Prop
   const join = async (inv: RideInviteDoc) => {
     const gid = String(inv.groupId || '').trim().toUpperCase();
     if (gid.length !== 6 || !user?.uid) return;
+    setJoiningId(inv.id);
     try {
+      const groupRef = doc(db, 'groups', gid);
+      const snap = await getDoc(groupRef);
+      if (!snap.exists()) {
+        showMessage({
+          variant: 'error',
+          title: 'Ruta no encontrada',
+          message: 'Ese código ya no existe o la ruta se ha borrado.',
+        });
+        await deleteDoc(doc(db, 'users', user.uid, 'invites', inv.id)).catch(() => {});
+        return;
+      }
+      const groupData = snap.data() as { isScheduled?: boolean };
+      const isScheduled = groupData?.isScheduled === true || inv.kind === 'scheduled_ride';
+
+      await updateDoc(groupRef, { members: arrayUnion(user.uid) });
       await deleteDoc(doc(db, 'users', user.uid, 'invites', inv.id));
+
+      const uref = doc(db, 'users', user.uid);
+      const usnap = await getDoc(uref);
+      const pending = usnap.data()?.rideInvitePending as { groupId?: string } | undefined;
+      if (pending && String(pending.groupId || '').toUpperCase().trim() === gid) {
+        await updateDoc(uref, { rideInvitePending: deleteField() });
+      }
+
+      onClose();
+
+      if (isScheduled) {
+        showMessage({
+          variant: 'success',
+          title: 'Te has apuntado',
+          message:
+            'Quedas en la lista de la ruta programada. Desde 1 h antes de la hora podrás entrar al mapa y al chat de voz.',
+        });
+      } else {
+        onJoinGroup(gid);
+      }
     } catch (e) {
-      handleFirestoreError(e, OperationType.DELETE, `users/${user.uid}/invites/${inv.id}`);
+      handleFirestoreError(e, OperationType.WRITE, `groups/${gid}`);
+    } finally {
+      setJoiningId(null);
     }
-    onClose();
-    onJoinGroup(gid);
   };
 
   return (
@@ -81,15 +131,15 @@ export default function InvitesMailboxModal({ open, onClose, onJoinGroup }: Prop
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[5000] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/75 backdrop-blur-sm"
+          className="fixed inset-0 z-[5000] flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm"
           onClick={onClose}
         >
           <motion.div
-            initial={{ y: 40, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 20, opacity: 0 }}
+            initial={{ y: 16, opacity: 0, scale: 0.98 }}
+            animate={{ y: 0, opacity: 1, scale: 1 }}
+            exit={{ y: 12, opacity: 0, scale: 0.98 }}
             onClick={(e) => e.stopPropagation()}
-            className="bg-zinc-900 border border-zinc-800 w-full sm:max-w-md max-h-[85dvh] rounded-t-3xl sm:rounded-3xl overflow-hidden shadow-2xl flex flex-col"
+            className="bg-zinc-900 border border-zinc-800 w-full max-w-md max-h-[min(85dvh,640px)] rounded-3xl overflow-hidden shadow-2xl flex flex-col"
           >
             <div className="p-4 border-b border-zinc-800 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2">
@@ -152,11 +202,18 @@ export default function InvitesMailboxModal({ open, onClose, onJoinGroup }: Prop
                     </div>
                     <button
                       type="button"
+                      disabled={joiningId === inv.id}
                       onClick={() => void join(inv)}
-                      className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold flex items-center justify-center gap-2"
+                      className="w-full py-2.5 rounded-xl bg-orange-500 hover:bg-orange-400 disabled:opacity-60 text-zinc-950 text-sm font-black flex items-center justify-center gap-2 shadow-lg shadow-orange-500/20"
                     >
-                      Unirse a la ruta
-                      <ChevronRight size={18} />
+                      {joiningId === inv.id ? (
+                        <Loader2 size={18} className="animate-spin" />
+                      ) : (
+                        <>
+                          {inv.kind === 'scheduled_ride' ? 'Apuntarme a la ruta' : 'Unirme a la ruta'}
+                          <ChevronRight size={18} />
+                        </>
+                      )}
                     </button>
                   </div>
                 ))

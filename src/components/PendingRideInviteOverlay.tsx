@@ -88,8 +88,18 @@ export default function PendingRideInviteOverlay({ onJoinGroup, activeGroupId }:
         await dismiss();
         return;
       }
+      const groupData = snap.data() as { isScheduled?: boolean };
       await updateDoc(gRef, { members: arrayUnion(user.uid) });
       await clearPendingInviteForUser(user.uid, pending, gid);
+      if (groupData?.isScheduled === true) {
+        showMessage({
+          variant: 'success',
+          title: 'Te has apuntado',
+          message:
+            'Quedas en la lista de la ruta programada. Desde 1 h antes de la hora podrás entrar al mapa y al chat de voz.',
+        });
+        return;
+      }
       onJoinGroup(gid);
     } catch (e: unknown) {
       const code = typeof e === 'object' && e && 'code' in e ? String((e as { code: string }).code) : '';

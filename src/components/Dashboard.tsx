@@ -35,11 +35,13 @@ import {
 import { requestUserLocation, reverseGeocodeProvinceMunicipality } from '../lib/reverseGeocode';
 import { getLevelRingWrapperClass } from '../lib/levelRing';
 import { canEnterScheduledRouteSession } from '../lib/scheduledRouteAccess';
+import { sortNominatimResults, pickBestNominatimResult } from '../lib/nominatimPick';
 import FriendsModal from './FriendsModal';
 import InvitesMailboxModal from './InvitesMailboxModal';
 import InviteFriendsModal from './InviteFriendsModal';
 import PremiumBadge from './PremiumBadge';
 import ScheduledRouteAttendees from './ScheduledRouteAttendees';
+import ScheduledRouteSoonOverlay from './ScheduledRouteSoonOverlay';
 
 interface DashboardProps {
   onJoinGroup: (id: string) => void;
@@ -115,6 +117,13 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   const [deletingType, setDeletingType] = useState<'scheduled' | null>(null);
   const exploreGpsFilledRef = useRef(false);
   const [exploreFromGpsHint, setExploreFromGpsHint] = useState(false);
+  /** Aviso 1 h antes: ruta programada a la que estás apuntado y ya puedes entrar al grupo. */
+  const [scheduledSoonRoute, setScheduledSoonRoute] = useState<{
+    id: string;
+    name: string;
+    code: string;
+    ts: number;
+  } | null>(null);
   /** Abrir bloque «Apuntados» desde el botón inferior (por id de ruta/grupo). */
   const [attendeesExpandNonceByRouteId, setAttendeesExpandNonceByRouteId] = useState<Record<string, number>>({});
   const bumpAttendeesList = (routeId: string) => {
@@ -146,33 +155,37 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     lon: number;
     address?: Record<string, string>;
   } | null>(null);
+  /** Índice resaltado en la lista (Enter elige esta fila). */
+  const [destinationHighlightIdx, setDestinationHighlightIdx] = useState(0);
   const [routeOptions, setRouteOptions] = useState({
     curves: true,
     secondary: true,
     highway: false
   });
 
-  // Debounce destination for preview
+  // Debounce destino: orden igual que al generar ruta (sortNominatimResults) para que fila N = coords N
   useEffect(() => {
     if (destination.length < 3) {
       setDestinationPreview(null);
       setDestinationSuggestions([]);
-      return;
-    }
-    // Only fetch if it's not already previewed
-    if (destinationPreview && destinationPreview !== 'Demasiadas peticiones, espera un poco...' && destinationPreview !== 'Error al buscar' && destinationPreview !== 'No encontrado') {
+      setDestinationHighlightIdx(0);
       return;
     }
     const timer = setTimeout(async () => {
-      const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(destination)}&limit=5&countrycodes=es&addressdetails=1`;
+      const q = destination.trim();
+      const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=8&countrycodes=es&addressdetails=1`;
       try {
         const geoData = await requestJson<any[]>(geocodeUrl, { timeoutMs: 8000, retries: 0, backoffMs: 400 });
         if (geoData && geoData.length > 0) {
-          setDestinationPreview(geoData[0].display_name);
-          setDestinationSuggestions(geoData.slice(0, 5));
+          const sorted = sortNominatimResults(geoData, q);
+          const top = sorted.slice(0, 5);
+          setDestinationPreview(top[0]?.display_name ?? '');
+          setDestinationSuggestions(top);
+          setDestinationHighlightIdx(0);
         } else {
           setDestinationPreview('No encontrado');
           setDestinationSuggestions([]);
+          setDestinationHighlightIdx(0);
         }
       } catch (e) {
         const status = (e as any)?.status;
@@ -183,10 +196,17 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
         console.error(e);
         setDestinationPreview('Error al buscar');
         setDestinationSuggestions([]);
+        setDestinationHighlightIdx(0);
       }
     }, 900);
     return () => clearTimeout(timer);
   }, [destination]);
+
+  useEffect(() => {
+    setDestinationHighlightIdx((i) =>
+      destinationSuggestions.length === 0 ? 0 : Math.min(i, destinationSuggestions.length - 1)
+    );
+  }, [destinationSuggestions]);
 
   // Search State
   const [searchProvince, setSearchProvince] = useState('');
@@ -451,6 +471,42 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     };
   }, [user]);
 
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    const evaluate = () => {
+      const now = Date.now();
+      for (const r of scheduledRoutes) {
+        const ts = Number(r.scheduledTimestamp);
+        if (!Number.isFinite(ts) || ts <= 0) continue;
+        if (!canEnterScheduledRouteSession(ts)) continue;
+        if (now > ts + 6 * 60 * 60 * 1000) continue;
+        try {
+          const dismissKey = `motoride_soon_dismiss_${r.id}_${ts}`;
+          if (sessionStorage.getItem(dismissKey)) continue;
+        } catch {
+          /* private mode */
+        }
+        const code = String((r as { code?: string }).code || r.id || '')
+          .toUpperCase()
+          .trim();
+        if (code.length !== 6) continue;
+        setScheduledSoonRoute({
+          id: String(r.id),
+          name: String((r as { name?: string }).name || 'Ruta'),
+          code,
+          ts,
+        });
+        return;
+      }
+      setScheduledSoonRoute(null);
+    };
+
+    evaluate();
+    const tick = window.setInterval(evaluate, 15000);
+    return () => clearInterval(tick);
+  }, [scheduledRoutes, user?.uid]);
+
   /** Explorar rutas: rellenar provincia/municipio desde GPS una vez al cargar. */
   useEffect(() => {
     if (!user?.uid || exploreGpsFilledRef.current) return;
@@ -470,7 +526,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     };
   }, [user?.uid]);
 
-  /** Crear ruta: al abrir el modal, sugerir provincia/municipio desde GPS (editable). */
+  /** Crear ruta: al abrir el modal, rellenar provincia/municipio desde GPS hasta que el planificador los fije por el punto de salida. */
   useEffect(() => {
     if (!user || !showCreateModal) return;
     let cancelled = false;
@@ -541,6 +597,19 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     reader.readAsText(file);
   };
 
+  /** Provincia/municipio desde coordenadas GPS; si falla, reintenta con ubicación actual. */
+  const resolveProvinceMunicipalityFromCoords = async (
+    lat: number,
+    lon: number
+  ): Promise<{ province: string; municipality: string } | null> => {
+    let r = await reverseGeocodeProvinceMunicipality(lat, lon);
+    if (r) return r;
+    const again = await requestUserLocation();
+    if (!again) return null;
+    r = await reverseGeocodeProvinceMunicipality(again.lat, again.lon);
+    return r;
+  };
+
   const createRoute = async () => {
     if (!user) return;
     
@@ -558,6 +627,21 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       ? new Date(`${scheduledDate}T${scheduledTime}`).getTime() 
       : Date.now();
 
+    let provFinal = province.trim().toLowerCase();
+    let munFinal = municipality.trim().toLowerCase();
+    if (!provFinal || !munFinal) {
+      const pos = await requestUserLocation();
+      if (pos) {
+        const rev = await resolveProvinceMunicipalityFromCoords(pos.lat, pos.lon);
+        if (rev) {
+          provFinal = rev.province;
+          munFinal = rev.municipality;
+          setProvince(rev.province);
+          setMunicipality(rev.municipality);
+        }
+      }
+    }
+
     // Firestore rules: routeGeoJSON must be absent or a string — null rejects validation (espontánea sin GPX).
     const groupData = {
       name: finalRouteName,
@@ -566,8 +650,8 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       members: [user.uid],
       isScheduled: routeType === 'scheduled',
       scheduledTimestamp,
-      province: province.trim().toLowerCase(),
-      municipality: municipality.trim().toLowerCase(),
+      province: provFinal,
+      municipality: munFinal,
       description: description.trim(),
       isEsporadica,
       createdAt: Date.now(),
@@ -646,14 +730,14 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           }
         }
 
-        const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(trimmed)}&limit=1&countrycodes=es&addressdetails=1`;
+        const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(trimmed)}&limit=8&countrycodes=es&addressdetails=1`;
         const geoData = await requestJson<any[]>(geocodeUrl, { timeoutMs: 8000, retries: 0, backoffMs: 400 });
         if (geoData && geoData.length > 0) {
-          const g0 = geoData[0];
+          const best = pickBestNominatimResult(geoData, trimmed) || geoData[0];
           return {
             ok: true,
-            geoData,
-            destCoords: `${g0.lon},${g0.lat}`,
+            geoData: [best],
+            destCoords: `${best.lon},${best.lat}`,
           };
         }
         return { ok: false };
@@ -726,18 +810,14 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
         setRouteGenerated(true);
         setIsEsporadica(false);
 
-        if (geoData[0]?.address) {
-          const addr = geoData[0].address;
-          const city = addr.city || addr.town || addr.village || addr.municipality;
-          const prov = addr.province || addr.state || addr.region;
-          if (city) setMunicipality(city);
-          if (prov) setProvince(prov);
-        } else if (geoData[0]?.display_name) {
-          const parts = geoData[0].display_name.split(',').map((p: string) => p.trim());
-          if (parts.length >= 2) {
-            setMunicipality(parts[0]);
-            setProvince(parts[parts.length - 2] || parts[1]);
-          }
+        // Zona de la ruta = punto de salida (GPS), no el destino
+        const rev = await resolveProvinceMunicipalityFromCoords(
+          pos.coords.latitude,
+          pos.coords.longitude
+        );
+        if (rev) {
+          setProvince(rev.province);
+          setMunicipality(rev.municipality);
         }
 
         if (!routeOptions.highway && route.distance > 0) {
@@ -846,6 +926,29 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     setDeletingType(null);
   };
 
+  const applyDestinationSuggestion = useCallback(
+    (item: { display_name?: string; lat?: string; lon?: string; address?: Record<string, string> }) => {
+      const name = (item.display_name || '').trim();
+      setDestination(name);
+      setDestinationPreview(name || null);
+      setDestinationSuggestions([]);
+      setDestinationHighlightIdx(0);
+      const lat = parseFloat(String(item.lat));
+      const lon = parseFloat(String(item.lon));
+      if (name && Number.isFinite(lat) && Number.isFinite(lon)) {
+        destinationPickedRef.current = {
+          displayName: name,
+          lat,
+          lon,
+          address: item.address,
+        };
+      } else {
+        destinationPickedRef.current = null;
+      }
+    },
+    []
+  );
+
   return (
     <div className="min-h-dvh bg-zinc-950 text-white overflow-x-hidden pb-[env(safe-area-inset-bottom,0px)]">
       {/* Header — respeta notch / Dynamic Island (pt = max padding, safe-area) */}
@@ -869,37 +972,40 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           </div>
 
           <div className="flex items-center justify-center min-w-0 px-1">
-            <div
-              className="flex w-full max-w-[min(100%,20rem)] flex-col gap-1.5 py-1"
-              aria-label="Progreso hacia el siguiente nivel"
+            <button
+              type="button"
+              onClick={onOpenProfile}
+              className="flex w-full max-w-[min(100%,20rem)] flex-col gap-0 py-1 text-left rounded-[1.25rem] focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/70 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
+              aria-label={`Abrir perfil: nivel ${level} y experiencia hacia el nivel ${level + 1}`}
             >
-              <div
-                className="h-1 w-full shrink-0 overflow-hidden rounded-full bg-zinc-800/95 ring-1 ring-zinc-700/60"
-                role="presentation"
-                aria-hidden
-              >
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-orange-600 via-amber-500 to-amber-400 transition-[width] duration-500 ease-out"
-                  style={{ width: `${levelProgressPercent}%` }}
-                />
-              </div>
-              <div className="flex min-h-[2.5rem] items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900/80 px-3 py-2 sm:min-h-[2.625rem] sm:px-3.5 sm:py-2.5">
-                <span className="whitespace-nowrap rounded-full bg-orange-500/15 px-2 py-1 text-[11px] font-black text-orange-400">
-                  Lv. {level}
-                </span>
-                {(user?.isPremium === true || userData?.isPremium === true) && (
-                  <span className="shrink-0">
-                    <PremiumBadge compact />
+              <div className="flex flex-col gap-2 rounded-[1.25rem] border border-zinc-800 bg-zinc-900/80 px-3 py-2.5 transition-colors hover:border-zinc-700 hover:bg-zinc-900 sm:rounded-[1.35rem] sm:px-3.5 sm:py-3">
+                <div className="flex min-h-0 items-center gap-2">
+                  <span className="shrink-0 whitespace-nowrap rounded-full bg-orange-500/15 px-2 py-1 text-[11px] font-black text-orange-400">
+                    Lv. {level}
                   </span>
-                )}
-                <p className="max-w-[42vw] truncate text-sm font-bold text-white sm:max-w-xs">
-                  {userData?.displayName || user?.displayName || 'Motero'}
-                </p>
-                {isOffline && (
-                  <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-red-500" title="Modo Offline" />
-                )}
+                  {(user?.isPremium === true || userData?.isPremium === true) && (
+                    <span className="shrink-0">
+                      <PremiumBadge compact />
+                    </span>
+                  )}
+                  <p className="min-w-0 flex-1 truncate text-sm font-bold text-white">
+                    {userData?.displayName || user?.displayName || 'Motero'}
+                  </p>
+                  {isOffline && (
+                    <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-red-500" title="Modo Offline" />
+                  )}
+                </div>
+                <div
+                  className="h-1.5 w-full shrink-0 overflow-hidden rounded-full bg-zinc-800/95 ring-1 ring-zinc-700/60 pointer-events-none"
+                  aria-hidden
+                >
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-orange-600 via-amber-500 to-amber-400 transition-[width] duration-500 ease-out"
+                    style={{ width: `${levelProgressPercent}%` }}
+                  />
+                </div>
               </div>
-            </div>
+            </button>
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap justify-end">
@@ -1098,7 +1204,6 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                   </p>
                   <ScheduledRouteAttendees
                     memberUids={Array.isArray(route.members) ? route.members : []}
-                    compact
                     className="mb-3"
                     expandNonce={attendeesExpandNonceByRouteId[route.id] ?? 0}
                   />
@@ -1212,7 +1317,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                     </p>
                     <ScheduledRouteAttendees
                       memberUids={Array.isArray(route.members) ? route.members : []}
-                      compact
+                      className="mb-3"
                       expandNonce={attendeesExpandNonceByRouteId[route.id] ?? 0}
                     />
                     <div className="flex gap-2">
@@ -1346,7 +1451,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
 
                       <ScheduledRouteAttendees
                         memberUids={Array.isArray(route.members) ? route.members : []}
-                        compact
+                        className="mb-3"
                         expandNonce={attendeesExpandNonceByRouteId[route.id] ?? 0}
                       />
                       
@@ -1419,6 +1524,38 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
         onJoinGroup={(code) => {
           setShowInvitesMailbox(false);
           onJoinGroup(code);
+        }}
+      />
+      <ScheduledRouteSoonOverlay
+        open={scheduledSoonRoute !== null}
+        routeName={scheduledSoonRoute?.name ?? ''}
+        scheduledTimestamp={scheduledSoonRoute?.ts ?? 0}
+        onDismiss={() => {
+          if (scheduledSoonRoute) {
+            try {
+              sessionStorage.setItem(
+                `motoride_soon_dismiss_${scheduledSoonRoute.id}_${scheduledSoonRoute.ts}`,
+                '1'
+              );
+            } catch {
+              /* quota / private */
+            }
+          }
+          setScheduledSoonRoute(null);
+        }}
+        onJoinNow={() => {
+          if (!scheduledSoonRoute) return;
+          try {
+            sessionStorage.setItem(
+              `motoride_soon_dismiss_${scheduledSoonRoute.id}_${scheduledSoonRoute.ts}`,
+              '1'
+            );
+          } catch {
+            /* */
+          }
+          const c = scheduledSoonRoute.code;
+          setScheduledSoonRoute(null);
+          void joinGroup(c);
         }}
       />
       {scheduledInviteModal && (
@@ -1614,35 +1751,47 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                               destinationPickedRef.current = null;
                             }
                           }}
+                          onKeyDown={(e) => {
+                            if (destinationSuggestions.length === 0) return;
+                            if (e.key === 'ArrowDown') {
+                              e.preventDefault();
+                              setDestinationHighlightIdx((i) =>
+                                Math.min(i + 1, destinationSuggestions.length - 1)
+                              );
+                            } else if (e.key === 'ArrowUp') {
+                              e.preventDefault();
+                              setDestinationHighlightIdx((i) => Math.max(i - 1, 0));
+                            } else if (e.key === 'Enter') {
+                              e.preventDefault();
+                              const item = destinationSuggestions[destinationHighlightIdx];
+                              if (item) applyDestinationSuggestion(item);
+                            }
+                          }}
+                          autoComplete="off"
                           className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-3 text-sm outline-none focus:border-blue-500 transition-all"
                         />
-                        {destinationPreview && (
-                          <p className="text-[10px] text-zinc-500 mt-1 ml-1 truncate">{destinationPreview}</p>
-                        )}
+                        {destinationPreview &&
+                          destinationSuggestions.length === 0 &&
+                          (destinationPreview === 'No encontrado' ||
+                            destinationPreview === 'Error al buscar' ||
+                            destinationPreview === 'Demasiadas peticiones, espera un poco...') && (
+                            <p className="text-[10px] text-amber-500/90 mt-1.5 ml-1 leading-snug">
+                              {destinationPreview}
+                            </p>
+                          )}
                         {destinationSuggestions.length > 0 && (
-                          <div className="mt-2 max-h-40 overflow-y-auto overscroll-contain rounded-xl border border-zinc-800 bg-zinc-950/80 [transform:translateZ(0)]">
+                          <div className="mt-2 max-h-40 overflow-y-auto overscroll-contain rounded-xl border border-zinc-800 bg-zinc-950/90 [transform:translateZ(0)] shadow-inner">
                             {destinationSuggestions.map((item, idx) => (
                               <button
-                                key={`${item.place_id || idx}`}
-                                onClick={() => {
-                                  const name = (item.display_name || '').trim();
-                                  setDestination(name);
-                                  setDestinationPreview(name || null);
-                                  setDestinationSuggestions([]);
-                                  const lat = parseFloat(item.lat);
-                                  const lon = parseFloat(item.lon);
-                                  if (name && Number.isFinite(lat) && Number.isFinite(lon)) {
-                                    destinationPickedRef.current = {
-                                      displayName: name,
-                                      lat,
-                                      lon,
-                                      address: item.address,
-                                    };
-                                  } else {
-                                    destinationPickedRef.current = null;
-                                  }
-                                }}
-                                className="w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800 transition-colors"
+                                key={`sug-${idx}-${String(item.lat)}-${String(item.lon)}-${(item.display_name || '').slice(0, 24)}`}
+                                type="button"
+                                onMouseDown={(ev) => ev.preventDefault()}
+                                onClick={() => applyDestinationSuggestion(item)}
+                                className={`w-full text-left px-3 py-2.5 text-xs transition-colors border-b border-zinc-800/80 last:border-b-0 ${
+                                  idx === destinationHighlightIdx
+                                    ? 'bg-blue-500/20 text-white ring-inset ring-1 ring-blue-500/40'
+                                    : 'text-zinc-300 hover:bg-zinc-800'
+                                }`}
                               >
                                 {item.display_name}
                               </button>
@@ -1791,34 +1940,6 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                       })}
                     </div>
                   </div>
-                )}
-
-                {(routeType === 'scheduled' || !isEsporadica) && (
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <label className="block text-xs font-bold text-zinc-500 uppercase ml-1">Provincia</label>
-                      <input 
-                        placeholder="Ej: Tarragona" 
-                        value={province}
-                        onChange={(e) => setProvince(e.target.value)}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 outline-none focus:border-orange-500 transition-all text-sm"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="block text-xs font-bold text-zinc-500 uppercase ml-1">Municipio</label>
-                      <input 
-                        placeholder="Ej: Salou" 
-                        value={municipality}
-                        onChange={(e) => setMunicipality(e.target.value)}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 outline-none focus:border-orange-500 transition-all text-sm"
-                      />
-                    </div>
-                  </div>
-                )}
-                {(routeType === 'scheduled' || !isEsporadica) && (
-                  <p className="text-[10px] text-zinc-500 mt-2 ml-1 leading-relaxed">
-                    Provincia y municipio se rellenan con tu ubicación al abrir este formulario; puedes cambiarlos.
-                  </p>
                 )}
               </div>
             </div>
