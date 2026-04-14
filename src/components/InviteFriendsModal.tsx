@@ -37,7 +37,7 @@ export default function InviteFriendsModal({ open, onClose, groupId, groupName, 
           const cleanId = String(id || '').trim();
           if (!cleanId) continue;
           const r = await getDoc(doc(db, 'users', cleanId));
-          if (r.exists()) rows.push({ uid: cleanId, ...r.data() });
+          if (r.exists()) rows.push({ ...r.data(), id: cleanId, uid: cleanId });
         }
         setFriends(rows);
       } catch (e) {
@@ -139,9 +139,9 @@ export default function InviteFriendsModal({ open, onClose, groupId, groupName, 
               ) : (
                 <ul className="space-y-2">
                   {friends
-                    .filter((f) => Boolean(String(f.uid || f.id || '').trim()))
+                    .filter((f) => Boolean(String(f.id || f.uid || '').trim()))
                     .map((f) => {
-                    const fid = String(f.uid || f.id || '').trim();
+                    const fid = String(f.id || f.uid || '').trim();
                     const inRoute = memberSet.has(fid);
                     const sent = sentIds[fid];
                     return (

@@ -19,6 +19,7 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
   const friendsIds: string[] = userData?.friends || [];
   const incomingIds: string[] = userData?.friendRequestsIncoming || [];
   const outgoingIds: string[] = userData?.friendRequestsOutgoing || [];
+  const toUserRow = (id: string, data: any) => ({ ...data, id, uid: id });
 
   useEffect(() => {
     if (!user) return;
@@ -47,7 +48,7 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
           const snaps = await Promise.all(chunk.map((fid) => getDoc(doc(db, 'users', fid))));
           for (const s of snaps) {
             if (s.exists()) {
-              allFriends.push({ id: s.id, uid: s.id, ...s.data() });
+              allFriends.push(toUserRow(s.id, s.data()));
             }
           }
         }
@@ -71,7 +72,7 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
       for (const chunk of chunks) {
         const snaps = await Promise.all(chunk.map((fid) => getDoc(doc(db, 'users', fid))));
         for (const s of snaps) {
-          if (s.exists()) all.push({ id: s.id, uid: s.id, ...s.data() });
+          if (s.exists()) all.push(toUserRow(s.id, s.data()));
         }
       }
       setIncomingUsers(all);
@@ -97,15 +98,15 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
         limit(20)
       );
       const snap = await getDocs(q);
-      let results = snap.docs.map(d => ({ id: d.id, ...d.data() } as any)).filter(u => u.id !== user?.uid);
+      let results = snap.docs.map((d) => toUserRow(d.id, d.data())).filter((u) => u.id !== user?.uid);
       if (results.length < 5) {
         // Fallback: wider search for contains (still capped).
         const wide = await getDocs(query(collection(db, 'users'), limit(120)));
         const merged = wide.docs
-          .map(d => ({ id: d.id, ...d.data() } as any))
-          .filter(u => u.id !== user?.uid && normalize(u.displayName || '').includes(qText));
+          .map((d) => toUserRow(d.id, d.data()))
+          .filter((u) => u.id !== user?.uid && normalize(u.displayName || '').includes(qText));
         const map = new Map<string, any>();
-        [...results, ...merged].forEach((u) => map.set(u.uid || u.id, u));
+        [...results, ...merged].forEach((u) => map.set(u.id, u));
         results = Array.from(map.values()).slice(0, 30);
       }
       setSearchResults(results);

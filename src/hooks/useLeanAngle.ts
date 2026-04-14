@@ -1,5 +1,74 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
+const clampLean = (value: number) => Math.max(-60, Math.min(60, value));
+
+const normalizeOrientationAngle = (value?: number) => {
+  const rounded = Math.round((value ?? 0) / 90) * 90;
+  const normalized = ((rounded % 360) + 360) % 360;
+  return normalized === 90 || normalized === 180 || normalized === 270 ? normalized : 0;
+};
+
+const getScreenOrientationAngle = () => {
+  if (typeof screen !== 'undefined' && screen.orientation && typeof screen.orientation.angle === 'number') {
+    return normalizeOrientationAngle(screen.orientation.angle);
+  }
+  if (typeof window !== 'undefined' && typeof window.orientation === 'number') {
+    return normalizeOrientationAngle(window.orientation);
+  }
+  return 0;
+};
+
+const isLandscapeOrientation = (orientationAngle: number) =>
+  orientationAngle === 90 ||
+  orientationAngle === 270 ||
+  (typeof window !== 'undefined' && window.innerWidth > window.innerHeight);
+
+const getRollFromOrientation = (event: DeviceOrientationEvent) => {
+  const orientationAngle = getScreenOrientationAngle();
+  const isLandscape = isLandscapeOrientation(orientationAngle);
+  const beta = event.beta ?? 0;
+  const gamma = event.gamma ?? 0;
+
+  if (!isLandscape) {
+    return orientationAngle === 180 ? -gamma : gamma;
+  }
+
+  const betaRoll = orientationAngle === 270 ? -beta : beta;
+  if (orientationAngle === 90 || orientationAngle === 270) {
+    return betaRoll;
+  }
+
+  const gammaRoll = orientationAngle === 180 ? -gamma : gamma;
+  return Math.abs(beta) >= Math.abs(gamma) * 0.85 ? betaRoll : gammaRoll;
+};
+
+const getRollFromGravity = (acc: DeviceMotionEventAcceleration | null | undefined) => {
+  if (!acc) return null;
+
+  const x = acc.x ?? 0;
+  const y = acc.y ?? 0;
+  const z = acc.z ?? 0;
+  const norm = Math.sqrt(x * x + y * y + z * z);
+  if (!norm) return null;
+
+  const orientationAngle = getScreenOrientationAngle();
+  const isLandscape = isLandscapeOrientation(orientationAngle);
+  let axis = x;
+
+  if (orientationAngle === 180) {
+    axis = -x;
+  } else if (orientationAngle === 90) {
+    axis = y;
+  } else if (orientationAngle === 270) {
+    axis = -y;
+  } else if (isLandscape) {
+    axis = Math.abs(y) >= Math.abs(x) * 0.85 ? y : x;
+  }
+
+  const ratio = Math.max(-1, Math.min(1, axis / norm));
+  return clampLean((Math.asin(ratio) * 180) / Math.PI);
+};
+
 /**
  * Inclinación desde IMU. Usa velocidad GPS y, sobre todo, datos de `devicemotion`
  * (giro + aceleración lineal + estabilidad de gravedad) para detectar móvil quieto en mesa
@@ -63,7 +132,7 @@ export const useLeanAngle = (speedMps?: number | null) => {
   }, []);
 
   const [rawAngle, setRawAngle] = useState(0);
-  const lastOrientationUpdateRef = useRef(0);
+  const lastMotionUpdateRef = useRef(0);
 
   useEffect(() => {
     try {
@@ -139,9 +208,7 @@ export const useLeanAngle = (speedMps?: number | null) => {
     };
 
     const processRollSample = (rollRaw: number) => {
-      let roll = rollRaw;
-      if (roll > 60) roll = 60;
-      if (roll < -60) roll = -60;
+      const roll = clampLean(rollRaw);
 
       setRawAngle(roll);
 
@@ -196,45 +263,15 @@ export const useLeanAngle = (speedMps?: number | null) => {
     };
 
     const handleOrientation = (event: DeviceOrientationEvent) => {
-      lastOrientationUpdateRef.current = Date.now();
-      const isLandscape = window.innerWidth > window.innerHeight;
-      const orientationAngle =
-        typeof screen !== 'undefined' && screen.orientation && typeof screen.orientation.angle === 'number'
-          ? screen.orientation.angle
-          : typeof window !== 'undefined' && typeof window.orientation === 'number'
-            ? window.orientation
-            : 0;
-
-      let roll = 0;
-      if (isLandscape) {
-        const beta = event.beta ?? 0;
-        const gamma = event.gamma ?? 0;
-        if (Math.abs(gamma) > Math.abs(beta) * 1.15) {
-          roll = orientationAngle === 90 || orientationAngle === -270 ? gamma : -gamma;
-        } else {
-          roll = beta;
-          if (orientationAngle === 270 || orientationAngle === -90) {
-            roll = -roll;
-          }
-        }
-      } else {
-        roll = event.gamma || 0;
-      }
-
-      processRollSample(roll);
+      if (Date.now() - lastMotionUpdateRef.current < 450) return;
+      processRollSample(getRollFromOrientation(event));
     };
 
     const handleMotion = (event: DeviceMotionEvent) => {
       updateMotionStationary(event);
-      if (Date.now() - lastOrientationUpdateRef.current < 1500) return;
-      const acc = event.accelerationIncludingGravity;
-      if (!acc) return;
-      const x = acc.x ?? 0;
-      const y = acc.y ?? 0;
-      const z = acc.z ?? 0;
-      const norm = Math.sqrt(x * x + y * y + z * z);
-      if (!norm) return;
-      const roll = Math.max(-60, Math.min(60, (Math.asin(x / norm) * 180) / Math.PI));
+      const roll = getRollFromGravity(event.accelerationIncludingGravity);
+      if (roll == null) return;
+      lastMotionUpdateRef.current = Date.now();
       processRollSample(roll);
     };
 

@@ -699,6 +699,11 @@ export default function MapView({
   const enterMirrorLinkMode = () => void enterTouchLockMode('mirrorlink');
   const [searchDestination, setSearchDestination] = useState('');
   const [searchSuggestions, setSearchSuggestions] = useState<any[]>([]);
+  const selectedSearchSuggestionRef = useRef<{
+    displayName: string;
+    lat: number;
+    lon: number;
+  } | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [shared, setShared] = useState(false);
   const [showInviteFriends, setShowInviteFriends] = useState(false);
@@ -1787,51 +1792,69 @@ export default function MapView({
   };
 
   const generateRouteFromSearch = async () => {
-    if (!searchDestination || !user) return;
+    const trimmedDestination = searchDestination.trim();
+    if (!trimmedDestination || !user) return;
     setIsSearching(true);
     try {
-      const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchDestination)}&limit=1&countrycodes=es&addressdetails=1`;
-      const geoData = await requestJson<any[]>(geocodeUrl, {
-        timeoutMs: 10000,
-        retries: 1,
-        backoffMs: 600,
-        headers: {
-          'User-Agent': 'MoteroApp/1.0 (contact: motorideapp1@gmail.com)'
-        }
-      });
-      
       let destCoords = "";
-      if (geoData && geoData.length > 0) {
-        destCoords = `${geoData[0].lon},${geoData[0].lat}`;
-      } else if (searchDestination.includes(',')) {
-        destCoords = searchDestination;
+      const picked = selectedSearchSuggestionRef.current;
+      if (
+        picked &&
+        picked.displayName === trimmedDestination &&
+        Number.isFinite(picked.lat) &&
+        Number.isFinite(picked.lon)
+      ) {
+        destCoords = `${picked.lon},${picked.lat}`;
+      } else if (trimmedDestination.includes(',')) {
+        const parts = trimmedDestination.split(',').map((part) => part.trim());
+        if (parts.length >= 2) {
+          const lon = Number(parts[0]);
+          const lat = Number(parts[1]);
+          if (Number.isFinite(lat) && Number.isFinite(lon)) {
+            destCoords = `${lon},${lat}`;
+          }
+        }
       } else {
-        alert('No se ha podido encontrar el destino. Intenta ser más específico.');
-        setIsSearching(false);
-        return;
+        const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(trimmedDestination)}&limit=1&countrycodes=es&addressdetails=1`;
+        const geoData = await requestJson<any[]>(geocodeUrl, {
+          timeoutMs: 10000,
+          retries: 1,
+          backoffMs: 600,
+          headers: {
+            'User-Agent': 'MoteroApp/1.0 (contact: motorideapp1@gmail.com)'
+          }
+        });
+        if (geoData && geoData.length > 0) {
+          destCoords = `${geoData[0].lon},${geoData[0].lat}`;
+        }
       }
 
-      const start = `${currentLocation?.lng || -3.7038},${currentLocation?.lat || 40.4168}`;
-      const url = `https://router.project-osrm.org/route/v1/driving/${start};${destCoords}?overview=full&geometries=geojson`;
-      
-      const data = await requestJson<any>(url, { timeoutMs: 12000, retries: 1, backoffMs: 700 });
-      if (data.code === 'Ok') {
-        if (!data.routes?.[0]?.geometry?.coordinates?.length) {
-          alert('No se pudo generar una ruta válida para ese destino.');
-          return;
-        }
-        try {
-          await updateDoc(doc(db, 'groups', groupId), {
-            routeGeoJSON: JSON.stringify(data.routes[0].geometry)
-          });
-          setShowSearchModal(false);
-          setSearchDestination('');
-          setSearchSuggestions([]);
-        } catch (error) {
-          handleFirestoreError(error, OperationType.UPDATE, `groups/${groupId}`);
+      if (destCoords) {
+        const start = `${currentLocation?.lng || -3.7038},${currentLocation?.lat || 40.4168}`;
+        const url = `https://router.project-osrm.org/route/v1/driving/${start};${destCoords}?overview=full&geometries=geojson`;
+
+        const data = await requestJson<any>(url, { timeoutMs: 12000, retries: 1, backoffMs: 700 });
+        if (data.code === 'Ok') {
+          if (!data.routes?.[0]?.geometry?.coordinates?.length) {
+            alert('No se pudo generar una ruta válida para ese destino.');
+            return;
+          }
+          try {
+            await updateDoc(doc(db, 'groups', groupId), {
+              routeGeoJSON: JSON.stringify(data.routes[0].geometry)
+            });
+            selectedSearchSuggestionRef.current = null;
+            setShowSearchModal(false);
+            setSearchDestination('');
+            setSearchSuggestions([]);
+          } catch (error) {
+            handleFirestoreError(error, OperationType.UPDATE, `groups/${groupId}`);
+          }
+        } else {
+          alert('Error al generar la ruta.');
         }
       } else {
-        alert('Error al generar la ruta.');
+        alert('No se ha podido encontrar el destino. Intenta ser más específico.');
       }
     } catch (e) {
       console.error(e);
@@ -3163,7 +3186,13 @@ export default function MapView({
                       <input 
                         placeholder="¿A dónde quieres ir?" 
                         value={searchDestination}
-                        onChange={(e) => setSearchDestination(e.target.value)}
+                        onChange={(e) => {
+                          const nextValue = e.target.value;
+                          setSearchDestination(nextValue);
+                          if (selectedSearchSuggestionRef.current?.displayName !== nextValue.trim()) {
+                            selectedSearchSuggestionRef.current = null;
+                          }
+                        }}
                         onKeyDown={(e) => e.key === 'Enter' && generateRouteFromSearch()}
                         className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-3 text-sm text-white outline-none focus:border-orange-500 transition-all"
                       />
@@ -3182,7 +3211,14 @@ export default function MapView({
                         <button
                           key={`${item.place_id || idx}`}
                           onClick={() => {
-                            setSearchDestination(item.display_name || '');
+                            const displayName = String(item.display_name || '').trim();
+                            const lat = Number(item.lat);
+                            const lon = Number(item.lon);
+                            setSearchDestination(displayName);
+                            selectedSearchSuggestionRef.current =
+                              displayName && Number.isFinite(lat) && Number.isFinite(lon)
+                                ? { displayName, lat, lon }
+                                : null;
                             setSearchSuggestions([]);
                           }}
                           className="w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800 transition-colors"
