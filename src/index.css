@@ -133,3 +133,37 @@ html, body, #root {
 .animate-float {
   animation: float 3s ease-in-out infinite;
 }
+
+/* Modal Novedades: brillo suave sobre el logo */
+@keyframes whats-new-logo-gleam {
+  0%,
+  100% {
+    transform: translateX(-120%) skewX(-14deg);
+    opacity: 0;
+  }
+  35% {
+    opacity: 0.85;
+  }
+  55% {
+    transform: translateX(160%) skewX(-14deg);
+    opacity: 0;
+  }
+}
+
+.whats-new-logo-gleam {
+  animation: whats-new-logo-gleam 5.5s ease-in-out infinite;
+}
+
+@keyframes whats-new-reflection-pulse {
+  0%,
+  100% {
+    opacity: 0.32;
+  }
+  50% {
+    opacity: 0.48;
+  }
+}
+
+.whats-new-reflection-pulse {
+  animation: whats-new-reflection-pulse 4.2s ease-in-out infinite;
+}

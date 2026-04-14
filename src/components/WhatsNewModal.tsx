@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Check, Sparkles, Wrench } from 'lucide-react';
+import appLogo from '../../ICONO.png';
 
 /** Sube este valor cuando cambien las novedades para volver a mostrar el aviso una vez por dispositivo. */
-export const WHATS_NEW_VERSION = '2026.04.17';
+export const WHATS_NEW_VERSION = '2026.04.15';
 
 const STORAGE_KEY = 'motoride_whats_new_seen_version';
 
@@ -21,81 +22,101 @@ type DayGroup = {
 
 /**
  * Cambios recientes (orden: día de más reciente a más antiguo; dentro de cada día, hora descendente).
- * Mantén el texto corto y claro para usuarios no técnicos.
+ * Incluye trabajo documentado desde el bloque 11 de CONTEXTO_APP.txt y mejoras posteriores.
  */
 const CHANGELOG: DayGroup[] = [
-  {
-    label: '17 de abril de 2026',
-    entries: [
-      {
-        time: '23:30',
-        kind: 'novedad',
-        text: 'En el mapa de ruta: aviso automático (unos 30 s) si hay posible lluvia en tu trazado o cerca de ti (≈10 km), con datos meteorológicos. Conduce con precaución.',
-      },
-    ],
-  },
-  {
-    label: '16 de abril de 2026',
-    entries: [
-      {
-        time: '22:00',
-        kind: 'novedad',
-        text: 'En el inicio, al tocar tu nivel (Lv.) o la barra de experiencia, entras a tu perfil igual que con el avatar.',
-      },
-      {
-        time: '21:45',
-        kind: 'arreglo',
-        text: 'Bandeja de invitaciones a rutas: en el móvil ya aparece centrada en pantalla (antes quedaba pegada abajo y era incómoda).',
-      },
-      {
-        time: '21:30',
-        kind: 'arreglo',
-        text: 'Rutas programadas: ya no hace falta escribir provincia y municipio a mano. Se toman del GPS del punto de salida al generar la ruta en el planificador; si no se pueden leer, se usa tu ubicación actual al guardar.',
-      },
-    ],
-  },
-  {
-    label: '15 de abril de 2026',
-    entries: [
-      {
-        time: '20:15',
-        kind: 'novedad',
-        text: 'Al volver al inicio, tus puntos y tu nivel se comprueban con el servidor y se guardan si hacía falta subir de nivel.',
-      },
-    ],
-  },
   {
     label: '14 de abril de 2026',
     entries: [
       {
-        time: '19:40',
-        kind: 'arreglo',
-        text: 'Ventanas del planificador y de previsualizar ruta: menos tirones al hacer scroll (fondo más ligero para el móvil).',
-      },
-      {
-        time: '18:20',
-        kind: 'arreglo',
-        text: 'Si eras organizador, a veces no salía invitar amigos en «Mis próximas rutas»; ya debería mostrarse cuando toca.',
-      },
-      {
-        time: '17:00',
+        time: '23:45',
         kind: 'novedad',
-        text: 'Bloque «Rutas de amigos» movido abajo: queda justo encima de «Mis próximas rutas».',
+        text: 'Ventana de novedades renovada: cabecera con el logo de MotoRide y lista actualizada con todo lo publicado desde la última nota de contexto.',
       },
       {
-        time: '15:30',
+        time: '22:30',
         kind: 'novedad',
-        text: 'En rutas programadas: lista de apuntados con nombre, nivel y moto (solo si la tienes en tu perfil).',
+        text: 'Mapa de ruta: aviso automático (unos 30 s) si puede llover en tu trazado o cerca de ti (≈10 km), con datos de Open-Meteo. Recuerda conducir con precaución.',
       },
       {
-        time: '12:00',
+        time: '21:10',
+        kind: 'novedad',
+        text: 'En el inicio, al tocar tu nivel (Lv.) o la barra de experiencia entras al perfil igual que con el avatar.',
+      },
+      {
+        time: '20:50',
+        kind: 'arreglo',
+        text: 'Bandeja de invitaciones a rutas: en móvil queda centrada en pantalla (antes podía quedar incómoda abajo).',
+      },
+      {
+        time: '20:20',
+        kind: 'arreglo',
+        text: 'Rutas programadas: provincia y municipio se toman del punto de salida con GPS al planificar; si no se leen, se usa tu ubicación al guardar.',
+      },
+      {
+        time: '19:30',
+        kind: 'novedad',
+        text: 'Al volver al inicio, tus puntos y tu nivel se sincronizan con el servidor y se guardan si correspondía subir de nivel.',
+      },
+      {
+        time: '18:45',
+        kind: 'arreglo',
+        text: 'Ventanas del planificador y de previsualizar ruta: scroll más suave en móvil (menos tirones del fondo).',
+      },
+      {
+        time: '18:00',
+        kind: 'arreglo',
+        text: 'Si eras organizador, a veces no aparecía invitar amigos en «Mis próximas rutas»; debería mostrarse cuando corresponda.',
+      },
+      {
+        time: '17:15',
+        kind: 'novedad',
+        text: 'Bloque «Rutas de amigos» reubicado: justo encima de «Mis próximas rutas».',
+      },
+      {
+        time: '16:30',
+        kind: 'novedad',
+        text: 'Rutas programadas: lista de apuntados con nombre, nivel y moto (si la tienes en tu perfil).',
+      },
+      {
+        time: '15:00',
         kind: 'novedad',
         text: 'Este aviso de novedades: te enteras de cambios y arreglos sin tener que buscarlos.',
       },
       {
-        time: '11:00',
+        time: '14:00',
         kind: 'novedad',
         text: 'Rutas con visibilidad (pública, solo amigos o privada), invitaciones por bandeja y salida al mapa/voz desde 1 h antes.',
+      },
+      {
+        time: '13:00',
+        kind: 'novedad',
+        text: 'Crear ruta: provincia y municipio sugeridos por GPS; búsqueda Nominatim prioriza ciudad frente a POIs sueltos. El historial de rutas pasa al perfil.',
+      },
+      {
+        time: '12:00',
+        kind: 'novedad',
+        text: 'Perfil: campo «Tu moto», historial de rutas con borrar y «Repetir ruta». Cabecera del inicio con anillo de nivel/premium.',
+      },
+      {
+        time: '11:00',
+        kind: 'novedad',
+        text: 'Mapa: avatares con «aro» según nivel y premium. Explorador de rutas con visibilidad y reglas de quién puede ver cada ruta.',
+      },
+      {
+        time: '10:15',
+        kind: 'novedad',
+        text: 'Mensajes globales de la app (info, éxito, error) y buzón de invitaciones unificado con el flujo de grupo y rutas.',
+      },
+      {
+        time: '09:30',
+        kind: 'novedad',
+        text: 'Inclinación y estimación de moto refinadas; invitaciones de amistad con IDs unificados y reintento si la amistad estaba desincronizada.',
+      },
+      {
+        time: '09:00',
+        kind: 'arreglo',
+        text: 'Mapa: mejor elección de destinos ambiguos, avisos apilados sin tapar el HUD, iPhone con modo horizontal forzado si hace falta.',
       },
     ],
   },
@@ -137,9 +158,42 @@ export default function WhatsNewModal() {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="relative px-6 pt-8 pb-3 bg-gradient-to-b from-orange-500/12 to-transparent border-b border-zinc-800/80 shrink-0">
-          <div className="flex justify-center mb-4">
-            <div className="w-16 h-16 rounded-2xl bg-orange-500/20 text-orange-400 flex items-center justify-center ring-1 ring-orange-500/30">
-              <Sparkles size={34} strokeWidth={2} />
+          <div className="flex justify-center mb-5">
+            <div className="flex flex-col items-center">
+              <div
+                className="relative w-[4.5rem] h-[4.5rem] rounded-2xl overflow-hidden ring-2 ring-orange-500/40 shadow-[0_14px_44px_-10px_rgba(249,115,22,0.45)]"
+                aria-hidden
+              >
+                <img src={appLogo} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                <div
+                  className="absolute inset-0 whats-new-logo-gleam pointer-events-none mix-blend-overlay"
+                  style={{
+                    background:
+                      'linear-gradient(105deg, transparent 0%, rgba(255,255,255,0.55) 45%, rgba(255,255,255,0.2) 55%, transparent 100%)',
+                    width: '42%',
+                    height: '160%',
+                    top: '-30%',
+                    left: '0',
+                  }}
+                />
+              </div>
+              <div className="relative w-[4.5rem] h-[2.1rem] -mt-0.5 overflow-hidden [perspective:420px]">
+                <img
+                  src={appLogo}
+                  alt=""
+                  aria-hidden
+                  className="absolute left-0 top-0 w-[4.5rem] h-[4.5rem] object-cover scale-y-[-1] whats-new-reflection-pulse [transform:rotateX(12deg)_scaleY(-1)] origin-top"
+                  style={{
+                    maskImage: 'linear-gradient(to bottom, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.2) 45%, transparent 100%)',
+                    WebkitMaskImage: 'linear-gradient(to bottom, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.2) 45%, transparent 100%)',
+                    filter: 'blur(0.35px) brightness(1.05)',
+                  }}
+                />
+                <div
+                  className="absolute inset-0 bg-gradient-to-b from-zinc-900/0 via-zinc-900/25 to-zinc-900 pointer-events-none"
+                  aria-hidden
+                />
+              </div>
             </div>
           </div>
           <h2 id="whats-new-title" className="text-center text-xl font-black text-white tracking-tight">

@@ -1,5 +1,5 @@
 MotoRide — registro de contexto / cambios recientes
-Ultima actualizacion: 2026-04-14 (bloque 11 — GPS, perfil, historial, nivel, rutas, mensajes)
+Ultima actualizacion: 2026-04-15 (bloque 19 — novedades UI, precipitaciones, changelog unificado)
 
 === Contacto y soporte ===
 - Correo publico de contacto: motorideapp1@gmail.com
@@ -162,3 +162,14 @@ Fecha: 2026-04-14
 
 18) GIT (ESTE BLOQUE)
 - Objetivo: commit unificado en `main` con el listado anterior y push a `origin/main`.
+
+=== RESUMEN DESDE EL ULTIMO LOG (POST BLOQUE 18) ===
+
+19) NOVEDADES (MODAL), PRECIPITACIONES Y TEXTO DE CONTEXTO
+- `src/components/WhatsNewModal.tsx`
+  - Version `WHATS_NEW_VERSION` actualizada para volver a mostrar el modal una vez por dispositivo.
+  - Cabecera: logo de la app (`ICONO.png` en raiz, misma fuente que Login) en lugar del icono de estrella; reflejo bajo el logo (imagen invertida + mascara + pulso suave) y franja de brillo animada (`whats-new-logo-gleam` / `whats-new-reflection-pulse` en `src/index.css`).
+  - Lista de cambios reescrita desde cero: un solo dia (14 abr 2026) con entradas que cubren bloques 11-18 de este archivo mas aviso de lluvia en mapa, toque en nivel al perfil, bandeja de invitaciones centrada en movil, sincronizacion puntos/nivel, scroll planificador, invitar en proximas rutas, reorden de «Rutas de amigos», lista de apuntados, visibilidad de rutas, GPS/Nominatim, perfil/moto/historial, aros de nivel, explorador, mensajes globales/buzon, inclinacion/invitaciones amistad, ajustes de mapa/HUD.
+- `src/lib/precipitationRisk.ts` + `src/components/MapView.tsx` (ya en main desde commit anterior)
+  - Consulta Open-Meteo en posicion, anillo ~10 km y puntos de la ruta; banner ~30 s, cooldown entre avisos.
+- Deploy Cloudflare Workers: nombre en `wrangler.jsonc` puede diferir del Worker enlazado en CI (p. ej. esperado `app`); el build puede sobreescribir el nombre; alinear nombre en dashboard o en config si se quiere evitar el aviso.
