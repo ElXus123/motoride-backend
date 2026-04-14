@@ -3,6 +3,7 @@ import Dashboard from './Dashboard';
 import MapView from './MapView';
 import Profile from './Profile';
 import PendingRideInviteOverlay from './PendingRideInviteOverlay';
+import WhatsNewModal from './WhatsNewModal';
 import { useAuth } from '../contexts/AuthContext';
 import { doc, getDoc, updateDoc, arrayUnion } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
@@ -152,6 +153,7 @@ export default function MainApp() {
 
   return (
     <>
+      <WhatsNewModal />
       {inviteOverlay}
       <Dashboard onJoinGroup={(id) => setActiveGroupId(id)} onRepeatRoute={(route) => setRepeatedRoute(route)} onOpenProfile={() => setShowProfile(true)} />
     </>
