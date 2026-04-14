@@ -34,7 +34,14 @@ import {
 import { requestUserLocation, reverseGeocodeProvinceMunicipality } from '../lib/reverseGeocode';
 import { getLevelRingWrapperClass } from '../lib/levelRing';
 import { canEnterScheduledRouteSession } from '../lib/scheduledRouteAccess';
-import { sortNominatimResults, pickBestNominatimResult } from '../lib/nominatimPick';
+import {
+  fetchNominatimSuggestions,
+  resolveDestinationForRouting,
+  formatOsrmDestCoords,
+  destinationLabelsMatch,
+  type PickedDestination,
+  type NominatimItem,
+} from '../lib/routePlannerDestination';
 import appIcon from '../../ICONO.png';
 import FriendsModal from './FriendsModal';
 import InvitesMailboxModal from './InvitesMailboxModal';
@@ -149,14 +156,9 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   const [routeListing, setRouteListing] = useState<RouteListing>('public');
   const [destination, setDestination] = useState('');
   const [destinationPreview, setDestinationPreview] = useState<string | null>(null);
-  const [destinationSuggestions, setDestinationSuggestions] = useState<any[]>([]);
+  const [destinationSuggestions, setDestinationSuggestions] = useState<NominatimItem[]>([]);
   /** Si el usuario elige una sugerencia, reutilizamos coords y evitamos otra petición Nominatim al generar. */
-  const destinationPickedRef = useRef<{
-    displayName: string;
-    lat: number;
-    lon: number;
-    address?: Record<string, string>;
-  } | null>(null);
+  const destinationPickedRef = useRef<PickedDestination | null>(null);
   /** Índice resaltado en la lista (Enter elige esta fila). */
   const [destinationHighlightIdx, setDestinationHighlightIdx] = useState(0);
   const [routeOptions, setRouteOptions] = useState({
@@ -165,43 +167,47 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     highway: false
   });
 
-  // Debounce destino: orden igual que al generar ruta (sortNominatimResults) para que fila N = coords N
+  // Debounce destino: misma orden que `resolveDestinationForRouting` (pickBest) para alinear lista y cálculo
   useEffect(() => {
-    if (destination.length < 3) {
+    const ac = new AbortController();
+    if (destination.trim().length < 3) {
       setDestinationPreview(null);
       setDestinationSuggestions([]);
       setDestinationHighlightIdx(0);
-      return;
+      return () => ac.abort();
     }
-    const timer = setTimeout(async () => {
+    const timer = setTimeout(() => {
       const q = destination.trim();
-      const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=8&countrycodes=es&addressdetails=1`;
-      try {
-        const geoData = await requestJson<any[]>(geocodeUrl, { timeoutMs: 8000, retries: 0, backoffMs: 400 });
-        if (geoData && geoData.length > 0) {
-          const sorted = sortNominatimResults(geoData, q);
-          const top = sorted.slice(0, 5);
-          setDestinationPreview(top[0]?.display_name ?? '');
-          setDestinationSuggestions(top);
-          setDestinationHighlightIdx(0);
-        } else {
-          setDestinationPreview('No encontrado');
+      fetchNominatimSuggestions(q, { signal: ac.signal })
+        .then((sorted) => {
+          if (sorted.length > 0) {
+            const top = sorted.slice(0, 5);
+            setDestinationPreview(top[0]?.display_name ?? '');
+            setDestinationSuggestions(top);
+            setDestinationHighlightIdx(0);
+          } else {
+            setDestinationPreview('No encontrado');
+            setDestinationSuggestions([]);
+            setDestinationHighlightIdx(0);
+          }
+        })
+        .catch((e: unknown) => {
+          if ((e as { name?: string })?.name === 'AbortError') return;
+          const status = (e as { status?: number })?.status;
+          if (status === 429) {
+            setDestinationPreview('Demasiadas peticiones, espera un poco...');
+            return;
+          }
+          console.error(e);
+          setDestinationPreview('Error al buscar');
           setDestinationSuggestions([]);
           setDestinationHighlightIdx(0);
-        }
-      } catch (e) {
-        const status = (e as any)?.status;
-        if (status === 429) {
-          setDestinationPreview('Demasiadas peticiones, espera un poco...');
-          return;
-        }
-        console.error(e);
-        setDestinationPreview('Error al buscar');
-        setDestinationSuggestions([]);
-        setDestinationHighlightIdx(0);
-      }
-    }, 900);
-    return () => clearTimeout(timer);
+        });
+    }, 600);
+    return () => {
+      clearTimeout(timer);
+      ac.abort();
+    };
   }, [destination]);
 
   useEffect(() => {
@@ -641,7 +647,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   };
 
   const generateLocalRoute = async () => {
-    if (!destination || !user) return;
+    if (!destination.trim() || !user) return;
     setLoading(true);
     try {
       if (!navigator.geolocation) {
@@ -655,59 +661,6 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
 
       const trimmed = destination.trim();
 
-      const resolveDestination = async (): Promise<
-        | { ok: true; geoData: any[]; destCoords: string }
-        | { ok: false }
-      > => {
-        const pick = destinationPickedRef.current;
-        if (
-          pick &&
-          pick.displayName === trimmed &&
-          Number.isFinite(pick.lat) &&
-          Number.isFinite(pick.lon)
-        ) {
-          return {
-            ok: true,
-            geoData: [
-              {
-                lat: String(pick.lat),
-                lon: String(pick.lon),
-                display_name: pick.displayName,
-                address: pick.address,
-              },
-            ],
-            destCoords: `${pick.lon},${pick.lat}`,
-          };
-        }
-
-        if (trimmed.includes(',')) {
-          const parts = trimmed.split(',').map((s) => s.trim());
-          if (parts.length >= 2) {
-            const lon = parseFloat(parts[0]);
-            const lat = parseFloat(parts[1]);
-            if (Number.isFinite(lon) && Number.isFinite(lat)) {
-              return {
-                ok: true,
-                geoData: [{ lat: String(lat), lon: String(lon), display_name: trimmed }],
-                destCoords: `${lon},${lat}`,
-              };
-            }
-          }
-        }
-
-        const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(trimmed)}&limit=8&countrycodes=es&addressdetails=1`;
-        const geoData = await requestJson<any[]>(geocodeUrl, { timeoutMs: 8000, retries: 0, backoffMs: 400 });
-        if (geoData && geoData.length > 0) {
-          const best = pickBestNominatimResult(geoData, trimmed) || geoData[0];
-          return {
-            ok: true,
-            geoData: [best],
-            destCoords: `${best.lon},${best.lat}`,
-          };
-        }
-        return { ok: false };
-      };
-
       const gpsPromise = new Promise<GeolocationPosition>((resolve, reject) => {
         navigator.geolocation.getCurrentPosition(resolve, reject, {
           timeout: 12000,
@@ -716,18 +669,13 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
         });
       });
 
-      const geoOutcomePromise = resolveDestination()
-        .then((r) => ({ ok: true as const, r }))
-        .catch((e) => {
-          console.error(e);
-          return { ok: false as const, geoNetError: true as const };
-        });
+      const destPromise = resolveDestinationForRouting(trimmed, destinationPickedRef.current);
 
       const gpsOutcomePromise = gpsPromise
         .then((p) => ({ ok: true as const, p }))
         .catch(() => ({ ok: false as const, gpsErr: true as const }));
 
-      const [geoOutcome, gpsOutcome] = await Promise.all([geoOutcomePromise, gpsOutcomePromise]);
+      const [destRes, gpsOutcome] = await Promise.all([destPromise, gpsOutcomePromise]);
 
       if (!gpsOutcome.ok) {
         setRouteGenFeedback({
@@ -737,26 +685,22 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
         });
         return;
       }
-      if (!geoOutcome.ok) {
+
+      if (destRes.ok === false) {
+        const reason = destRes.reason;
         setRouteGenFeedback({
           kind: 'error',
-          title: 'Error de red',
-          detail: 'No se pudo contactar con el buscador de direcciones. Revisa la conexión e inténtalo de nuevo.',
+          title: reason === 'network' ? 'Error de red' : 'Destino no encontrado',
+          detail:
+            reason === 'network'
+              ? 'No se pudo contactar con el buscador de direcciones. Revisa la conexión e inténtalo de nuevo.'
+              : 'Prueba con una ciudad más concreta o elige un resultado de la lista.',
         });
         return;
       }
 
-      const destResult = geoOutcome.r;
-      if (!destResult.ok) {
-        setRouteGenFeedback({
-          kind: 'error',
-          title: 'Destino no encontrado',
-          detail: 'Prueba con una ciudad más concreta o elige un resultado de la lista.',
-        });
-        return;
-      }
-
-      const { geoData, destCoords } = destResult;
+      const destCoords = formatOsrmDestCoords(destRes.lon, destRes.lat);
+      const geoData = [destRes.primary];
       const pos = gpsOutcome.p;
 
       const start = `${pos.coords.longitude},${pos.coords.latitude}`;
@@ -792,7 +736,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
         setRouteGenFeedback({
           kind: 'success',
           title: '¡Ruta lista!',
-          detail: geoData[0]?.display_name || destination
+          detail: destRes.displayName || geoData[0]?.display_name || destination
         });
       } else {
         setRouteGenFeedback({
@@ -893,7 +837,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   };
 
   const applyDestinationSuggestion = useCallback(
-    (item: { display_name?: string; lat?: string; lon?: string; address?: Record<string, string> }) => {
+    (item: NominatimItem) => {
       const name = (item.display_name || '').trim();
       setDestination(name);
       setDestinationPreview(name || null);
@@ -903,7 +847,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       const lon = parseFloat(String(item.lon));
       if (name && Number.isFinite(lat) && Number.isFinite(lon)) {
         destinationPickedRef.current = {
-          displayName: name,
+          label: name,
           lat,
           lon,
           address: item.address,
@@ -1784,7 +1728,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                             const v = e.target.value;
                             setDestination(v);
                             const p = destinationPickedRef.current;
-                            if (p && v.trim() !== p.displayName) {
+                            if (p && !destinationLabelsMatch(v, p.label)) {
                               destinationPickedRef.current = null;
                             }
                           }}
@@ -1840,7 +1784,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                       </div>
                       <button 
                         onClick={generateLocalRoute}
-                        disabled={!destination || loading}
+                        disabled={!destination.trim() || loading}
                         className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-sm font-bold transition-all shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2"
                       >
                         {loading ? <Clock className="animate-spin" size={18} /> : <MapIcon size={18} />}

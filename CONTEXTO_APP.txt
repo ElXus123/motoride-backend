@@ -1,5 +1,5 @@
 MotoRide — registro de contexto / cambios recientes
-Ultima actualizacion: 2026-04-16 (bloque 20 — CTA inicio, tutorial Chrome iOS, novedades simplificadas)
+Ultima actualizacion: 2026-04-18 (bloque 21 — planificador de rutas / destinos Nominatim)
 
 === Contacto y soporte ===
 - Correo publico de contacto: motorideapp1@gmail.com
@@ -186,3 +186,19 @@ Fecha: 2026-04-14
   - Bloque pantalla completa también si `isChromeIOS`. Mensajes de error/info de pantalla completa actualizados (Safari y Chrome iOS).
 - `src/components/WhatsNewModal.tsx`
   - `WHATS_NEW_VERSION` `2026.04.16`. Lista reducida a frases simples (`HIGHLIGHTS`), sin horas ni etiquetas novedad/arreglo; botón «Entendido».
+
+=== RESUMEN DESDE EL ULTIMO LOG (POST BLOQUE 20) ===
+
+21) PLANIFICADOR DE RUTAS (CREAR RUTA) — DESTINOS DESDE CERO
+- Nuevo: `src/lib/routePlannerDestination.ts`
+  - Unifica URL y parametros de busqueda Nominatim (`countrycodes=es`, `addressdetails`, limite coherente con la lista).
+  - Cabeceras `Accept-Language` y `User-Agent` con correo de contacto (politica de uso de Nominatim), alineado con `clientInfo` / MapView.
+  - `fetchNominatimSuggestions`: orden con `sortNominatimResults` / `pickBestNominatimResult` desde `nominatimPick.ts` (misma prioridad ciudad/municipio que al generar).
+  - `resolveDestinationForRouting`: prioridad (1) sugerencia elegida si el texto sigue coincidiendo (`destinationLabelsMatch` con normalizacion Unicode), (2) par lat/lon escrito (`tryParseCoordinatePair` con bbox Espana peninsular + islas), (3) geocodificacion con el mismo criterio de mejor resultado.
+  - `formatOsrmDestCoords` para cadena `lon,lat` hacia OSRM.
+- `src/components/Dashboard.tsx`
+  - Busqueda con debounce ~600 ms y `AbortController`: al cambiar el texto se cancela la peticion anterior (menos carreras y resultados desfasados).
+  - Ref `PickedDestination` con campo `label` (antes `displayName`); al editar el input se invalida la seleccion solo si ya no coincide el texto normalizado.
+  - `generateLocalRoute` usa solo `resolveDestinationForRouting` + GPS en paralelo; mensajes distinguiendo red vs destino no encontrado.
+- `src/components/WhatsNewModal.tsx`
+  - Version actualizada; entrada en tablon sobre el planificador / busqueda de destinos (sin admin ni premium).

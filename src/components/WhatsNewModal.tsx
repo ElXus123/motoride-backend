@@ -3,12 +3,14 @@ import { Check } from 'lucide-react';
 import appLogo from '../../ICONO.png';
 
 /** Sube este valor cuando cambien las novedades para volver a mostrar el aviso una vez por dispositivo. */
-export const WHATS_NEW_VERSION = '2026.04.16';
+export const WHATS_NEW_VERSION = '2026.04.18';
 
 const STORAGE_KEY = 'motoride_whats_new_seen_version';
 
 /** Textos breves para cualquier usuario (sin tecnicismos). */
 const HIGHLIGHTS: string[] = [
+  'Al crear una ruta, el buscador de destino va más fino: menos fallos al escribir y la ruta encaja con la sugerencia que elijas.',
+  'En el mapa, el bloque de marcha (velocidad, tiempo y clima) sigue compacto y legible al rodar.',
   'Tarjeta principal del inicio con el estilo actual de la app: más clara y cómoda en el móvil.',
   'Cabecera del inicio reorganizada en el teléfono: tu avatar y botones arriba; nivel, nombre y barra de experiencia abajo, a ancho completo.',
   'Si vas a rodar y puede llover en tu ruta o cerca de ti (unos 10 km), verás un aviso unos segundos. Conduce con cuidado.',
