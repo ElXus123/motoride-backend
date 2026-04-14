@@ -940,18 +940,18 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     <button
       type="button"
       onClick={onOpenProfile}
-      className="flex w-full min-w-0 flex-col gap-0 py-1 text-center rounded-[1.25rem] focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/70 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 sm:max-w-[min(100%,20rem)] sm:mx-auto"
+      className="flex w-full min-w-0 flex-col gap-0 py-0 text-center rounded-[1.1rem] focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/70 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 sm:max-w-[min(100%,20rem)] sm:mx-auto"
       aria-label={`Abrir perfil: nivel ${level} y experiencia hacia el nivel ${level + 1}`}
     >
-      <div className="relative flex flex-col gap-1.5 sm:gap-2 rounded-[1.15rem] sm:rounded-[1.35rem] border border-zinc-800 bg-zinc-900/80 px-2.5 py-2 sm:px-3.5 sm:py-3 transition-colors hover:border-zinc-700 hover:bg-zinc-900">
+      <div className="relative flex flex-col gap-1 rounded-[1.05rem] sm:rounded-[1.25rem] border border-zinc-800 bg-zinc-900/80 px-2.5 py-1.5 sm:px-3 sm:py-2 transition-colors hover:border-zinc-700 hover:bg-zinc-900">
         {isOffline && (
           <span
-            className="absolute right-2 top-2 h-1.5 w-1.5 animate-pulse rounded-full bg-red-500 ring-1 ring-red-900/40"
+            className="absolute right-1.5 top-1.5 h-1.5 w-1.5 animate-pulse rounded-full bg-red-500 ring-1 ring-red-900/40"
             title="Modo sin conexión"
           />
         )}
-        <div className="flex min-h-0 w-full min-w-0 flex-nowrap items-center justify-center gap-1.5 sm:gap-2 text-center">
-          <span className="shrink-0 whitespace-nowrap rounded-full bg-orange-500/15 px-1.5 py-0.5 sm:px-2 sm:py-1 text-[10px] sm:text-[11px] font-black text-orange-400">
+        <div className="flex min-h-0 w-full min-w-0 flex-nowrap items-center justify-center gap-1.5 text-center leading-none">
+          <span className="shrink-0 whitespace-nowrap rounded-full bg-orange-500/15 px-2 py-0.5 text-[11px] font-black text-orange-400">
             Lv. {level}
           </span>
           {isPremiumUser && (
@@ -959,12 +959,12 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
               <PremiumBadge compact />
             </span>
           )}
-          <p className="min-w-0 flex-1 truncate text-center text-xs font-bold text-white sm:text-sm sm:max-w-[18rem]">
+          <p className="min-w-0 flex-1 truncate text-center text-sm font-bold text-white leading-tight sm:max-w-[18rem]">
             {displayName}
           </p>
         </div>
         <div
-          className="h-1.5 w-full shrink-0 overflow-hidden rounded-full bg-zinc-800/95 ring-1 ring-zinc-700/60 pointer-events-none"
+          className="h-1 w-full shrink-0 overflow-hidden rounded-full bg-zinc-800/95 ring-1 ring-zinc-700/60 pointer-events-none sm:h-1.5"
           aria-hidden
         >
           <div
@@ -1028,7 +1028,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       {/* Header — móvil: fila avatar+acciones y tarjeta a ancho completo; sm+: tres columnas */}
       <header className="sticky top-0 z-30 bg-zinc-950/80 backdrop-blur-md border-b border-zinc-900 pl-[max(1rem,env(safe-area-inset-left,0px))] pr-[max(1rem,env(safe-area-inset-right,0px))] sm:pl-[max(1.5rem,env(safe-area-inset-left,0px))] sm:pr-[max(1.5rem,env(safe-area-inset-right,0px))] pt-[max(1rem,env(safe-area-inset-top,0px))] pb-3 sm:pb-4">
         <div className="max-w-5xl mx-auto">
-          <div className="flex flex-col gap-2 sm:hidden">
+          <div className="flex flex-col gap-1.5 sm:hidden">
             <div className="flex items-center justify-between gap-2 min-w-0">
               {renderHeaderAvatar()}
               <div className="flex items-center gap-1 shrink-0">{renderHeaderActions()}</div>
