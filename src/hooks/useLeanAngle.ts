@@ -204,18 +204,19 @@ export const useLeanAngle = (speedMps?: number | null) => {
           : typeof window !== 'undefined' && typeof window.orientation === 'number'
             ? window.orientation
             : 0;
+      const normalizedOrientation = ((orientationAngle % 360) + 360) % 360;
 
       let roll = 0;
       if (isLandscape) {
-        const beta = event.beta ?? 0;
-        const gamma = event.gamma ?? 0;
-        if (Math.abs(gamma) > Math.abs(beta) * 1.15) {
-          roll = orientationAngle === 90 || orientationAngle === -270 ? gamma : -gamma;
+        // En horizontal, gamma representa la inclinación izquierda/derecha de forma más estable entre dispositivos.
+        // Algunos móviles invierten el signo en landscape-secondary (270º).
+        const gamma = event.gamma;
+        if (gamma != null && Number.isFinite(gamma)) {
+          const sign = normalizedOrientation === 270 ? -1 : 1;
+          roll = gamma * sign;
         } else {
-          roll = beta;
-          if (orientationAngle === 270 || orientationAngle === -90) {
-            roll = -roll;
-          }
+          const beta = event.beta ?? 0;
+          roll = normalizedOrientation === 270 ? -beta : beta;
         }
       } else {
         roll = event.gamma || 0;
@@ -234,7 +235,18 @@ export const useLeanAngle = (speedMps?: number | null) => {
       const z = acc.z ?? 0;
       const norm = Math.sqrt(x * x + y * y + z * z);
       if (!norm) return;
-      const roll = Math.max(-60, Math.min(60, (Math.asin(x / norm) * 180) / Math.PI));
+      const orientationAngle =
+        typeof screen !== 'undefined' && screen.orientation && typeof screen.orientation.angle === 'number'
+          ? screen.orientation.angle
+          : typeof window !== 'undefined' && typeof window.orientation === 'number'
+            ? window.orientation
+            : 0;
+      const normalizedOrientation = ((orientationAngle % 360) + 360) % 360;
+      let roll = (Math.asin(x / norm) * 180) / Math.PI;
+      if (window.innerWidth > window.innerHeight && normalizedOrientation === 270) {
+        roll = -roll;
+      }
+      roll = Math.max(-60, Math.min(60, roll));
       processRollSample(roll);
     };
 

@@ -47,7 +47,8 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
           const snaps = await Promise.all(chunk.map((fid) => getDoc(doc(db, 'users', fid))));
           for (const s of snaps) {
             if (s.exists()) {
-              allFriends.push({ id: s.id, uid: s.id, ...s.data() });
+              // El ID canónico de Firestore debe prevalecer sobre cualquier campo `uid` legado del documento.
+              allFriends.push({ ...s.data(), id: s.id, uid: s.id });
             }
           }
         }
@@ -71,7 +72,7 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
       for (const chunk of chunks) {
         const snaps = await Promise.all(chunk.map((fid) => getDoc(doc(db, 'users', fid))));
         for (const s of snaps) {
-          if (s.exists()) all.push({ id: s.id, uid: s.id, ...s.data() });
+          if (s.exists()) all.push({ ...s.data(), id: s.id, uid: s.id });
         }
       }
       setIncomingUsers(all);
@@ -97,12 +98,14 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
         limit(20)
       );
       const snap = await getDocs(q);
-      let results = snap.docs.map(d => ({ id: d.id, ...d.data() } as any)).filter(u => u.id !== user?.uid);
+      let results = snap.docs
+        .map((d) => ({ ...(d.data() as any), id: d.id, uid: d.id } as any))
+        .filter((u) => u.id !== user?.uid);
       if (results.length < 5) {
         // Fallback: wider search for contains (still capped).
         const wide = await getDocs(query(collection(db, 'users'), limit(120)));
         const merged = wide.docs
-          .map(d => ({ id: d.id, ...d.data() } as any))
+          .map((d) => ({ ...(d.data() as any), id: d.id, uid: d.id } as any))
           .filter(u => u.id !== user?.uid && normalize(u.displayName || '').includes(qText));
         const map = new Map<string, any>();
         [...results, ...merged].forEach((u) => map.set(u.uid || u.id, u));

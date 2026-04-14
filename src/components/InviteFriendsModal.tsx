@@ -37,7 +37,10 @@ export default function InviteFriendsModal({ open, onClose, groupId, groupName, 
           const cleanId = String(id || '').trim();
           if (!cleanId) continue;
           const r = await getDoc(doc(db, 'users', cleanId));
-          if (r.exists()) rows.push({ uid: cleanId, ...r.data() });
+          if (r.exists()) {
+            // El id del documento de Firestore es la referencia canónica para amistades/invitaciones.
+            rows.push({ ...(r.data() as any), id: cleanId, uid: cleanId });
+          }
         }
         setFriends(rows);
       } catch (e) {

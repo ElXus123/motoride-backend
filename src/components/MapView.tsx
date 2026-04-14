@@ -699,6 +699,7 @@ export default function MapView({
   const enterMirrorLinkMode = () => void enterTouchLockMode('mirrorlink');
   const [searchDestination, setSearchDestination] = useState('');
   const [searchSuggestions, setSearchSuggestions] = useState<any[]>([]);
+  const selectedSearchSuggestionRef = useRef<{ displayName: string; lat: number; lon: number } | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [shared, setShared] = useState(false);
   const [showInviteFriends, setShowInviteFriends] = useState(false);
@@ -1787,27 +1788,61 @@ export default function MapView({
   };
 
   const generateRouteFromSearch = async () => {
-    if (!searchDestination || !user) return;
+    const typedDestination = searchDestination.trim();
+    if (!typedDestination || !user) return;
     setIsSearching(true);
     try {
-      const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchDestination)}&limit=1&countrycodes=es&addressdetails=1`;
-      const geoData = await requestJson<any[]>(geocodeUrl, {
-        timeoutMs: 10000,
-        retries: 1,
-        backoffMs: 600,
-        headers: {
-          'User-Agent': 'MoteroApp/1.0 (contact: motorideapp1@gmail.com)'
-        }
-      });
-      
-      let destCoords = "";
-      if (geoData && geoData.length > 0) {
-        destCoords = `${geoData[0].lon},${geoData[0].lat}`;
-      } else if (searchDestination.includes(',')) {
-        destCoords = searchDestination;
+      const selected = selectedSearchSuggestionRef.current;
+      const useSelectedSuggestion =
+        selected &&
+        selected.displayName === typedDestination &&
+        Number.isFinite(selected.lat) &&
+        Number.isFinite(selected.lon);
+
+      let destCoords = '';
+      if (useSelectedSuggestion) {
+        destCoords = `${selected.lon},${selected.lat}`;
       } else {
-        alert('No se ha podido encontrar el destino. Intenta ser más específico.');
-        setIsSearching(false);
+        const coordParts = typedDestination.split(',').map((p) => p.trim());
+        if (coordParts.length >= 2) {
+          const lon = Number.parseFloat(coordParts[0]);
+          const lat = Number.parseFloat(coordParts[1]);
+          if (Number.isFinite(lat) && Number.isFinite(lon)) {
+            destCoords = `${lon},${lat}`;
+          }
+        }
+      }
+
+      if (!destCoords) {
+        const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(typedDestination)}&limit=1&countrycodes=es&addressdetails=1`;
+        const geoData = await requestJson<any[]>(geocodeUrl, {
+          timeoutMs: 10000,
+          retries: 1,
+          backoffMs: 600,
+          headers: {
+            'User-Agent': 'MoteroApp/1.0 (contact: motorideapp1@gmail.com)'
+          }
+        });
+        const first = Array.isArray(geoData) ? geoData[0] : null;
+        const lat = Number.parseFloat(String(first?.lat ?? ''));
+        const lon = Number.parseFloat(String(first?.lon ?? ''));
+        if (Number.isFinite(lat) && Number.isFinite(lon)) {
+          destCoords = `${lon},${lat}`;
+          if (typeof first?.display_name === 'string' && first.display_name.trim().length > 0) {
+            setSearchDestination(first.display_name.trim());
+            selectedSearchSuggestionRef.current = {
+              displayName: first.display_name.trim(),
+              lat,
+              lon,
+            };
+          } else {
+            selectedSearchSuggestionRef.current = null;
+          }
+        }
+      }
+
+      if (!destCoords) {
+        alert('No se ha podido encontrar el destino. Intenta elegir una sugerencia o usar coordenadas "lon,lat".');
         return;
       }
 
@@ -1827,6 +1862,7 @@ export default function MapView({
           setShowSearchModal(false);
           setSearchDestination('');
           setSearchSuggestions([]);
+          selectedSearchSuggestionRef.current = null;
         } catch (error) {
           handleFirestoreError(error, OperationType.UPDATE, `groups/${groupId}`);
         }
@@ -3163,7 +3199,14 @@ export default function MapView({
                       <input 
                         placeholder="¿A dónde quieres ir?" 
                         value={searchDestination}
-                        onChange={(e) => setSearchDestination(e.target.value)}
+                        onChange={(e) => {
+                          const next = e.target.value;
+                          setSearchDestination(next);
+                          const selected = selectedSearchSuggestionRef.current;
+                          if (selected && selected.displayName !== next.trim()) {
+                            selectedSearchSuggestionRef.current = null;
+                          }
+                        }}
                         onKeyDown={(e) => e.key === 'Enter' && generateRouteFromSearch()}
                         className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-3 text-sm text-white outline-none focus:border-orange-500 transition-all"
                       />
@@ -3182,8 +3225,16 @@ export default function MapView({
                         <button
                           key={`${item.place_id || idx}`}
                           onClick={() => {
-                            setSearchDestination(item.display_name || '');
+                            const displayName = String(item.display_name || '').trim();
+                            const lat = Number.parseFloat(String(item.lat ?? ''));
+                            const lon = Number.parseFloat(String(item.lon ?? ''));
+                            setSearchDestination(displayName);
                             setSearchSuggestions([]);
+                            if (displayName && Number.isFinite(lat) && Number.isFinite(lon)) {
+                              selectedSearchSuggestionRef.current = { displayName, lat, lon };
+                            } else {
+                              selectedSearchSuggestionRef.current = null;
+                            }
                           }}
                           className="w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800 transition-colors"
                         >
