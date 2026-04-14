@@ -366,7 +366,7 @@ export default function MapView({
     return () => window.removeEventListener('motoride:route-back', onRouteBack);
   }, []);
 
-  // Rain Viewer: load real tile path from API (paths are hashed; /v2/radar/0 is invalid). Refresh every 10 min.
+  // Rain Viewer: load real tile path from API (paths are hashed; /v2/radar/0 is invalid). Refresh every 5 min.
   useEffect(() => {
     if (!showWeather) {
       setRainRadar(null);
@@ -388,7 +388,7 @@ export default function MapView({
       }
     };
     load();
-    const id = window.setInterval(load, 10 * 60 * 1000);
+    const id = window.setInterval(load, 5 * 60 * 1000);
     return () => {
       cancelled = true;
       window.clearInterval(id);
@@ -968,10 +968,11 @@ export default function MapView({
     }
   };
 
-  // Keep screen awake while recording route or in pocket mode (Wake Lock API: iOS 16.4+ Safari / PWA; requiere gesto en muchos dispositivos).
+  // Mantener pantalla encendida mientras el mapa con GPS está abierto (no solo grabación / bolsillo).
+  // Screen Wake Lock: Chrome/Android; Safari iOS 16.4+ (incl. PWA a pantalla completa). A veces hace falta un toque para que enganche.
   useEffect(() => {
     let cancelled = false;
-    const shouldKeepAwake = isRecording || isPocketMode;
+    const shouldKeepAwake = true;
     const nav = navigator as Navigator & { wakeLock?: { request: (type: 'screen') => Promise<any> } };
 
     const requestWakeLock = async () => {
@@ -1029,7 +1030,7 @@ export default function MapView({
         wakeLockRef.current = null;
       }
     };
-  }, [isRecording, isPocketMode]);
+  }, []);
 
   // Leave group when route view is closed/app is backgrounded or closed.
   useEffect(() => {
@@ -2113,7 +2114,7 @@ export default function MapView({
                 </button>
                 {showWeather && weatherFetchFailed && (
                   <p className="text-[11px] text-amber-400/90 px-3 -mt-2 mb-1 leading-snug">
-                    No se pudo cargar el radar ahora. Revisa la conexión; se reintentará al abrir ajustes o cada 10 min.
+                    No se pudo cargar el radar ahora. Revisa la conexión; se reintentará al abrir ajustes o cada 5 min.
                   </p>
                 )}
                 {showWeather && !weatherFetchFailed && rainRadar && !weatherTilesLoaded && (
