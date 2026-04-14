@@ -62,9 +62,14 @@ export default function InvitesMailboxModal({ open, onClose, onJoinGroup }: Prop
     }
   };
 
-  const join = (inv: RideInviteDoc) => {
+  const join = async (inv: RideInviteDoc) => {
     const gid = String(inv.groupId || '').trim().toUpperCase();
-    if (gid.length !== 6) return;
+    if (gid.length !== 6 || !user?.uid) return;
+    try {
+      await deleteDoc(doc(db, 'users', user.uid, 'invites', inv.id));
+    } catch (e) {
+      handleFirestoreError(e, OperationType.DELETE, `users/${user.uid}/invites/${inv.id}`);
+    }
     onClose();
     onJoinGroup(gid);
   };
@@ -119,6 +124,9 @@ export default function InvitesMailboxModal({ open, onClose, onJoinGroup }: Prop
                       <div className="min-w-0">
                         <p className="font-bold text-white truncate">{inv.groupName || 'Ruta'}</p>
                         <p className="text-[10px] text-zinc-500 font-mono">Código {inv.groupId}</p>
+                        {inv.kind === 'scheduled_ride' && (
+                          <p className="text-[10px] font-bold text-sky-400 mt-1">Ruta programada</p>
+                        )}
                         <p className="text-[10px] text-zinc-600 mt-1">
                           {inv.sentAt
                             ? new Date(inv.sentAt).toLocaleString([], {
@@ -144,7 +152,7 @@ export default function InvitesMailboxModal({ open, onClose, onJoinGroup }: Prop
                     </div>
                     <button
                       type="button"
-                      onClick={() => join(inv)}
+                      onClick={() => void join(inv)}
                       className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold flex items-center justify-center gap-2"
                     >
                       Unirse a la ruta

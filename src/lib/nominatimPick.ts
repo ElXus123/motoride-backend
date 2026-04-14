@@ -1,6 +1,9 @@
 /**
  * Elige el mejor resultado de Nominatim cuando la consulta libre devuelve
  * un POI aleatorio en lugar de la ciudad (p. ej. "Huesca, Aragón, España").
+ *
+ * Importante: NO usar `string.includes` para tokens de lugar — "huesca" coincidiría
+ * dentro de "Adahuesca" y desviaría la ruta. Se usa coincidencia por límite de palabra.
  */
 
 export type NominatimItem = {
@@ -13,10 +16,59 @@ export type NominatimItem = {
   address?: Record<string, string>;
 };
 
+/** Letra (incl. ñ / acentos) para detectar si un carácter es parte de una palabra. */
+const IS_LETTER = /[\p{L}]/u;
+
+/**
+ * `needle` aparece en `haystack` como palabra completa (no como subcadena de otra palabra).
+ * Evita que "huesca" premie a "Adahuesca".
+ */
+export function matchesAsWholeWord(haystack: string, needle: string): boolean {
+  if (!needle || needle.length < 2) return false;
+  const h = haystack.toLowerCase();
+  const n = needle.toLowerCase();
+  let from = 0;
+  while (from <= h.length - n.length) {
+    const i = h.indexOf(n, from);
+    if (i < 0) break;
+    const beforeOk = i === 0 || !IS_LETTER.test(h[i - 1]!);
+    const afterOk = i + n.length >= h.length || !IS_LETTER.test(h[i + n.length]!);
+    if (beforeOk && afterOk) return true;
+    from = i + 1;
+  }
+  return false;
+}
+
+/**
+ * Término de lugar que el usuario quiere (p. ej. "Huesca, Aragón, España" → "huesca").
+ * Con coma: se toma la primera palabra del primer segmento (no "La Rioja" entero: "La, Rioja" → "la" evitado con artículos).
+ */
+function primaryPlaceToken(queryLower: string): string {
+  const trimmed = queryLower.trim();
+  const firstPart = trimmed.split(',')[0]?.trim() || trimmed;
+  const words = firstPart.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return '';
+
+  if (trimmed.includes(',')) {
+    let i = 0;
+    const articles = ['la', 'las', 'el', 'los'];
+    if (words[0] && articles.includes(words[0].toLowerCase()) && words[1]) i = 1;
+    return (words[i] || words[0] || '').toLowerCase();
+  }
+
+  const stop = new Set(['de', 'la', 'el', 'los', 'las', 'del', 'y']);
+  const significant = words.filter((w) => w.length >= 3 && !stop.has(w.toLowerCase()));
+  if (words[0]?.toLowerCase() === 'provincia' || words[0]?.toLowerCase() === 'comarca') {
+    const last = significant[significant.length - 1];
+    if (last) return last.toLowerCase();
+  }
+  return (significant[0] || words[0] || '').toLowerCase();
+}
+
 function scoreItem(item: NominatimItem, queryLower: string): number {
   let s = 0;
   const imp = Number(item.importance);
-  if (Number.isFinite(imp)) s += imp * 3;
+  if (Number.isFinite(imp)) s += imp * 4;
 
   const t = (item.type || '').toLowerCase();
   const c = (item.class || '').toLowerCase();
@@ -29,13 +81,43 @@ function scoreItem(item: NominatimItem, queryLower: string): number {
   const city = (addr.city || addr.town || addr.village || addr.municipality || '').toLowerCase();
   const state = (addr.state || addr.region || '').toLowerCase();
   const q = queryLower;
-  if (city && q.includes(city)) s += 6;
-  if (state && q.includes(state)) s += 3;
+  const primary = primaryPlaceToken(q);
+
+  // Coincidencia exacta del lugar principal con la ciudad/municipio del resultado (p. ej. Huesca ≠ Adahuesca).
+  const placeFields = [
+    addr.city,
+    addr.town,
+    addr.village,
+    addr.municipality,
+    addr.city_district,
+  ]
+    .filter(Boolean)
+    .map((x) => String(x).toLowerCase());
+  if (primary.length >= 3) {
+    for (const pl of placeFields) {
+      if (pl === primary) {
+        s += 28;
+        break;
+      }
+    }
+    // Penalizar nombres que contienen el token como subcadena pero no son el mismo sitio (Adahuesca vs Huesca).
+    for (const pl of placeFields) {
+      if (pl.length > primary.length && pl.includes(primary) && pl !== primary) {
+        s -= 22;
+        break;
+      }
+    }
+  }
+
+  if (city && matchesAsWholeWord(city, primary)) s += 6;
+  else if (city && q.includes(city) && matchesAsWholeWord(q, city)) s += 6;
+
+  if (state && matchesAsWholeWord(q, state)) s += 3;
 
   const name = (item.display_name || '').toLowerCase();
   const parts = q.split(/[,\s]+/).filter((p) => p.length > 2);
   for (const p of parts) {
-    if (name.includes(p)) s += 1.5;
+    if (matchesAsWholeWord(name, p)) s += 2;
   }
 
   return s;

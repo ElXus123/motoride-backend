@@ -13,9 +13,18 @@ type Props = {
   groupId: string;
   groupName: string;
   memberUids: string[];
+  /** Por defecto sesión en vivo; `scheduled_ride` para rutas programadas desde el inicio. */
+  inviteKind?: 'live_ride' | 'scheduled_ride';
 };
 
-export default function InviteFriendsModal({ open, onClose, groupId, groupName, memberUids }: Props) {
+export default function InviteFriendsModal({
+  open,
+  onClose,
+  groupId,
+  groupName,
+  memberUids,
+  inviteKind = 'live_ride',
+}: Props) {
   const { user } = useAuth();
   const showMessage = useAppMessage();
   const [friends, setFriends] = useState<any[]>([]);
@@ -99,7 +108,7 @@ export default function InviteFriendsModal({ open, onClose, groupId, groupName, 
           groupId: gid,
           groupName: safeName,
           sentAt: Date.now(),
-          kind: 'live_ride',
+          kind: inviteKind,
         },
         { merge: true }
       );
@@ -139,7 +148,7 @@ export default function InviteFriendsModal({ open, onClose, groupId, groupName, 
               groupId: gid,
               groupName: safeName,
               sentAt: Date.now(),
-              kind: 'live_ride',
+              kind: inviteKind,
             },
             { merge: true }
           );
@@ -199,7 +208,17 @@ export default function InviteFriendsModal({ open, onClose, groupId, groupName, 
 
             <div className="px-5 py-3 overflow-y-auto flex-1 custom-scrollbar">
               <p className="text-xs text-zinc-400 mb-3 leading-relaxed">
-                La invitación se guarda en su buzón (icono arriba a la derecha en el inicio) y pueden unirse sin salir de MotoRide.
+                {inviteKind === 'scheduled_ride' ? (
+                  <>
+                    Invita a tus amigos a esta <span className="text-orange-400 font-semibold">ruta programada</span>. La
+                    invitación llega a su bandeja (icono arriba a la derecha en el inicio) y pueden unirse con el código.
+                  </>
+                ) : (
+                  <>
+                    La invitación se guarda en su buzón (icono arriba a la derecha en el inicio) y pueden unirse sin salir
+                    de MotoRide.
+                  </>
+                )}
               </p>
               {loading ? (
                 <div className="flex flex-col items-center justify-center py-12 gap-3 text-zinc-500">

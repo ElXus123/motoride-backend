@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { doc, getDoc, updateDoc, deleteField, arrayUnion } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, deleteDoc, deleteField, arrayUnion } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppMessage } from '../contexts/AppMessageContext';
@@ -17,6 +17,20 @@ type Props = {
   /** Si ya estás en esa ruta, no molestar */
   activeGroupId: string | null;
 };
+
+/** Borra `rideInvitePending` y, si existe, la entrada en `users/{uid}/invites`. */
+async function clearPendingInviteForUser(
+  userUid: string,
+  pending: Pending,
+  groupIdUpper: string
+) {
+  await updateDoc(doc(db, 'users', userUid), { rideInvitePending: deleteField() });
+  const from = String(pending.fromUid || '').trim();
+  if (from) {
+    const inviteDocId = `${from}_${groupIdUpper}`;
+    await deleteDoc(doc(db, 'users', userUid, 'invites', inviteDocId)).catch(() => {});
+  }
+}
 
 /**
  * Invitación a ruta en tiempo real: debe mostrarse aunque el usuario esté en el mapa
@@ -47,11 +61,10 @@ export default function PendingRideInviteOverlay({ onJoinGroup, activeGroupId }:
 
   useEffect(() => {
     const gid = pending?.groupId ? String(pending.groupId).toUpperCase().trim() : '';
-    if (!gid || !activeGroupId) return;
-    if (gid === activeGroupId.toUpperCase().trim() && user?.uid) {
-      void updateDoc(doc(db, 'users', user.uid), { rideInvitePending: deleteField() }).catch(() => {});
-    }
-  }, [pending?.groupId, activeGroupId, user?.uid]);
+    if (!gid || gid.length !== 6 || !activeGroupId || !user?.uid || !pending) return;
+    if (gid !== activeGroupId.toUpperCase().trim()) return;
+    void clearPendingInviteForUser(user.uid, pending, gid).catch(() => {});
+  }, [pending, activeGroupId, user?.uid]);
 
   if (!user || !pending?.groupId) return null;
 
@@ -60,7 +73,7 @@ export default function PendingRideInviteOverlay({ onJoinGroup, activeGroupId }:
 
   const dismiss = async () => {
     try {
-      await updateDoc(doc(db, 'users', user.uid), { rideInvitePending: deleteField() });
+      await clearPendingInviteForUser(user.uid, pending, gid);
     } catch (e) {
       handleFirestoreError(e, OperationType.UPDATE, `users/${user.uid}`);
     }
@@ -76,7 +89,7 @@ export default function PendingRideInviteOverlay({ onJoinGroup, activeGroupId }:
         return;
       }
       await updateDoc(gRef, { members: arrayUnion(user.uid) });
-      await updateDoc(doc(db, 'users', user.uid), { rideInvitePending: deleteField() });
+      await clearPendingInviteForUser(user.uid, pending, gid);
       onJoinGroup(gid);
     } catch (e: unknown) {
       const code = typeof e === 'object' && e && 'code' in e ? String((e as { code: string }).code) : '';

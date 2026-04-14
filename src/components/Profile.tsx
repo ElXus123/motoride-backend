@@ -15,8 +15,9 @@ import {
 import { updateProfile } from 'firebase/auth';
 import { db, auth, logOut, handleFirestoreError, OperationType } from '../firebase';
 import { calculateLevel } from '../lib/utils';
-import { ArrowLeft, Camera, LogOut, ChevronDown, ChevronUp, Activity, Trash2, Play, Clock } from 'lucide-react';
+import { ArrowLeft, Camera, LogOut, ChevronDown, ChevronUp, Activity, Trash2, Play, Clock, Shield } from 'lucide-react';
 import PremiumBadge from './PremiumBadge';
+import AdminPointsPanel from './AdminPointsPanel';
 
 type Props = {
   onBack: () => void;
@@ -36,6 +37,9 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
   const [indexBuilding, setIndexBuilding] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [showAdminPanel, setShowAdminPanel] = useState(false);
+
+  const isAdmin = user?.email?.toLowerCase() === 'juarp123@gmail.com';
 
   useEffect(() => {
     if (!user) return;
@@ -162,11 +166,23 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
   return (
     <div className="min-h-dvh bg-zinc-950 text-white pl-[max(1.5rem,env(safe-area-inset-left,0px))] pr-[max(1.5rem,env(safe-area-inset-right,0px))] pt-[max(1.5rem,env(safe-area-inset-top,0px))] pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]">
       <div className="max-w-md mx-auto pt-4 pb-8">
-        <div className="flex items-center gap-4 mb-8">
-          <button onClick={onBack} className="p-2 bg-zinc-900 rounded-full hover:bg-zinc-800 transition-colors">
-            <ArrowLeft size={20} />
-          </button>
-          <h1 className="text-2xl font-bold">Mi Perfil</h1>
+        <div className="flex items-center justify-between gap-3 mb-8">
+          <div className="flex items-center gap-4 min-w-0">
+            <button onClick={onBack} className="p-2 bg-zinc-900 rounded-full hover:bg-zinc-800 transition-colors shrink-0">
+              <ArrowLeft size={20} />
+            </button>
+            <h1 className="text-2xl font-bold truncate">Mi Perfil</h1>
+          </div>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => setShowAdminPanel(true)}
+              className="p-2.5 bg-zinc-900 border border-zinc-800 rounded-full hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-orange-400 shrink-0"
+              title="Panel de administración"
+            >
+              <Shield size={20} />
+            </button>
+          )}
         </div>
 
         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-3xl flex flex-col items-center">
@@ -278,19 +294,19 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
             {historyOpen ? <ChevronUp size={20} className="text-zinc-500" /> : <ChevronDown size={20} className="text-zinc-500" />}
           </button>
           {historyOpen && (
-            <div className="px-4 pb-4 border-t border-zinc-800">
+            <div className="border-t border-zinc-800 px-3 sm:px-5 pb-5 pt-4">
               {indexBuilding && (
-                <div className="bg-blue-500/10 border border-blue-500/20 p-3 rounded-xl flex items-center gap-2 my-3">
+                <div className="bg-blue-500/10 border border-blue-500/20 p-3 rounded-xl flex items-center gap-2 mb-4">
                   <Clock className="text-blue-400 shrink-0" size={16} />
                   <p className="text-xs text-blue-400">Cargando historial…</p>
                 </div>
               )}
-              <div className="space-y-3 max-h-[55vh] overflow-y-auto pr-1">
+              <div className="space-y-4 max-h-[55vh] overflow-y-auto overflow-x-hidden px-0.5 sm:px-0">
                 {rideHistory.length > 0 ? (
                   rideHistory.map((ride) => (
                     <div
                       key={ride.id}
-                      className="bg-zinc-950 border border-zinc-800 p-4 rounded-2xl relative group"
+                      className="bg-zinc-950 border border-zinc-800 p-4 sm:p-5 rounded-2xl relative group"
                     >
                       <div className="absolute top-3 right-3">
                         {deletingId === ride.id ? (
@@ -356,6 +372,8 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
           Cerrar Sesión
         </button>
       </div>
+
+      {showAdminPanel && isAdmin && <AdminPointsPanel onClose={() => setShowAdminPanel(false)} />}
     </div>
   );
 }

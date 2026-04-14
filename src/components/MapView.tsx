@@ -525,6 +525,7 @@ export default function MapView({
   const leaveInProgressRef = useRef(false);
   const wakeLockRef = useRef<any>(null);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const [exitLeaving, setExitLeaving] = useState(false);
   const [showLeanBetaNotice, setShowLeanBetaNotice] = useState(false);
 
   // Ensure score is always an integer, rounding up if necessary
@@ -534,8 +535,11 @@ export default function MapView({
     }
   }, [score]);
 
+  const confirmLeaveInFlightRef = useRef(false);
+
   useEffect(() => {
     const onRouteBack = () => {
+      if (hasExplicitlyLeftRef.current || confirmLeaveInFlightRef.current || leaveInProgressRef.current) return;
       setShowExitConfirm((wasOpen) => (wasOpen ? false : true));
     };
     window.addEventListener('motoride:route-back', onRouteBack);
@@ -1351,13 +1355,23 @@ export default function MapView({
   };
 
   const confirmLeaveRoute = async () => {
+    if (confirmLeaveInFlightRef.current) return;
+    confirmLeaveInFlightRef.current = true;
+    setExitLeaving(true);
     setShowExitConfirm(false);
     hasExplicitlyLeftRef.current = true;
-    await deleteGroupIfHost('leave-route');
-    prepareHistoryLeave?.();
-    onLeave();
-    if (window.history.state && (window.history.state as { motorideRoute?: boolean }).motorideRoute) {
-      window.history.back();
+    try {
+      await deleteGroupIfHost('leave-route');
+    } catch (e) {
+      console.error('confirmLeaveRoute:', e);
+    } finally {
+      prepareHistoryLeave?.();
+      onLeave();
+      if (window.history.state && (window.history.state as { motorideRoute?: boolean }).motorideRoute) {
+        window.history.back();
+      }
+      confirmLeaveInFlightRef.current = false;
+      setExitLeaving(false);
     }
   };
 
@@ -3145,8 +3159,12 @@ export default function MapView({
           role="dialog"
           aria-modal="true"
           aria-labelledby="exit-route-title"
+          onClick={() => setShowExitConfirm(false)}
         >
-          <div className="bg-zinc-900 border border-zinc-700 rounded-3xl p-6 max-w-sm w-full shadow-2xl">
+          <div
+            className="bg-zinc-900 border border-zinc-700 rounded-3xl p-6 max-w-sm w-full shadow-2xl pointer-events-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
             <h2 id="exit-route-title" className="text-lg font-black text-white mb-2">
               ¿Salir de la ruta?
             </h2>
@@ -3163,10 +3181,15 @@ export default function MapView({
               </button>
               <button
                 type="button"
-                onClick={() => void confirmLeaveRoute()}
-                className="w-full sm:w-auto px-4 py-3 rounded-2xl font-bold text-white bg-orange-600 hover:bg-orange-500 transition-colors"
+                disabled={exitLeaving}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  void confirmLeaveRoute();
+                }}
+                className="w-full sm:w-auto px-4 py-3 rounded-2xl font-bold text-white bg-orange-600 hover:bg-orange-500 transition-colors disabled:opacity-60 disabled:pointer-events-none"
               >
-                Salir
+                {exitLeaving ? 'Saliendo…' : 'Salir'}
               </button>
             </div>
           </div>
