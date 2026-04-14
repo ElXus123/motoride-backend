@@ -63,7 +63,7 @@ export const useLeanAngle = (speedMps?: number | null) => {
   }, []);
 
   const [rawAngle, setRawAngle] = useState(0);
-  const lastOrientationUpdateRef = useRef(0);
+  const lastOrientationUpdateRef = useRef(Date.now());
 
   useEffect(() => {
     try {
@@ -205,10 +205,10 @@ export const useLeanAngle = (speedMps?: number | null) => {
             ? window.orientation
             : 0;
 
+      const beta = event.beta ?? 0;
+      const gamma = event.gamma ?? 0;
       let roll = 0;
       if (isLandscape) {
-        const beta = event.beta ?? 0;
-        const gamma = event.gamma ?? 0;
         if (Math.abs(gamma) > Math.abs(beta) * 1.15) {
           roll = orientationAngle === 90 || orientationAngle === -270 ? gamma : -gamma;
         } else {
@@ -218,7 +218,10 @@ export const useLeanAngle = (speedMps?: number | null) => {
           }
         }
       } else {
-        roll = event.gamma || 0;
+        roll = gamma;
+        if (orientationAngle === 180 || orientationAngle === -180) {
+          roll = -roll;
+        }
       }
 
       processRollSample(roll);
@@ -229,12 +232,31 @@ export const useLeanAngle = (speedMps?: number | null) => {
       if (Date.now() - lastOrientationUpdateRef.current < 1500) return;
       const acc = event.accelerationIncludingGravity;
       if (!acc) return;
-      const x = acc.x ?? 0;
-      const y = acc.y ?? 0;
-      const z = acc.z ?? 0;
-      const norm = Math.sqrt(x * x + y * y + z * z);
+      const ax = acc.x ?? 0;
+      const ay = acc.y ?? 0;
+      const az = acc.z ?? 0;
+      const norm = Math.sqrt(ax * ax + ay * ay + az * az);
       if (!norm) return;
-      const roll = Math.max(-60, Math.min(60, (Math.asin(x / norm) * 180) / Math.PI));
+
+      const orientationAngle =
+        typeof screen !== 'undefined' && screen.orientation && typeof screen.orientation.angle === 'number'
+          ? screen.orientation.angle
+          : typeof window !== 'undefined' && typeof window.orientation === 'number'
+            ? window.orientation
+            : 0;
+      const isLandscape = window.innerWidth > window.innerHeight;
+
+      let lateral: number;
+      if (isLandscape) {
+        lateral = orientationAngle === 90 || orientationAngle === -270 ? ay : -ay;
+      } else {
+        lateral = ax;
+        if (orientationAngle === 180 || orientationAngle === -180) {
+          lateral = -lateral;
+        }
+      }
+
+      const roll = Math.max(-60, Math.min(60, (Math.asin(lateral / norm) * 180) / Math.PI));
       processRollSample(roll);
     };
 

@@ -37,7 +37,7 @@ export default function InviteFriendsModal({ open, onClose, groupId, groupName, 
           const cleanId = String(id || '').trim();
           if (!cleanId) continue;
           const r = await getDoc(doc(db, 'users', cleanId));
-          if (r.exists()) rows.push({ uid: cleanId, ...r.data() });
+          if (r.exists()) rows.push({ ...r.data(), uid: cleanId, id: cleanId });
         }
         setFriends(rows);
       } catch (e) {
