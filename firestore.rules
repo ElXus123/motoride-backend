@@ -55,6 +55,7 @@ service cloud.firestore {
              (!('friendRequestsIncoming' in data) || data.friendRequestsIncoming is list) &&
              (!('friendRequestsOutgoing' in data) || data.friendRequestsOutgoing is list) &&
              isValidOptionalBool('isPremium') &&
+             isValidOptionalString('motorcycle', 120) &&
              (!('rideInvitePending' in data) || data.rideInvitePending == null ||
                (data.rideInvitePending is map &&
                 data.rideInvitePending.keys().hasAll(['fromUid','groupId','groupName','sentAt']) &&
@@ -72,6 +73,14 @@ service cloud.firestore {
              (data.routeGeoJSON is string && data.routeGeoJSON.size() <= 1000000);
     }
 
+    function isValidRouteListing(data) {
+      return !('routeListing' in data) ||
+        (data.routeListing is string &&
+          (data.routeListing == 'public' ||
+            data.routeListing == 'friends_only' ||
+            data.routeListing == 'unlisted'));
+    }
+
     function isValidGroup(data) {
       return hasRequiredFields(['name', 'code', 'createdBy', 'members', 'isScheduled', 'scheduledTimestamp', 'createdAt']) &&
              isValidString('name', 1, 100) &&
@@ -86,7 +95,8 @@ service cloud.firestore {
              isValidOptionalString('municipality', 50) &&
              isValidOptionalString('description', 500) &&
              (!('isRecording' in data) || data.isRecording is bool) &&
-             isValidOptionalNumber('startTime');
+             isValidOptionalNumber('startTime') &&
+             isValidRouteListing(data);
     }
 
     function isValidLocation(data) {
@@ -115,6 +125,8 @@ service cloud.firestore {
              isValidOptionalNumber('leftTurns') &&
              isValidOptionalNumber('rightTurns') &&
              isValidOptionalNumber('score') &&
+             isValidOptionalNumber('baseScore') &&
+             isValidOptionalNumber('pointsEarned') &&
              (!('path' in data) || data.path is list);
     }
 
@@ -173,9 +185,13 @@ service cloud.firestore {
 
     function crossUserSetRideInviteOnFriend(friendId) {
       let me = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-      let friends = ('friends' in me && me.friends is list) ? me.friends : [];
+      let myFriends = ('friends' in me && me.friends is list) ? me.friends : [];
+      let them = get(/databases/$(database)/documents/users/$(friendId)).data;
+      let theirFriends = ('friends' in them && them.friends is list) ? them.friends : [];
+      let iHaveThem = friendId in myFriends;
+      let theyHaveMe = request.auth.uid in theirFriends;
       return request.auth.uid != friendId &&
-        friendId in friends &&
+        (iHaveThem || theyHaveMe) &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rideInvitePending']) &&
         request.resource.data.rideInvitePending is map &&
         request.resource.data.rideInvitePending.fromUid == request.auth.uid &&
@@ -184,6 +200,25 @@ service cloud.firestore {
         request.resource.data.rideInvitePending.groupName is string &&
         request.resource.data.rideInvitePending.groupName.size() <= 120 &&
         request.resource.data.rideInvitePending.sentAt is number;
+    }
+
+    function isValidRideInviteDoc(data) {
+      return data.keys().hasAll(['fromUid', 'groupId', 'groupName', 'sentAt']) &&
+        data.fromUid is string &&
+        data.groupId is string && data.groupId.size() == 6 &&
+        data.groupName is string && data.groupName.size() <= 120 &&
+        data.sentAt is number &&
+        (!('kind' in data) || (data.kind is string && data.kind.size() <= 32));
+    }
+
+    function crossUserWriteInviteDoc(receiverUid) {
+      let me = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      let myFriends = friendsList(me);
+      let them = get(/databases/$(database)/documents/users/$(receiverUid)).data;
+      let theirFriends = friendsList(them);
+      let iHaveThem = receiverUid in myFriends;
+      let theyHaveMe = request.auth.uid in theirFriends;
+      return request.auth.uid != receiverUid && (iHaveThem || theyHaveMe);
     }
 
     match /users/{userId} {
@@ -203,6 +238,20 @@ service cloud.firestore {
         crossUserRemoveSelfFromTheirFriends(userId) ||
         crossUserSetRideInviteOnFriend(userId)
       );
+
+      match /invites/{inviteId} {
+        allow read: if isAuthenticated() && request.auth.uid == userId;
+        allow create: if isAuthenticated() &&
+          crossUserWriteInviteDoc(userId) &&
+          request.resource.data.fromUid == request.auth.uid &&
+          isValidRideInviteDoc(request.resource.data);
+        allow update: if isAuthenticated() &&
+          crossUserWriteInviteDoc(userId) &&
+          resource.data.fromUid == request.auth.uid &&
+          request.resource.data.fromUid == request.auth.uid &&
+          isValidRideInviteDoc(request.resource.data);
+        allow delete: if isAuthenticated() && request.auth.uid == userId;
+      }
     }
 
     match /premiumCandidates/{docId} {

@@ -1,5 +1,5 @@
 MotoRide — registro de contexto / cambios recientes
-Ultima actualizacion: 2026-04-14
+Ultima actualizacion: 2026-04-14 (bloque 11 — GPS, perfil, historial, nivel, rutas, mensajes)
 
 === Contacto y soporte ===
 - Correo publico de contacto: motorideapp1@gmail.com
@@ -116,3 +116,49 @@ Fecha: 2026-04-14
 - Abrir este archivo (`CONTEXTO_APP.txt`) y continuar desde la rama actual.
 - Verificar variable `CLOUDFLARE_API_TOKEN` en el proveedor de CI/deploy.
 - Reintentar deploy con `npx wrangler versions upload` (o pipeline equivalente).
+
+=== RESUMEN DE CAMBIOS DESDE EL ULTIMO LOG (2026-04-14, bloque 11) ===
+
+11) GPS / BUSCAR Y CREAR RUTAS (PROVINCIA Y MUNICIPIO)
+- Nuevo: `src/lib/reverseGeocode.ts`
+  - `requestUserLocation()` (geolocation del navegador) y `reverseGeocodeProvinceMunicipality(lat, lon)` vía Nominatim reverse (es), User-Agent con contacto motorideapp1@gmail.com.
+- Nuevo: `src/lib/nominatimPick.ts` — puntuación de resultados de búsqueda Nominatim para priorizar ciudad/municipio frente a POIs sueltos.
+- `src/components/Dashboard.tsx`
+  - Al cargar y al abrir el modal de crear ruta, relleno sugerido de provincia/municipio desde GPS; texto de ayuda en explorar y bajo los inputs del formulario de creación.
+  - Historial de rutas retirado del dashboard (pasa al perfil).
+  - Avatar del header con anillo de nivel/premium (`getLevelRingWrapperClass` desde `src/lib/levelRing.ts`).
+
+12) PERFIL, MOTO E HISTORIAL DE RUTAS
+- `src/components/Profile.tsx`
+  - Campo de texto «Tu moto» (Firestore `motorcycle`, hasta 120 caracteres).
+  - Sección colapsable «Historial de rutas» (consulta `rideHistory`), borrar entrada, «Repetir ruta».
+- `src/components/MainApp.tsx` — `onRepeatRoute`: al repetir, cierra perfil y pasa la ruta al flujo principal (`repeatedRoute`).
+- `firestore.rules` — validación `isValidOptionalString('motorcycle', 120)` en usuarios.
+- Despliegue remoto de reglas ejecutado sobre el proyecto `motoapp-3e6c6` (`firebase deploy --only firestore:rules`).
+
+13) NIVEL — «ARO» ALREDEDOR DEL JUGADOR
+- Nuevo: `src/lib/levelRing.ts`
+  - `getLevelRingBoxStyle(level, isPremium)` para marcadores HTML del mapa.
+  - `getLevelRingWrapperClass(level, isPremium)` para componentes React (Tailwind): tramos por nivel (5, 8, 12, 18, 25, 35+) y estilo premium; algo de animación en niveles altos.
+- `src/components/MapView.tsx` — avatares en mapa y lista de ranking envueltos con estos estilos según nivel/premium.
+
+14) VISIBILIDAD DE RUTAS EN EL EXPLORADOR
+- Nuevo: `src/lib/routeListing.ts` — tipos `public` | `friends_only` | `unlisted`, etiquetas y `canShowRouteInExplore` + `normalizeFriendIds`.
+- `firestore.rules` — validación opcional de `routeListing` en documentos de rutas.
+- `firestore.indexes.json` — ajustes de índices asociados a consultas.
+
+15) INCLINACION / MOTOCICLETA (ESTIMACION AVANZADA)
+- Nuevo: `src/hooks/useMotorcycleLean.ts` y carpeta `src/lib/motorcycleLean/` (filtros, geometría, detección bolsillo/curva, tipos).
+- `src/hooks/useLeanAngle.ts` — integración/refactor acorde al nuevo enfoque donde aplica.
+
+16) MENSAJES GLOBALES Y BUZON DE INVITACIONES
+- Nuevo: `src/contexts/AppMessageContext.tsx` — modal reutilizable (info / éxito / error) para mensajes de app.
+- `src/App.tsx` — envuelve la app con `AppMessageProvider`.
+- Nuevo: `src/components/InvitesMailboxModal.tsx` y cambios en `InviteFriendsModal.tsx`, `GroupPanel.tsx`, `PendingRideInviteOverlay.tsx` para flujo de invitaciones y UX.
+- `src/components/AdminPointsPanel.tsx` — ajustes puntuales de panel admin.
+
+17) MAPVIEW Y OTROS
+- `src/components/MapView.tsx` — cambios amplios (integración anillos de nivel, rutas/Nominatim, avisos y comportamiento ya descrito en bloques anteriores según diff).
+
+18) GIT (ESTE BLOQUE)
+- Objetivo: commit unificado en `main` con el listado anterior y push a `origin/main`.

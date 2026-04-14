@@ -1,26 +1,80 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { doc, updateDoc, onSnapshot } from 'firebase/firestore';
+import { useAppMessage } from '../contexts/AppMessageContext';
+import {
+  doc,
+  updateDoc,
+  onSnapshot,
+  collection,
+  query,
+  where,
+  orderBy,
+  limit,
+  deleteDoc,
+} from 'firebase/firestore';
 import { updateProfile } from 'firebase/auth';
 import { db, auth, logOut, handleFirestoreError, OperationType } from '../firebase';
 import { calculateLevel } from '../lib/utils';
-import { ArrowLeft, Camera, LogOut } from 'lucide-react';
+import { ArrowLeft, Camera, LogOut, ChevronDown, ChevronUp, Activity, Trash2, Play, Clock } from 'lucide-react';
 import PremiumBadge from './PremiumBadge';
 
-export default function Profile({ onBack }: { onBack: () => void }) {
+type Props = {
+  onBack: () => void;
+  onRepeatRoute: (routeGeoJSON: string) => void;
+};
+
+export default function Profile({ onBack, onRepeatRoute }: Props) {
   const { user } = useAuth();
+  const showMessage = useAppMessage();
   const [displayName, setDisplayName] = useState(user?.displayName || '');
+  const [motorcycle, setMotorcycle] = useState('');
   const [loading, setLoading] = useState(false);
   const [photoURL, setPhotoURL] = useState(user?.photoURL || '');
   const [userData, setUserData] = useState<any>(null);
 
+  const [rideHistory, setRideHistory] = useState<any[]>([]);
+  const [indexBuilding, setIndexBuilding] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
   useEffect(() => {
     if (!user) return;
-    const unsub = onSnapshot(doc(db, 'users', user.uid), (doc) => {
-      setUserData(doc.data());
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
-    });
+    const unsub = onSnapshot(
+      doc(db, 'users', user.uid),
+      (docSnap) => {
+        const data = docSnap.data();
+        setUserData(data);
+        if (data?.motorcycle != null) setMotorcycle(String(data.motorcycle));
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
+      }
+    );
+    return unsub;
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const historyQ = query(
+      collection(db, 'rideHistory'),
+      where('uid', '==', user.uid),
+      orderBy('endTime', 'desc'),
+      limit(20)
+    );
+    const unsub = onSnapshot(
+      historyQ,
+      (snapshot) => {
+        setRideHistory(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
+        setIndexBuilding(false);
+      },
+      (error) => {
+        if (error.message.includes('index') && error.message.includes('building')) {
+          setIndexBuilding(true);
+        }
+        console.error('Historial perfil:', error);
+        handleFirestoreError(error, OperationType.LIST, 'rideHistory');
+      }
+    );
     return unsub;
   }, [user]);
 
@@ -54,8 +108,7 @@ export default function Profile({ onBack }: { onBack: () => void }) {
         canvas.height = height;
         const ctx = canvas.getContext('2d');
         ctx?.drawImage(img, 0, 0, width, height);
-        
-        // Compress to JPEG to save space in Firestore
+
         const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
         setPhotoURL(dataUrl);
       };
@@ -69,25 +122,46 @@ export default function Profile({ onBack }: { onBack: () => void }) {
     setLoading(true);
     try {
       await updateProfile(auth.currentUser, {
-        displayName
+        displayName,
       });
       await updateDoc(doc(db, 'users', user.uid), {
         displayName,
         displayNameLower: displayName.toLowerCase(),
-        photoURL
+        photoURL,
+        motorcycle: motorcycle.trim().slice(0, 120),
       });
-      alert('Perfil actualizado');
+      showMessage({ variant: 'success', title: 'Perfil', message: 'Perfil actualizado.' });
     } catch (error) {
-      console.error("Error updating profile:", error);
-      alert('Error al actualizar el perfil');
+      console.error('Error updating profile:', error);
+      showMessage({ variant: 'error', title: 'Perfil', message: 'Error al actualizar el perfil.' });
       handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
     }
     setLoading(false);
   };
 
+  const deleteRide = (rideId: string) => setDeletingId(rideId);
+
+  const confirmDeleteRide = async (rideId: string) => {
+    try {
+      await deleteDoc(doc(db, 'rideHistory', rideId));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `rideHistory/${rideId}`);
+    }
+    setDeletingId(null);
+  };
+
+  const repeatFromHistory = useCallback(
+    (gpx: string) => {
+      if (!gpx) return;
+      onRepeatRoute(gpx);
+      onBack();
+    },
+    [onRepeatRoute, onBack]
+  );
+
   return (
     <div className="min-h-dvh bg-zinc-950 text-white pl-[max(1.5rem,env(safe-area-inset-left,0px))] pr-[max(1.5rem,env(safe-area-inset-right,0px))] pt-[max(1.5rem,env(safe-area-inset-top,0px))] pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]">
-      <div className="max-w-md mx-auto pt-4">
+      <div className="max-w-md mx-auto pt-4 pb-8">
         <div className="flex items-center gap-4 mb-8">
           <button onClick={onBack} className="p-2 bg-zinc-900 rounded-full hover:bg-zinc-800 transition-colors">
             <ArrowLeft size={20} />
@@ -120,27 +194,29 @@ export default function Profile({ onBack }: { onBack: () => void }) {
             </div>
           )}
 
-          {/* Experience Bar */}
-          {userData && (() => {
-            const totalPoints = Math.max(0, Number(userData.points || 0));
-            const { level, pointsForNextLevel, prevLevelPoints } = calculateLevel(totalPoints);
-            const levelProgress = totalPoints - prevLevelPoints;
-            const levelRequired = pointsForNextLevel - prevLevelPoints;
-            return (
-              <div className="w-full mb-6">
-                <div className="flex justify-between items-center text-xs font-bold text-zinc-400 mb-2">
-                  <span className="text-orange-500 font-black tracking-wider">NIVEL {level}</span>
-                  <span className="text-zinc-500">{totalPoints} / {pointsForNextLevel} pts</span>
+          {userData &&
+            (() => {
+              const totalPoints = Math.max(0, Number(userData.points || 0));
+              const { level, pointsForNextLevel, prevLevelPoints } = calculateLevel(totalPoints);
+              const levelProgress = totalPoints - prevLevelPoints;
+              const levelRequired = pointsForNextLevel - prevLevelPoints;
+              return (
+                <div className="w-full mb-6">
+                  <div className="flex justify-between items-center text-xs font-bold text-zinc-400 mb-2">
+                    <span className="text-orange-500 font-black tracking-wider">NIVEL {level}</span>
+                    <span className="text-zinc-500">
+                      {totalPoints} / {pointsForNextLevel} pts
+                    </span>
+                  </div>
+                  <div className="h-3 bg-zinc-950 rounded-full overflow-hidden border border-zinc-800">
+                    <div
+                      className="h-full bg-gradient-to-r from-orange-500 to-orange-400 transition-all duration-1000 ease-out"
+                      style={{ width: `${Math.min((levelProgress / levelRequired) * 100, 100)}%` }}
+                    />
+                  </div>
                 </div>
-                <div className="h-3 bg-zinc-950 rounded-full overflow-hidden border border-zinc-800">
-                  <div 
-                    className="h-full bg-gradient-to-r from-orange-500 to-orange-400 transition-all duration-1000 ease-out" 
-                    style={{ width: `${Math.min((levelProgress / levelRequired) * 100, 100)}%` }} 
-                  />
-                </div>
-              </div>
-            );
-          })()}
+              );
+            })()}
 
           <div className="grid grid-cols-2 gap-4 mb-6 w-full">
             <div className="bg-zinc-800 px-4 py-3 rounded-2xl text-center border border-zinc-700">
@@ -149,32 +225,130 @@ export default function Profile({ onBack }: { onBack: () => void }) {
             </div>
             <div className="bg-zinc-800 px-4 py-3 rounded-2xl text-center border border-zinc-700">
               <p className="text-[10px] text-zinc-400 uppercase font-bold tracking-wider mb-1">Curvas Totales</p>
-              <p className="font-black text-xl text-white">{(userData?.totalLeftTurns || 0) + (userData?.totalRightTurns || 0)}</p>
+              <p className="font-black text-xl text-white">
+                {(userData?.totalLeftTurns || 0) + (userData?.totalRightTurns || 0)}
+              </p>
             </div>
           </div>
 
           <div className="w-full space-y-4">
             <div>
               <label className="block text-sm text-zinc-400 mb-1">Nombre de motero</label>
-              <input 
-                type="text" 
+              <input
+                type="text"
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
                 className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-orange-500 transition-colors"
               />
             </div>
-            
-            <button 
+
+            <div>
+              <label className="block text-sm text-zinc-400 mb-1">Tu moto</label>
+              <textarea
+                value={motorcycle}
+                onChange={(e) => setMotorcycle(e.target.value.slice(0, 120))}
+                placeholder="Ej: Yamaha MT-07 2022"
+                rows={2}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-orange-500 transition-colors resize-none placeholder:text-zinc-600"
+              />
+              <p className="text-[10px] text-zinc-600 mt-1">{motorcycle.length}/120</p>
+            </div>
+
+            <button
               onClick={saveProfile}
               disabled={loading}
-              className="w-full bg-orange-500 hover:bg-orange-600 text-white py-3 rounded-xl font-semibold transition-colors disabled:opacity-50 mt-4"
+              className="w-full bg-orange-500 hover:bg-orange-600 text-white py-3 rounded-xl font-semibold transition-colors disabled:opacity-50 mt-2"
             >
               {loading ? 'Guardando...' : 'Guardar Cambios'}
             </button>
           </div>
         </div>
 
-        <button 
+        {/* Historial de rutas (desplegable) */}
+        <div className="mt-6 bg-zinc-900 border border-zinc-800 rounded-3xl overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setHistoryOpen((o) => !o)}
+            className="w-full flex items-center justify-between p-4 text-left hover:bg-zinc-800/50 transition-colors"
+          >
+            <span className="font-bold flex items-center gap-2">
+              <Activity className="text-orange-500" size={18} />
+              Historial de rutas
+            </span>
+            {historyOpen ? <ChevronUp size={20} className="text-zinc-500" /> : <ChevronDown size={20} className="text-zinc-500" />}
+          </button>
+          {historyOpen && (
+            <div className="px-4 pb-4 border-t border-zinc-800">
+              {indexBuilding && (
+                <div className="bg-blue-500/10 border border-blue-500/20 p-3 rounded-xl flex items-center gap-2 my-3">
+                  <Clock className="text-blue-400 shrink-0" size={16} />
+                  <p className="text-xs text-blue-400">Cargando historial…</p>
+                </div>
+              )}
+              <div className="space-y-3 max-h-[55vh] overflow-y-auto pr-1">
+                {rideHistory.length > 0 ? (
+                  rideHistory.map((ride) => (
+                    <div
+                      key={ride.id}
+                      className="bg-zinc-950 border border-zinc-800 p-4 rounded-2xl relative group"
+                    >
+                      <div className="absolute top-3 right-3">
+                        {deletingId === ride.id ? (
+                          <div className="flex gap-1">
+                            <button
+                              onClick={() => void confirmDeleteRide(ride.id)}
+                              className="text-[10px] bg-red-600 text-white px-2 py-1 rounded font-bold"
+                            >
+                              Confirmar
+                            </button>
+                            <button onClick={() => setDeletingId(null)} className="text-[10px] text-zinc-500 px-2">
+                              Cancelar
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => deleteRide(ride.id)}
+                            className="text-zinc-600 hover:text-red-500 opacity-0 group-hover:opacity-100"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
+                      </div>
+                      <h4 className="font-bold text-orange-500 pr-16">{ride.groupName || 'Ruta sin nombre'}</h4>
+                      <p className="text-xs text-zinc-500 mt-1">
+                        {new Date(ride.endTime).toLocaleDateString()} •{' '}
+                        {new Date(ride.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                      <div className="flex flex-wrap gap-4 mt-2 text-sm">
+                        <span>
+                          <span className="text-zinc-500 text-[10px] uppercase">Dist. </span>
+                          {ride.distance != null ? Number(ride.distance).toFixed(1) : '—'} km
+                        </span>
+                        <span>
+                          <span className="text-zinc-500 text-[10px] uppercase">Pts </span>+
+                          {Math.round(Number(ride.score ?? ride.pointsEarned ?? 0))}
+                        </span>
+                      </div>
+                      {ride.routeGeoJSON && (
+                        <button
+                          type="button"
+                          onClick={() => repeatFromHistory(ride.routeGeoJSON)}
+                          className="mt-3 flex items-center gap-2 text-xs font-bold bg-zinc-800 hover:bg-zinc-700 text-white px-3 py-2 rounded-xl"
+                        >
+                          <Play size={14} /> Repetir ruta
+                        </button>
+                      )}
+                    </div>
+                  ))
+                ) : (
+                  !indexBuilding && <p className="text-sm text-zinc-500 py-6 text-center">Aún no hay rutas guardadas</p>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <button
           onClick={logOut}
           className="w-full mt-8 flex items-center justify-center gap-2 text-red-500 hover:text-red-400 transition-colors py-4"
         >

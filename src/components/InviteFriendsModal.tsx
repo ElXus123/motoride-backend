@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { doc, onSnapshot, getDoc, updateDoc, writeBatch, arrayUnion } from 'firebase/firestore';
+import { doc, onSnapshot, getDoc, updateDoc, arrayUnion, setDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppMessage } from '../contexts/AppMessageContext';
 import { X, UserPlus, Check, Loader2, User as UserIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import PremiumBadge from './PremiumBadge';
@@ -16,6 +17,7 @@ type Props = {
 
 export default function InviteFriendsModal({ open, onClose, groupId, groupName, memberUids }: Props) {
   const { user } = useAuth();
+  const showMessage = useAppMessage();
   const [friends, setFriends] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [sendingId, setSendingId] = useState<string | null>(null);
@@ -59,42 +61,70 @@ export default function InviteFriendsModal({ open, onClose, groupId, groupName, 
     if (!targetUid || targetUid === user.uid) return;
     const gid = groupId.toUpperCase().trim();
     if (gid === 'REPEATED' || gid.length !== 6) {
-      window.alert(
-        'No se puede enviar la invitación: el código de ruta no es válido (debe ser 6 caracteres). Si acabas de crear la ruta, vuelve a abrir Invitar.'
-      );
+      showMessage({
+        variant: 'error',
+        title: 'Código de ruta',
+        message:
+          'No se puede enviar la invitación: el código de ruta no es válido (debe ser 6 caracteres). Si acabas de crear la ruta, vuelve a abrir Invitar.',
+      });
       return;
     }
     const safeName = (groupName || 'Ruta').trim().slice(0, 120) || 'Ruta';
     setSendingId(targetUid);
     try {
+      const targetSnap = await getDoc(doc(db, 'users', targetUid));
+      if (!targetSnap.exists()) {
+        showMessage({
+          variant: 'error',
+          title: 'Invitación',
+          message: 'No se encontró el perfil de ese usuario. Prueba a cerrar y abrir de nuevo el listado de amigos.',
+        });
+        return;
+      }
+      const canonUid = targetSnap.id;
       const invitePayload = {
         fromUid: user.uid,
         groupId: gid,
         groupName: safeName,
         sentAt: Date.now(),
       };
-      const targetRef = doc(db, 'users', targetUid);
+      const targetRef = doc(db, 'users', canonUid);
       await updateDoc(targetRef, {
         rideInvitePending: invitePayload,
       });
+      await setDoc(
+        doc(db, 'users', canonUid, 'invites', `${user.uid}_${gid}`),
+        {
+          fromUid: user.uid,
+          groupId: gid,
+          groupName: safeName,
+          sentAt: Date.now(),
+          kind: 'live_ride',
+        },
+        { merge: true }
+      );
       setSentIds((s) => ({ ...s, [targetUid]: Date.now() }));
     } catch (e: unknown) {
       const code = typeof e === 'object' && e && 'code' in e ? String((e as { code: string }).code) : '';
       if (code === 'permission-denied') {
-        // Fallback: si mi lista de amigos quedó desincronizada localmente/reglas, la reparamos y reintentamos.
         try {
           const myRef = doc(db, 'users', user.uid);
           const [mySnap, targetSnap] = await Promise.all([getDoc(myRef), getDoc(doc(db, 'users', targetUid))]);
           if (!mySnap.exists() || !targetSnap.exists()) {
-            window.alert('No se pudo enviar la invitación. El usuario de destino no está disponible.');
+            showMessage({
+              variant: 'error',
+              title: 'Invitación',
+              message: 'No se pudo enviar la invitación. El usuario de destino no está disponible.',
+            });
             return;
           }
+          const canonUid = targetSnap.id;
           const myData = mySnap.data() as any;
-          const myFriends = Array.isArray(myData?.friends) ? myData.friends : [];
-          if (!myFriends.includes(targetUid)) {
-            await updateDoc(myRef, { friends: arrayUnion(targetUid) });
+          const myFriends = Array.isArray(myData?.friends) ? myData.friends.map((x: unknown) => String(x)) : [];
+          if (!myFriends.includes(canonUid)) {
+            await updateDoc(myRef, { friends: arrayUnion(canonUid) });
           }
-          await updateDoc(doc(db, 'users', targetUid), {
+          await updateDoc(doc(db, 'users', canonUid), {
             rideInvitePending: {
               fromUid: user.uid,
               groupId: gid,
@@ -102,12 +132,26 @@ export default function InviteFriendsModal({ open, onClose, groupId, groupName, 
               sentAt: Date.now(),
             },
           });
+          await setDoc(
+            doc(db, 'users', canonUid, 'invites', `${user.uid}_${gid}`),
+            {
+              fromUid: user.uid,
+              groupId: gid,
+              groupName: safeName,
+              sentAt: Date.now(),
+              kind: 'live_ride',
+            },
+            { merge: true }
+          );
           setSentIds((s) => ({ ...s, [targetUid]: Date.now() }));
           return;
         } catch {
-          window.alert(
-            'No se pudo enviar la invitación. Comprueba que esa persona está en tu lista de amigos (amistad aceptada en ambos sentidos).'
-          );
+          showMessage({
+            variant: 'error',
+            title: 'Permiso denegado',
+            message:
+              'Firestore ha rechazado el envío. Comprueba que sois amigos en MotoRide (las reglas permiten la invitación si uno está en la lista del otro). Si sigue fallando, vuelve a iniciar sesión.',
+          });
           return;
         }
       }
@@ -155,7 +199,7 @@ export default function InviteFriendsModal({ open, onClose, groupId, groupName, 
 
             <div className="px-5 py-3 overflow-y-auto flex-1 custom-scrollbar">
               <p className="text-xs text-zinc-400 mb-3 leading-relaxed">
-                Tus amigos verán una invitación en el inicio de la app y podrán unirse sin salir de MotoRide.
+                La invitación se guarda en su buzón (icono arriba a la derecha en el inicio) y pueden unirse sin salir de MotoRide.
               </p>
               {loading ? (
                 <div className="flex flex-col items-center justify-center py-12 gap-3 text-zinc-500">

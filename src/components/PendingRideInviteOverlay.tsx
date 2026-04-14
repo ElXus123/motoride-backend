@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { doc, getDoc, updateDoc, deleteField, arrayUnion } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppMessage } from '../contexts/AppMessageContext';
 import { Loader2 } from 'lucide-react';
 
 type Pending = {
@@ -23,6 +24,7 @@ type Props = {
  */
 export default function PendingRideInviteOverlay({ onJoinGroup, activeGroupId }: Props) {
   const { user } = useAuth();
+  const showMessage = useAppMessage();
   const pending = (user?.rideInvitePending || null) as Pending | null;
   const [fromName, setFromName] = useState<string | null>(null);
   const [joining, setJoining] = useState(false);
@@ -79,9 +81,11 @@ export default function PendingRideInviteOverlay({ onJoinGroup, activeGroupId }:
     } catch (e: unknown) {
       const code = typeof e === 'object' && e && 'code' in e ? String((e as { code: string }).code) : '';
       if (code === 'permission-denied') {
-        window.alert(
-          'No se pudo unir a la ruta. Comprueba la conexión y que sigas siendo amigo del anfitrión.'
-        );
+        showMessage({
+          variant: 'error',
+          title: 'Unirse a la ruta',
+          message: 'No se pudo unir a la ruta. Comprueba la conexión y que tengas permiso para unirte al grupo.',
+        });
       } else {
         handleFirestoreError(e, OperationType.WRITE, `groups/${gid}`);
       }

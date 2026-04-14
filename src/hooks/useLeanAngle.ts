@@ -160,7 +160,7 @@ export const useLeanAngle = (speedMps?: number | null) => {
       const rollStable = sorted[Math.floor(sorted.length / 2)];
 
       let jitteryOrientation = false;
-      if (win.length >= 6) {
+      if (win.length >= 5) {
         const mean = win.reduce((a, b) => a + b, 0) / win.length;
         let sq = 0;
         for (const x of win) sq += (x - mean) * (x - mean);
@@ -177,19 +177,28 @@ export const useLeanAngle = (speedMps?: number | null) => {
       const physicallyStill =
         gpsSaysStopped || imuSaysStill || (!gpsLikelyMoving && jitteryOrientation);
 
+      /**
+       * Inclinación clara con GPS en cero (prueba en parado, manillar, etc.): no usar modo “mesa”
+       * que autocentraba a 0° con bias + zona muerta grande.
+       */
+      const stationaryButLeaning = gpsSaysStopped && Math.abs(rollStable) >= 7;
+      /** Solo entonces forzar lectura neutra / deriva: móvil realmente plano y quieto. */
+      const tableFlatRest = physicallyStill && !stationaryButLeaning;
+
       const speedNow = typeof v === 'number' && Number.isFinite(v) ? Math.abs(v) : 0;
-      /** Misma reactividad que a alta velocidad en cuanto el GPS indica marcha real. */
-      const alpha = physicallyStill
+      const alpha = tableFlatRest
         ? 0.02
-        : speedUnknown
-          ? 0.12
-          : gpsLikelyMoving
-            ? 0.22
-            : 0.16;
+        : stationaryButLeaning
+          ? 0.18
+          : speedUnknown
+            ? 0.12
+            : gpsLikelyMoving
+              ? 0.22
+              : 0.16;
       smoothedAngleRef.current =
         smoothedAngleRef.current + alpha * (rollStable - smoothedAngleRef.current);
 
-      if (physicallyStill && Math.abs(smoothedAngleRef.current) < 14) {
+      if (tableFlatRest && Math.abs(smoothedAngleRef.current) < 14) {
         smoothedAngleRef.current *= 0.88;
       }
 
@@ -197,7 +206,7 @@ export const useLeanAngle = (speedMps?: number | null) => {
       if (angleHistoryRef.current.length > 30) angleHistoryRef.current.shift();
 
       const shouldAutoZero =
-        physicallyStill &&
+        tableFlatRest &&
         (typeof v !== 'number' || !Number.isFinite(v) || Math.abs(v) < 1.6) &&
         Math.abs(smoothedAngleRef.current) < 18;
       if (shouldAutoZero) {
@@ -218,14 +227,14 @@ export const useLeanAngle = (speedMps?: number | null) => {
       }
       if (finalAngle > 60) finalAngle = 60;
       if (finalAngle < -60) finalAngle = -60;
-      const deadDeg = physicallyStill ? 4.8 : speedUnknown ? 2.2 : 1.0;
+      const deadDeg = tableFlatRest ? 4.8 : stationaryButLeaning ? 1.0 : speedUnknown ? 2.2 : 1.0;
       if (Math.abs(finalAngle) < deadDeg) finalAngle = 0;
 
       const displayAngle = finalAngle;
       const roundedAngle = Math.round(finalAngle);
       setLeanAngle(displayAngle);
 
-      const minMaxThreshold = physicallyStill ? 10 : 0;
+      const minMaxThreshold = tableFlatRest ? 10 : 0;
       if (roundedAngle < 0 && Math.abs(roundedAngle) >= minMaxThreshold) {
         setMaxLeanLeft((prev) => Math.max(prev, Math.abs(roundedAngle)));
       } else if (roundedAngle > 0 && roundedAngle >= minMaxThreshold) {

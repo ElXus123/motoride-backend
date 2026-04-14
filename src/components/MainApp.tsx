@@ -115,7 +115,13 @@ export default function MainApp() {
     return (
       <>
         {inviteOverlay}
-        <Profile onBack={() => setShowProfile(false)} />
+        <Profile
+          onBack={() => setShowProfile(false)}
+          onRepeatRoute={(route) => {
+            setRepeatedRoute(route);
+            setShowProfile(false);
+          }}
+        />
       </>
     );
   }

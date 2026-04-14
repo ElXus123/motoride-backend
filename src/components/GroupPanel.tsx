@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { doc, setDoc, updateDoc, arrayUnion, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppMessage } from '../contexts/AppMessageContext';
 import { parseGPX } from '../lib/gpx';
 import { Users, Upload, Plus, LogIn } from 'lucide-react';
 
@@ -12,6 +13,7 @@ interface GroupPanelProps {
 
 export const GroupPanel: React.FC<GroupPanelProps> = ({ currentGroup, setCurrentGroupId }) => {
   const { user } = useAuth();
+  const showMessage = useAppMessage();
   const [joinCode, setJoinCode] = useState('');
   const [newGroupName, setNewGroupName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
@@ -37,7 +39,7 @@ export const GroupPanel: React.FC<GroupPanelProps> = ({ currentGroup, setCurrent
       setIsCreating(false);
     } catch (error) {
       console.error("Error creating group:", error);
-      alert("Error al crear el grupo");
+      showMessage({ variant: 'error', title: 'Grupo', message: 'Error al crear el grupo.' });
     }
   };
 
@@ -56,11 +58,11 @@ export const GroupPanel: React.FC<GroupPanelProps> = ({ currentGroup, setCurrent
         setJoinCode('');
         setIsJoining(false);
       } else {
-        alert("Grupo no encontrado. Asegúrate de usar el ID correcto.");
+        showMessage({ variant: 'error', title: 'Grupo', message: 'Grupo no encontrado. Asegúrate de usar el ID correcto.' });
       }
     } catch (error) {
       console.error("Error joining group:", error);
-      alert("Error al unirse al grupo");
+      showMessage({ variant: 'error', title: 'Grupo', message: 'Error al unirse al grupo.' });
     }
   };
 
@@ -78,13 +80,13 @@ export const GroupPanel: React.FC<GroupPanelProps> = ({ currentGroup, setCurrent
           await updateDoc(doc(db, 'groups', currentGroup.id), {
             routeGeoJSON: JSON.stringify(geojson)
           });
-          alert("Ruta cargada exitosamente");
+          showMessage({ variant: 'success', title: 'Ruta', message: 'Ruta cargada correctamente.' });
         } catch (error) {
           console.error("Error uploading route:", error);
-          alert("Error al subir la ruta");
+          showMessage({ variant: 'error', title: 'Ruta', message: 'Error al subir la ruta.' });
         }
       } else {
-        alert("Error al procesar el archivo GPX");
+        showMessage({ variant: 'error', title: 'GPX', message: 'Error al procesar el archivo GPX.' });
       }
     };
     reader.readAsText(file);

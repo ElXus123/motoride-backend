@@ -1,10 +1,23 @@
 import { useEffect, useState, useRef, useMemo, useCallback, type CSSProperties, type MutableRefObject } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, GeoJSON, useMap, useMapEvents, Pane } from 'react-leaflet';
 import L from 'leaflet';
-import { doc, onSnapshot, updateDoc, collection, query, where, addDoc, getDoc, setDoc, arrayRemove } from 'firebase/firestore';
+import {
+  doc,
+  onSnapshot,
+  updateDoc,
+  collection,
+  query,
+  where,
+  addDoc,
+  getDoc,
+  setDoc,
+  arrayRemove,
+  deleteField,
+} from 'firebase/firestore';
 import { db, logOut, handleFirestoreError, OperationType } from '../firebase';
 import { calculateLevel } from '../lib/utils';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppMessage } from '../contexts/AppMessageContext';
 import { useLocationTracking } from '../hooks/useLocationTracking';
 import { useOpenMeteoWeather } from '../hooks/useOpenMeteoWeather';
 import { useLeanAngle } from '../hooks/useLeanAngle';
@@ -18,13 +31,15 @@ import { requestJson } from '../lib/network';
 import { getActivePointsConfig } from '../lib/pointsConfig';
 import { fetchRainViewerTileUrl } from '../lib/rainviewer';
 import { LEAFLET_LIGHT_ERROR_TILE, LEAFLET_TRANSPARENT_ERROR_TILE } from '../lib/leafletTiles';
+import { getLevelRingBoxStyle, getLevelRingWrapperClass } from '../lib/levelRing';
+import { pickBestNominatimResult, sortNominatimResults } from '../lib/nominatimPick';
 import { prefetchAroundUser } from '../lib/mapTileCache';
 import { weatherWmoToLucide } from '../lib/weatherWmo';
 import socket from '../lib/socket';
 import { useVoiceChat } from '../hooks/useVoiceChat';
 import PremiumBadge from './PremiumBadge';
 import InviteFriendsModal from './InviteFriendsModal';
-import { Upload, ArrowLeft, Copy, Check, Navigation, AlertTriangle, Play, Square, ArrowUp, MapPin, Trophy, Bell, AlertCircle, Wrench, Fuel, X, Maximize, Minimize, Search, Share2, Menu, Target, LogOut, Users, UserPlus, Mic, MicOff, ShieldAlert, Activity, Layers, Lock, LockOpen, Smartphone, RotateCw, Crown, WifiOff, Monitor, Loader2, Mail } from 'lucide-react';
+import { Upload, ArrowLeft, Copy, Check, Navigation, AlertTriangle, Play, Square, ArrowUp, MapPin, Trophy, Bell, AlertCircle, Wrench, Fuel, X, Maximize, Minimize, Search, Share2, Menu, Target, LogOut, Users, UserPlus, Mic, MicOff, ShieldAlert, Activity, Layers, Lock, LockOpen, Smartphone, RotateCw, Crown, WifiOff, Monitor, Loader2, Mail, Ban } from 'lucide-react';
 import { copyTextToClipboard, getSupportMailtoHref } from '../lib/clientInfo';
 import { generateGroupCode } from '../lib/groupCode';
 import { motion, AnimatePresence } from 'motion/react';
@@ -68,9 +83,9 @@ type ScreenOrientationLockArg =
   | 'landscape-primary'
   | 'landscape-secondary';
 
-// Custom icon creator for avatars with level
+// Custom icon creator for avatars with level (aro evoluciona con el nivel)
 const createAvatarIcon = (url: string, level: number = 1, isPremium: boolean = false) => {
-  const ring = isPremium ? '#f59e0b' : '#f97316';
+  const rv = getLevelRingBoxStyle(level, isPremium);
   const lvlBg = isPremium ? '#d97706' : '#f97316';
   const crown = isPremium
     ? `<div style="position:absolute;top:-5px;left:-3px;width:17px;height:17px;background:linear-gradient(160deg,#fde68a,#f59e0b);border-radius:50%;border:2px solid #18181b;box-shadow:0 1px 4px rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;font-size:9px;line-height:1;">👑</div>`
@@ -79,7 +94,7 @@ const createAvatarIcon = (url: string, level: number = 1, isPremium: boolean = f
     className: 'custom-avatar-icon',
     html: `<div style="position: relative; width: 44px; height: 44px;">
              ${crown}
-             <div style="width: 40px; height: 40px; border-radius: 50%; overflow: hidden; border: 3px solid ${ring}; background: white; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">
+             <div style="width: 40px; height: 40px; border-radius: 50%; overflow: hidden; ${rv.border}; box-shadow: ${rv.boxShadow}, 0 4px 6px -1px rgb(0 0 0 / 0.12); background: white;">
                <img src="${url || 'https://via.placeholder.com/40'}" style="width: 100%; height: 100%; object-fit: cover;" />
              </div>
              <div style="position: absolute; bottom: -2px; right: -2px; background: ${lvlBg}; color: white; border-radius: 50%; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 900; border: 2px solid #18181b; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">
@@ -394,6 +409,7 @@ export default function MapView({
 }) {
   const LOCAL_RIDE_DRAFT_KEY = `motoride_ride_draft_${groupId}`;
   const { user } = useAuth();
+  const showMessage = useAppMessage();
   const [customName, setCustomName] = useState<string | null>(null);
   const [customPhotoURL, setCustomPhotoURL] = useState<string | null>(null);
   const [group, setGroup] = useState<any>(null);
@@ -699,9 +715,12 @@ export default function MapView({
           so.lock!('landscape').catch(() => {});
         }
         if (e?.message?.includes('sandboxed')) {
-          alert(
-            "⚠️ Limitación del Navegador: El bloqueo de orientación está restringido dentro de la vista previa de AI Studio.\n\nPara que el Modo Bolsillo y MirrorLink funcionen correctamente, pulsa el botón de 'Abrir en pestaña nueva' (arriba a la derecha)."
-          );
+          showMessage({
+            variant: 'info',
+            title: 'Orientación',
+            message:
+              "Limitación del navegador: el bloqueo de orientación está restringido en algunas vistas embebidas.\n\nPara Modo Bolsillo y MirrorLink, abre MotoRide en una pestaña normal del navegador.",
+          });
         }
       });
     }
@@ -1085,18 +1104,35 @@ export default function MapView({
     }
   }, [group?.routeGeoJSON]);
 
-  const navState = useNavigation(currentLocation, parsedRoute);
+  /** Ocultar guía OSRM solo en este dispositivo (sigue la ruta del grupo en servidor). */
+  const [navigationGuideHiddenLocal, setNavigationGuideHiddenLocal] = useState(false);
+  useEffect(() => {
+    setNavigationGuideHiddenLocal(false);
+  }, [group?.routeGeoJSON]);
+
+  /** Solo hidrata la ruta repetida una vez; las búsquedas posteriores no las pisa el efecto. */
+  const repeatedPreloadAppliedRef = useRef(false);
+  useEffect(() => {
+    repeatedPreloadAppliedRef.current = false;
+  }, [groupId]);
+
+  const effectiveRouteForNav = useMemo(
+    () => (navigationGuideHiddenLocal ? null : parsedRoute),
+    [navigationGuideHiddenLocal, parsedRoute]
+  );
+
+  const navState = useNavigation(currentLocation, effectiveRouteForNav);
   const navigationHeading = useNavigationHeading(
     heading,
     speed,
     courseOverGround,
     currentLocation,
-    parsedRoute,
+    effectiveRouteForNav,
     navState
   );
   const displayLocation = useMemo(() => {
     if (!currentLocation) return null;
-    const snapCandidate = navState.routeGeometry || parsedRoute;
+    const snapCandidate = navState.routeGeometry || effectiveRouteForNav;
     if (!snapCandidate) return currentLocation;
 
     const snapped = snapPointToRouteDetailed(currentLocation.lat, currentLocation.lng, snapCandidate);
@@ -1110,7 +1146,7 @@ export default function MapView({
       return { lat: snapped.lat, lng: snapped.lng };
     }
     return currentLocation;
-  }, [currentLocation, navState.routeGeometry, parsedRoute, horizontalAccuracy]);
+  }, [currentLocation, navState.routeGeometry, effectiveRouteForNav, horizontalAccuracy]);
 
   const { nearbyRadar, radars } = useRoadData(currentLocation);
   const [hostIsPremium, setHostIsPremium] = useState(false);
@@ -1137,7 +1173,8 @@ export default function MapView({
 
   // Listen to group data
   useEffect(() => {
-    if (groupId === 'REPEATED' && preloadedRoute) {
+    if (groupId === 'REPEATED' && preloadedRoute && !repeatedPreloadAppliedRef.current) {
+      repeatedPreloadAppliedRef.current = true;
       setGroup({
         name: 'Repitiendo Ruta',
         routeGeoJSON: preloadedRoute,
@@ -1676,7 +1713,7 @@ export default function MapView({
     try {
       const blob = await createSummaryImage();
       if (!blob) {
-        alert('No se pudo generar la imagen del resumen.');
+        showMessage({ variant: 'error', title: 'Resumen', message: 'No se pudo generar la imagen del resumen.' });
         return;
       }
 
@@ -1696,11 +1733,16 @@ export default function MapView({
         a.download = `resumen-ruta-${Date.now()}.png`;
         a.click();
         URL.revokeObjectURL(imageUrl);
-        alert('Tu dispositivo no permite compartir archivos directamente. Se ha descargado la imagen para que la compartas por WhatsApp o la app que quieras.');
+        showMessage({
+          variant: 'info',
+          title: 'Compartir',
+          message:
+            'Tu dispositivo no permite compartir archivos directamente. Se ha descargado la imagen para que la compartas por WhatsApp o la app que quieras.',
+        });
       }
     } catch (err) {
       console.error('Error sharing summary image:', err);
-      alert('No se pudo compartir el resumen.');
+      showMessage({ variant: 'error', title: 'Compartir', message: 'No se pudo compartir el resumen.' });
     } finally {
       setIsSharingSummary(false);
     }
@@ -1922,11 +1964,11 @@ export default function MapView({
           handleFirestoreError(error, OperationType.UPDATE, `groups/${groupId}`);
         }
       } else {
-        alert("No se pudo analizar el archivo GPX o no contiene una ruta válida.");
+        showMessage({ variant: 'error', title: 'GPX', message: 'No se pudo analizar el archivo GPX o no contiene una ruta válida.' });
       }
     } catch (err) {
       console.error("Error reading file:", err);
-      alert("Error al leer el archivo.");
+      showMessage({ variant: 'error', title: 'Archivo', message: 'Error al leer el archivo.' });
     }
   };
 
@@ -1957,7 +1999,7 @@ export default function MapView({
       }
 
       if (!destCoords) {
-        const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(typedDestination)}&limit=1&countrycodes=es&addressdetails=1`;
+        const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(typedDestination)}&limit=12&countrycodes=es&addressdetails=1`;
         const geoData = await requestJson<any[]>(geocodeUrl, {
           timeoutMs: 10000,
           retries: 1,
@@ -1966,7 +2008,7 @@ export default function MapView({
             'User-Agent': 'MoteroApp/1.0 (contact: motorideapp1@gmail.com)'
           }
         });
-        const first = Array.isArray(geoData) ? geoData[0] : null;
+        const first = pickBestNominatimResult(Array.isArray(geoData) ? geoData : [], typedDestination);
         const lat = Number.parseFloat(String(first?.lat ?? ''));
         const lon = Number.parseFloat(String(first?.lon ?? ''));
         if (Number.isFinite(lat) && Number.isFinite(lon)) {
@@ -1985,7 +2027,11 @@ export default function MapView({
       }
 
       if (!destCoords) {
-        alert('No se ha podido encontrar el destino. Intenta elegir una sugerencia o usar coordenadas "lon,lat".');
+        showMessage({
+          variant: 'error',
+          title: 'Destino',
+          message: 'No se ha podido encontrar el destino. Intenta elegir una sugerencia o usar coordenadas "lon,lat".',
+        });
         return;
       }
 
@@ -1995,13 +2041,25 @@ export default function MapView({
       const data = await requestJson<any>(url, { timeoutMs: 12000, retries: 1, backoffMs: 700 });
       if (data.code === 'Ok') {
         if (!data.routes?.[0]?.geometry?.coordinates?.length) {
-          alert('No se pudo generar una ruta válida para ese destino.');
+          showMessage({ variant: 'error', title: 'Ruta', message: 'No se pudo generar una ruta válida para ese destino.' });
           return;
         }
+        const routeStr = JSON.stringify(data.routes[0].geometry);
         try {
-          await updateDoc(doc(db, 'groups', groupId), {
-            routeGeoJSON: JSON.stringify(data.routes[0].geometry)
-          });
+          if (groupId === 'REPEATED') {
+            setGroup((prev: Record<string, unknown> | null) => ({
+              ...(prev || {}),
+              name: (prev?.name as string) || 'Repitiendo Ruta',
+              routeGeoJSON: routeStr,
+              isEsporadica: true,
+              createdBy: user.uid,
+              members: user?.uid ? [user.uid] : [],
+            }));
+          } else {
+            await updateDoc(doc(db, 'groups', groupId), {
+              routeGeoJSON: routeStr,
+            });
+          }
           setShowSearchModal(false);
           setSearchDestination('');
           setSearchSuggestions([]);
@@ -2010,11 +2068,11 @@ export default function MapView({
           handleFirestoreError(error, OperationType.UPDATE, `groups/${groupId}`);
         }
       } else {
-        alert('Error al generar la ruta.');
+        showMessage({ variant: 'error', title: 'Ruta', message: 'Error al generar la ruta.' });
       }
     } catch (e) {
       console.error(e);
-      alert('Error de conexión.');
+      showMessage({ variant: 'error', title: 'Red', message: 'Error de conexión.' });
     } finally {
       setIsSearching(false);
     }
@@ -2027,15 +2085,59 @@ export default function MapView({
     }
     const timer = setTimeout(async () => {
       try {
-        const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchDestination)}&limit=5&countrycodes=es&addressdetails=1`;
-        const geoData = await requestJson<any[]>(geocodeUrl, { timeoutMs: 9000, retries: 1, backoffMs: 500 });
-        setSearchSuggestions(Array.isArray(geoData) ? geoData : []);
+        const q = searchDestination.trim();
+        const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=12&countrycodes=es&addressdetails=1`;
+        const geoData = await requestJson<any[]>(geocodeUrl, {
+          timeoutMs: 9000,
+          retries: 1,
+          backoffMs: 500,
+          headers: { 'User-Agent': 'MoteroApp/1.0 (contact: motorideapp1@gmail.com)' },
+        });
+        const arr = Array.isArray(geoData) ? geoData : [];
+        setSearchSuggestions(sortNominatimResults(arr, q).slice(0, 8));
       } catch {
         setSearchSuggestions([]);
       }
     }, 450);
     return () => clearTimeout(timer);
   }, [showSearchModal, searchDestination]);
+
+  const cancelNavigation = useCallback(async () => {
+    if (!user) return;
+    if (groupId === 'REPEATED') {
+      setGroup((prev: Record<string, unknown> | null) =>
+        prev ? { ...prev, routeGeoJSON: null } : prev
+      );
+      setNavigationGuideHiddenLocal(false);
+      showMessage({
+        variant: 'success',
+        title: 'Navegación',
+        message: 'Ruta quitada. Puedes buscar otro destino o seguir rodando y grabando sin guía.',
+      });
+      return;
+    }
+    if (isHost) {
+      try {
+        await updateDoc(doc(db, 'groups', groupId), { routeGeoJSON: deleteField() });
+        setNavigationGuideHiddenLocal(false);
+        showMessage({
+          variant: 'success',
+          title: 'Navegación',
+          message: 'Se ha quitado la ruta del grupo. Podéis cargar otra o seguir sin guía.',
+        });
+      } catch (e) {
+        handleFirestoreError(e, OperationType.UPDATE, `groups/${groupId}`);
+      }
+      return;
+    }
+    setNavigationGuideHiddenLocal(true);
+    showMessage({
+      variant: 'info',
+      title: 'Guía oculta',
+      message:
+        'Has ocultado la ruta solo en tu pantalla. El grupo sigue con la misma ruta; el anfitrión puede quitarla para todos.',
+    });
+  }, [user, groupId, isHost, showMessage]);
 
   const copyCode = async () => {
     const ok = await copyTextToClipboard(groupId);
@@ -2081,12 +2183,12 @@ export default function MapView({
     }
     const routeJson = typeof preloadedRoute === 'string' ? preloadedRoute.trim() : '';
     if (!routeJson) {
-      window.alert('No hay una ruta cargada para invitar desde esta sesión.');
+      showMessage({ variant: 'info', title: 'Invitar', message: 'No hay una ruta cargada para invitar desde esta sesión.' });
       return;
     }
     if (!user) return;
     if (!onPromoteFromRepeat) {
-      window.alert('No se puede generar invitación en este modo.');
+      showMessage({ variant: 'info', title: 'Invitar', message: 'No se puede generar invitación en este modo.' });
       return;
     }
     setInviteBusy(true);
@@ -2219,11 +2321,14 @@ export default function MapView({
 
     if (!so?.lock) {
       if (isiPhone) {
-        alert(
-          'En iPhone Safari el bloqueo de orientación del navegador suele estar limitado. Usa "Añadir a pantalla de inicio", abre la app desde el icono y activa "Bloquear giro" tras ponerla en horizontal.'
-        );
+        showMessage({
+          variant: 'info',
+          title: 'Orientación',
+          message:
+            'En iPhone Safari el bloqueo de orientación del navegador suele estar limitado. Usa «Añadir a pantalla de inicio», abre la app desde el icono y activa «Bloquear giro» tras ponerla en horizontal.',
+        });
       } else {
-        alert('Tu navegador no soporta bloquear la orientación.');
+        showMessage({ variant: 'info', title: 'Orientación', message: 'Tu navegador no soporta bloquear la orientación.' });
       }
       return;
     }
@@ -2256,15 +2361,27 @@ export default function MapView({
       }
       const msg = firstErr && typeof firstErr === 'object' && 'message' in firstErr ? String((firstErr as Error).message) : '';
       if (msg.includes('sandboxed')) {
-        alert("⚠️ El bloqueo de orientación no está disponible en esta vista previa. Abre la app en una pestaña normal del navegador.");
+        showMessage({
+          variant: 'info',
+          title: 'Orientación',
+          message: 'El bloqueo de orientación no está disponible en esta vista previa. Abre la app en una pestaña normal del navegador.',
+        });
       } else if (isiPhone) {
         // Fallback iPhone: bloqueamos la UI en modo paisaje aunque el lock nativo falle.
         setForceLandscapeUi(true);
-        alert(
-          'iPhone: el bloqueo nativo ha fallado. Activamos el modo "paisaje forzado" solo para iPhone para mantener la interfaz en horizontal.'
-        );
+        showMessage({
+          variant: 'info',
+          title: 'iPhone',
+          message:
+            'El bloqueo nativo ha fallado. Activamos el modo «paisaje forzado» solo para iPhone para mantener la interfaz en horizontal.',
+        });
       } else {
-        alert('No se pudo bloquear el giro. Prueba en pantalla completa o comprueba que la rotación no esté bloqueada a nivel del sistema.');
+        showMessage({
+          variant: 'info',
+          title: 'Orientación',
+          message:
+            'No se pudo bloquear el giro. Prueba en pantalla completa o comprueba que la rotación no esté bloqueada a nivel del sistema.',
+        });
       }
     }
   };
@@ -2379,7 +2496,11 @@ export default function MapView({
       return;
     }
 
-    alert('Para calibrar mejor: parado (o casi) o en recta estable unos segundos a partir de ~22 km/h.');
+    showMessage({
+      variant: 'info',
+      title: 'Calibrar inclinación',
+      message: 'Para calibrar mejor: parado (o casi) o en recta estable unos segundos a partir de ~22 km/h.',
+    });
   };
 
   const otherLocations = useMemo(
@@ -2484,7 +2605,7 @@ export default function MapView({
 
   const connectionBannerHeight = !isOnline ? 58 : 0;
   const hostBannerHeight = hostLeftRoute && !isHost ? 64 : 0;
-  const headerOverlayHeight = parsedRoute ? 220 : (!isMoving ? 98 : 0);
+  const headerOverlayHeight = effectiveRouteForNav ? 220 : (!isMoving ? 98 : 0);
   const C = connectionBannerHeight;
   const H = hostBannerHeight;
   const navHeaderPad = !isMoving ? 86 : 8;
@@ -2509,7 +2630,7 @@ export default function MapView({
   const leanIosBannerTop = topBelowSafe(blockBelowHeader + navHeaderPad + (gpsError ? 58 : 0) + 8);
 
   const topStackBelowSafe = edgeGap + C + H;
-  const headerBlockForRanking = !parsedRoute ? 56 : headerOverlayHeight;
+  const headerBlockForRanking = !effectiveRouteForNav ? 56 : headerOverlayHeight;
   const rankingExtra = Math.max(
     topStackBelowSafe + peerAlertsStripHeight + headerBlockForRanking + 10,
     edgeGap + C + H + peerAlertsStripHeight + navHeaderPad + (gpsError ? 72 : 0),
@@ -2663,31 +2784,41 @@ export default function MapView({
            )}
 
            {/* Navigation Instruction */}
-           {parsedRoute && (
-             <div className={`bg-zinc-950/95 backdrop-blur-md border-l-8 border-blue-500 rounded-2xl shadow-2xl flex items-center pointer-events-auto mt-2 max-w-sm ring-1 ring-white/10 transition-all duration-300 ${isCompactUI ? 'p-3 gap-3' : 'p-5 gap-5'}`}>
-               <div className={`${isCompactUI ? 'w-12 h-12' : 'w-16 h-16'} bg-blue-600 rounded-2xl flex items-center justify-center text-white shrink-0 shadow-lg rotate-3`}>
-                 <div className="-rotate-3">
-                  {getDirectionIcon(navState.maneuverType, navState.maneuverModifier)}
+           {effectiveRouteForNav && (
+             <div className={`bg-zinc-950/95 backdrop-blur-md border-l-8 border-blue-500 rounded-2xl shadow-2xl flex flex-col gap-2 pointer-events-auto mt-2 max-w-sm ring-1 ring-white/10 transition-all duration-300 ${isCompactUI ? 'p-3' : 'p-4'}`}>
+               <div className={`flex items-center ${isCompactUI ? 'gap-3' : 'gap-5'}`}>
+                 <div className={`${isCompactUI ? 'w-12 h-12' : 'w-16 h-16'} bg-blue-600 rounded-2xl flex items-center justify-center text-white shrink-0 shadow-lg rotate-3`}>
+                   <div className="-rotate-3">
+                    {getDirectionIcon(navState.maneuverType, navState.maneuverModifier)}
+                   </div>
+                 </div>
+                 <div className="flex-1 min-w-0">
+                   <p className={`${isCompactUI ? 'text-base' : 'text-xl'} text-white font-black leading-tight tracking-tight`}>{navState.instruction}</p>
+                   {navState.instructionDetail ? (
+                     <p className={`${isCompactUI ? 'text-xs' : 'text-sm'} text-blue-100/90 font-semibold leading-snug mt-1`}>
+                       {navState.instructionDetail}
+                     </p>
+                   ) : null}
+                   {navState.distanceToNext !== null && (
+                     <div className="flex items-baseline gap-1 mt-1">
+                       <span className={`${isCompactUI ? 'text-xl' : 'text-2xl'} text-blue-400 font-black`}>
+                         {navState.distanceToNext >= 1000 ? (navState.distanceToNext / 1000).toFixed(1) : navState.distanceToNext}
+                       </span>
+                       <span className="text-blue-400/70 font-bold text-sm uppercase">
+                         {navState.distanceToNext >= 1000 ? 'km' : 'm'}
+                       </span>
+                     </div>
+                   )}
                  </div>
                </div>
-               <div className="flex-1">
-                 <p className={`${isCompactUI ? 'text-base' : 'text-xl'} text-white font-black leading-tight tracking-tight`}>{navState.instruction}</p>
-                 {navState.instructionDetail ? (
-                   <p className={`${isCompactUI ? 'text-xs' : 'text-sm'} text-blue-100/90 font-semibold leading-snug mt-1`}>
-                     {navState.instructionDetail}
-                   </p>
-                 ) : null}
-                 {navState.distanceToNext !== null && (
-                   <div className="flex items-baseline gap-1 mt-1">
-                     <span className={`${isCompactUI ? 'text-xl' : 'text-2xl'} text-blue-400 font-black`}>
-                       {navState.distanceToNext >= 1000 ? (navState.distanceToNext / 1000).toFixed(1) : navState.distanceToNext}
-                     </span>
-                     <span className="text-blue-400/70 font-bold text-sm uppercase">
-                       {navState.distanceToNext >= 1000 ? 'km' : 'm'}
-                     </span>
-                   </div>
-                 )}
-               </div>
+               <button
+                 type="button"
+                 onClick={() => void cancelNavigation()}
+                 className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 text-xs font-bold"
+               >
+                 <Ban size={14} className="text-orange-400 shrink-0" />
+                 {isHost ? 'Cancelar navegación (quita la ruta para todos)' : 'Ocultar guía solo en mi pantalla'}
+               </button>
              </div>
            )}
          </div>
@@ -2706,9 +2837,12 @@ export default function MapView({
              onClick={() => {
                clearMicError();
                if (!voiceAllowed) {
-                 window.alert(
-                   'El chat de voz es Premium. Si el anfitrión de esta ruta tiene Premium, todo el grupo puede usarlo. Si no, puedes obtenerlo apoyando el proyecto (Ko-fi; activación manual). Menú principal → Apoyar proyecto.'
-                 );
+                 showMessage({
+                   variant: 'info',
+                   title: 'Chat de voz',
+                   message:
+                     'El chat de voz es Premium. Si el anfitrión de esta ruta tiene Premium, todo el grupo puede usarlo. Si no, puedes obtenerlo apoyando el proyecto (Ko-fi; activación manual). Menú principal → Apoyar proyecto.',
+                 });
                  return;
                }
                void toggleVoice();
@@ -3281,8 +3415,16 @@ export default function MapView({
                 .map((loc, index) => (
                   <div key={loc.uid} className={`flex items-center gap-3 p-2 rounded-xl border ${loc.uid === user?.uid ? 'bg-orange-500/10 border-orange-500/30' : 'bg-zinc-900 border-zinc-800'}`}>
                     <div className="w-6 text-xs font-black text-zinc-500">#{index + 1}</div>
-                    <div className="relative">
-                      <img src={loc.photoURL || 'https://via.placeholder.com/32'} className="w-8 h-8 rounded-full border border-zinc-700" />
+                    <div className="relative shrink-0">
+                      <div
+                        className={`rounded-full p-[2px] ${getLevelRingWrapperClass(loc.level || 1, loc.isPremium === true)}`}
+                      >
+                        <img
+                          src={loc.photoURL || 'https://via.placeholder.com/32'}
+                          alt=""
+                          className="w-8 h-8 rounded-full block bg-zinc-800"
+                        />
+                      </div>
                       <div className="absolute -bottom-1 -right-1 bg-orange-500 text-white text-[8px] font-black w-4 h-4 flex items-center justify-center rounded-full border border-zinc-900">
                         {loc.level || 1}
                       </div>
@@ -3402,6 +3544,9 @@ export default function MapView({
               <div className="space-y-4">
                 <div>
                   <label className="block text-xs font-bold text-zinc-500 uppercase mb-2 ml-1">Buscar destino</label>
+                  <p className="text-[10px] text-zinc-500 mb-2 leading-relaxed">
+                    Escribe ciudad y región (ej. Huesca, Aragón) y elige la sugerencia que coincida con el municipio. Así evitamos que el buscador te lleve a un punto suelto lejos del centro.
+                  </p>
                   <div className="flex gap-2">
                     <div className="relative flex-1">
                       <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" size={16} />
@@ -3551,10 +3696,10 @@ export default function MapView({
         )}
         
         {/* Draw GPX Route */}
-        {parsedRoute && (
+        {effectiveRouteForNav && (
           <GeoJSON 
             key={group?.routeGeoJSON?.length || 'route'} // Force re-render when route changes
-            data={parsedRoute} 
+            data={effectiveRouteForNav} 
             style={{ color: '#3b82f6', weight: 5, opacity: 0.8 }} 
           />
         )}
@@ -3628,7 +3773,7 @@ export default function MapView({
           showRanking={showRanking}
           isRecording={isRecording}
           speedKmh={currentSpeedKmh}
-          hasActiveRoute={!!parsedRoute}
+          hasActiveRoute={!!effectiveRouteForNav}
           isLandscapeUi={isLandscapeUi}
         />
           </MapContainer>
@@ -3719,7 +3864,11 @@ export default function MapView({
                           maxLeanRight: summaryData.maxLeanRight,
                         });
                         if (!ok) {
-                          alert('No se pudieron sumar los puntos al perfil. Revisa la conexión e inténtalo de nuevo.');
+                          showMessage({
+                            variant: 'error',
+                            title: 'Puntos',
+                            message: 'No se pudieron sumar los puntos al perfil. Revisa la conexión e inténtalo de nuevo.',
+                          });
                           return;
                         }
                         ridePointsCommittedSessionKeyRef.current = summaryData.rideSessionKey;
@@ -3738,14 +3887,16 @@ export default function MapView({
                         leftTurns: summaryData.leftTurns,
                         rightTurns: summaryData.rightTurns,
                         score: summaryData.score,
+                        baseScore: summaryData.baseScore ?? summaryData.score,
+                        pointsEarned: summaryData.score,
                         path: pathForHistory,
                       });
                       clearRideDraft();
                       setShowSummary(false);
-                      alert("Ruta guardada en tu historial.");
+                      showMessage({ variant: 'success', title: 'Historial', message: 'Ruta guardada en tu historial.' });
                     } catch (e) {
                       console.error(e);
-                      alert("Error al guardar en el historial.");
+                      showMessage({ variant: 'error', title: 'Historial', message: 'Error al guardar en el historial.' });
                     }
                   }}
                   className="w-full bg-orange-500 hover:bg-orange-600 text-white font-black py-4 rounded-2xl transition-all shadow-lg shadow-orange-500/20"
@@ -3767,9 +3918,12 @@ export default function MapView({
                         if (ok) {
                           ridePointsCommittedSessionKeyRef.current = summaryData.rideSessionKey;
                         } else {
-                          alert(
-                            'Los puntos de esta ruta no se han podido sumar al perfil (conexión o servidor). Los intentaremos de nuevo si reaparece el resumen al volver a entrar.'
-                          );
+                          showMessage({
+                            variant: 'error',
+                            title: 'Puntos',
+                            message:
+                              'Los puntos de esta ruta no se han podido sumar al perfil (conexión o servidor). Los intentaremos de nuevo si reaparece el resumen al volver a entrar.',
+                          });
                         }
                       }
                     }

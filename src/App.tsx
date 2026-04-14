@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { AppMessageProvider, useAppMessage } from './contexts/AppMessageContext';
 import Login from './components/Login';
 import MainApp from './components/MainApp';
 import { AlertTriangle, Download, RefreshCcw, ShieldAlert } from 'lucide-react';
@@ -48,6 +49,7 @@ const AppErrorBoundary: React.FC<AppErrorBoundaryProps> = ({ children }) => <>{c
 
 const AppContent = () => {
   const { user, loading, error } = useAuth();
+  const showMessage = useAppMessage();
   const [showInstallNotice, setShowInstallNotice] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isSafari, setIsSafari] = useState(false);
@@ -129,11 +131,21 @@ const AppContent = () => {
       } else if (el.webkitRequestFullscreen) {
         await el.webkitRequestFullscreen();
       } else {
-        alert('En iPhone no funciona la pantalla completa dentro del navegador. Instala la app desde Safari: abajo, Compartir → Añadir a pantalla de inicio. Luego ábrela desde el icono en tu pantalla de inicio.');
+        showMessage({
+          title: 'Pantalla completa',
+          variant: 'info',
+          message:
+            'En iPhone no funciona la pantalla completa dentro del navegador. Instala la app desde Safari: abajo, Compartir → Añadir a pantalla de inicio. Luego ábrela desde el icono en tu pantalla de inicio.',
+        });
       }
     } catch (err) {
       console.error('Fullscreen not available:', err);
-      alert('No se pudo usar pantalla completa aquí. En iPhone: instala MotoRide desde Safari (Compartir → Añadir a pantalla de inicio) y ábrela desde el icono.');
+      showMessage({
+        title: 'Pantalla completa',
+        variant: 'info',
+        message:
+          'No se pudo usar pantalla completa aquí. En iPhone: instala MotoRide desde Safari (Compartir → Añadir a pantalla de inicio) y ábrela desde el icono.',
+      });
     }
   };
   
@@ -255,9 +267,11 @@ const AppContent = () => {
 export default function App() {
   return (
     <AuthProvider>
-      <AppErrorBoundary>
-        <AppContent />
-      </AppErrorBoundary>
+      <AppMessageProvider>
+        <AppErrorBoundary>
+          <AppContent />
+        </AppErrorBoundary>
+      </AppMessageProvider>
     </AuthProvider>
   );
 }

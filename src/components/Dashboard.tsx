@@ -1,17 +1,27 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { doc, setDoc, getDoc, updateDoc, arrayUnion, arrayRemove, collection, query, where, onSnapshot, deleteDoc, orderBy, limit } from 'firebase/firestore';
+import { doc, setDoc, getDoc, updateDoc, arrayUnion, arrayRemove, collection, query, where, onSnapshot, deleteDoc } from 'firebase/firestore';
 import { db, logOut, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppMessage } from '../contexts/AppMessageContext';
 import { parseGPX, parseRouteData } from '../lib/gpx';
 import { calculateLevel, formatDurationHoursMinutes } from '../lib/utils';
 import { requestJson } from '../lib/network';
 import { LEAFLET_LIGHT_ERROR_TILE } from '../lib/leafletTiles';
-import { Users, Plus, LogOut, User as UserIcon, Activity, Trash2, Trophy, Calendar, MapPin, Search, Clock, ChevronRight, Upload, X, Map as MapIcon, Play, HeartHandshake, CircleDollarSign, Shield, CheckCircle2, AlertCircle, Mail, Share2, Copy, Check, Loader2 } from 'lucide-react';
+import { Users, Plus, LogOut, User as UserIcon, Activity, Trash2, Trophy, Calendar, MapPin, Search, Clock, ChevronRight, Upload, X, Map as MapIcon, HeartHandshake, CircleDollarSign, Shield, CheckCircle2, AlertCircle, Mail, Share2, Copy, Check, Loader2, Globe, Lock, Inbox } from 'lucide-react';
 import { copyTextToClipboard, getSupportMailtoHref } from '../lib/clientInfo';
 import { generateGroupCode } from '../lib/groupCode';
+import {
+  canShowRouteInExplore,
+  normalizeFriendIds,
+  ROUTE_LISTING_LABELS,
+  type RouteListing,
+} from '../lib/routeListing';
+import { requestUserLocation, reverseGeocodeProvinceMunicipality } from '../lib/reverseGeocode';
+import { getLevelRingWrapperClass } from '../lib/levelRing';
 import FriendsModal from './FriendsModal';
+import InvitesMailboxModal from './InvitesMailboxModal';
 import AdminPointsPanel from './AdminPointsPanel';
 import PremiumBadge from './PremiumBadge';
 
@@ -35,6 +45,7 @@ const PROVINCE_MAPPING: {[key: string]: string} = {
 
 export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }: DashboardProps) {
   const { user } = useAuth();
+  const showMessage = useAppMessage();
   const [userData, setUserData] = useState<any>(null);
   const [pointsFixError, setPointsFixError] = useState<string | null>(null);
 
@@ -93,7 +104,6 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
 
   const [joinCode, setJoinCode] = useState('');
   const [loading, setLoading] = useState(false);
-  const [rideHistory, setRideHistory] = useState<any[]>([]);
   const [scheduledRoutes, setScheduledRoutes] = useState<any[]>([]);
   const [nearbyRoutes, setNearbyRoutes] = useState<any[]>([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -112,13 +122,18 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     showSupportModal: false,
     hasPreview: false,
   });
-  const [indexBuilding, setIndexBuilding] = useState(false);
   /** Tras crear ruta programada: mostrar código y enlaces de invitación (antes no se veía el código). */
-  const [postScheduleInvite, setPostScheduleInvite] = useState<{ code: string; name: string } | null>(null);
+  const [postScheduleInvite, setPostScheduleInvite] = useState<{
+    code: string;
+    name: string;
+    routeListing: RouteListing;
+  } | null>(null);
   const [scheduleInviteCopied, setScheduleInviteCopied] = useState<'code' | 'link' | null>(null);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [deletingType, setDeletingType] = useState<'history' | 'scheduled' | null>(null);
+  const [deletingType, setDeletingType] = useState<'scheduled' | null>(null);
+  const exploreGpsFilledRef = useRef(false);
+  const [exploreFromGpsHint, setExploreFromGpsHint] = useState(false);
   
   // Create Route Form State
   const [routeName, setRouteName] = useState('');
@@ -130,6 +145,8 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   const [municipality, setMunicipality] = useState('');
   const [description, setDescription] = useState('');
   const [gpxData, setGpxData] = useState<string | null>(null);
+  /** Solo para rutas programadas (`isScheduled`): quién ve la ruta en "Explorar". */
+  const [routeListing, setRouteListing] = useState<RouteListing>('public');
   const [destination, setDestination] = useState('');
   const [destinationPreview, setDestinationPreview] = useState<string | null>(null);
   const [destinationSuggestions, setDestinationSuggestions] = useState<any[]>([]);
@@ -203,6 +220,61 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   const [createMunis, setCreateMunis] = useState<string[]>([]);
   const isAdmin = user?.email?.toLowerCase() === 'juarp123@gmail.com';
 
+  const [inviteInboxCount, setInviteInboxCount] = useState(0);
+  const [showInvitesMailbox, setShowInvitesMailbox] = useState(false);
+  const [friendsPlannedRoutes, setFriendsPlannedRoutes] = useState<any[]>([]);
+  const friendsRoutesChunkRef = useRef<Record<number, Record<string, any>>>({});
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    const unsub = onSnapshot(collection(db, 'users', user.uid, 'invites'), (snap) => {
+      setInviteInboxCount(snap.size);
+    });
+    return unsub;
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    const friendIds = normalizeFriendIds(userData?.friends);
+    friendsRoutesChunkRef.current = {};
+    if (friendIds.length === 0) {
+      setFriendsPlannedRoutes([]);
+      return;
+    }
+    const chunkSize = 28;
+    const chunks: string[][] = [];
+    for (let i = 0; i < friendIds.length; i += chunkSize) {
+      chunks.push(friendIds.slice(i, i + chunkSize));
+    }
+    const unsubs = chunks.map((chunk, chunkIdx) => {
+      const q = query(
+        collection(db, 'groups'),
+        where('isScheduled', '==', true),
+        where('createdBy', 'in', chunk)
+      );
+      return onSnapshot(
+        q,
+        (snapshot) => {
+          const map: Record<string, any> = {};
+          snapshot.docs.forEach((d) => {
+            map[d.id] = { id: d.id, ...d.data() };
+          });
+          friendsRoutesChunkRef.current[chunkIdx] = map;
+          const merged = Object.values(friendsRoutesChunkRef.current).flatMap((m) => Object.values(m));
+          const now = Date.now();
+          setFriendsPlannedRoutes(
+            merged.filter((r) => (r.scheduledTimestamp || 0) > now && r.code)
+          );
+        },
+        (error) => {
+          console.error('Rutas de amigos:', error);
+          handleFirestoreError(error, OperationType.LIST, 'groups/friends-routes');
+        }
+      );
+    });
+    return () => unsubs.forEach((u) => u());
+  }, [user?.uid, userData?.friends]);
+
   useEffect(() => {
     const handleOnline = () => setIsOffline(false);
     const handleOffline = () => setIsOffline(true);
@@ -235,6 +307,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   const closeCreateModal = useCallback(() => {
     setShowCreateModal(false);
     setLoading(false);
+    setRouteListing('public');
   }, []);
 
   useEffect(() => {
@@ -326,20 +399,6 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
 
   useEffect(() => {
     if (!user) return;
-    const historyQ = query(collection(db, 'rideHistory'), where('uid', '==', user.uid), orderBy('endTime', 'desc'), limit(10));
-    const unsubscribeHistory = onSnapshot(historyQ, (snapshot) => {
-      const historyData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as any[];
-      setRideHistory(historyData);
-      setIndexBuilding(false);
-    }, (error) => {
-      if (error.message.includes('index') && error.message.includes('building')) {
-        setIndexBuilding(true);
-      }
-      console.error("Error en historial (posible falta de índice):", error);
-      handleFirestoreError(error, OperationType.LIST, 'rideHistory');
-    });
-
-    // Listen to scheduled routes I'm part of
     const scheduledQ = query(collection(db, 'groups'), where('members', 'array-contains', user.uid), where('isScheduled', '==', true));
     const unsubscribeScheduled = onSnapshot(scheduledQ, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as any[];
@@ -350,10 +409,45 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     });
 
     return () => {
-      unsubscribeHistory();
       unsubscribeScheduled();
     };
   }, [user]);
+
+  /** Explorar rutas: rellenar provincia/municipio desde GPS una vez al cargar. */
+  useEffect(() => {
+    if (!user?.uid || exploreGpsFilledRef.current) return;
+    let cancelled = false;
+    (async () => {
+      const pos = await requestUserLocation();
+      if (!pos || cancelled) return;
+      const parts = await reverseGeocodeProvinceMunicipality(pos.lat, pos.lon);
+      if (!parts || cancelled) return;
+      exploreGpsFilledRef.current = true;
+      if (parts.province) setSearchProvince(parts.province);
+      if (parts.municipality) setSearchMunicipality(parts.municipality);
+      setExploreFromGpsHint(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.uid]);
+
+  /** Crear ruta: al abrir el modal, sugerir provincia/municipio desde GPS (editable). */
+  useEffect(() => {
+    if (!user || !showCreateModal) return;
+    let cancelled = false;
+    (async () => {
+      const pos = await requestUserLocation();
+      if (!pos || cancelled) return;
+      const parts = await reverseGeocodeProvinceMunicipality(pos.lat, pos.lon);
+      if (!parts || cancelled) return;
+      if (parts.province) setProvince(parts.province);
+      if (parts.municipality) setMunicipality(parts.municipality);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [showCreateModal, user]);
 
   // Search for routes
   useEffect(() => {
@@ -372,16 +466,24 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       q = query(q, where('municipality', '==', searchMunicipality.trim().toLowerCase()));
     }
 
+    const friendIds = normalizeFriendIds(userData?.friends);
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as any[];
-      setNearbyRoutes(data.filter(r => (r.scheduledTimestamp || 0) > Date.now()));
+      const uid = user?.uid;
+      setNearbyRoutes(
+        data.filter(
+          (r) =>
+            (r.scheduledTimestamp || 0) > Date.now() &&
+            canShowRouteInExplore(r, uid, friendIds)
+        )
+      );
     }, (error) => {
       console.error("Error buscando rutas cercanas:", error);
       handleFirestoreError(error, OperationType.LIST, 'groups');
     });
 
     return () => unsubscribe();
-  }, [searchProvince, searchMunicipality]);
+  }, [searchProvince, searchMunicipality, user?.uid, userData?.friends]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -392,7 +494,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       const parsed = parseGPX(raw);
       const routeCoords = (parsed as any)?.features?.find((f: any) => f?.geometry?.type === 'LineString')?.geometry?.coordinates;
       if (!routeCoords || routeCoords.length < 2) {
-        alert('El archivo GPX no contiene una ruta válida.');
+        showMessage({ variant: 'error', title: 'GPX', message: 'El archivo GPX no contiene una ruta válida.' });
         return;
       }
       setGpxData(JSON.stringify(parsed));
@@ -407,7 +509,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     // Default name for spontaneous routes if empty
     const finalRouteName = routeName || (isEsporadica ? `Ruta Espontánea ${new Date().toLocaleDateString()}` : '');
     if (!finalRouteName) {
-      alert('Por favor, introduce un nombre para la ruta.');
+      showMessage({ variant: 'info', title: 'Nombre', message: 'Por favor, introduce un nombre para la ruta.' });
       return;
     }
 
@@ -431,16 +533,17 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       description: description.trim(),
       isEsporadica,
       createdAt: Date.now(),
+      ...(routeType === 'scheduled' ? { routeListing } : {}),
       ...(gpxData ? { routeGeoJSON: gpxData } : {}),
     };
 
     try {
       await setDoc(doc(db, 'groups', code), groupData);
-      setShowCreateModal(false);
+      closeCreateModal();
       if (routeType === 'instant') {
         onJoinGroup(code);
       } else {
-        setPostScheduleInvite({ code, name: finalRouteName });
+        setPostScheduleInvite({ code, name: finalRouteName, routeListing });
         setScheduleInviteCopied(null);
       }
     } catch (error) {
@@ -641,7 +744,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
         });
         onJoinGroup(code);
       } else {
-        alert('Grupo no encontrado. Comprueba el código.');
+        showMessage({ variant: 'error', title: 'Código', message: 'Grupo no encontrado. Comprueba el código.' });
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `groups/${code}`);
@@ -657,7 +760,11 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
         const snap = await getDoc(groupRef);
         const d = snap.data();
         if (d?.isScheduled === true && d?.createdBy === user.uid) {
-          alert('Como organizador de una ruta programada no puedes desapuntarte. Borra la ruta si ya no la quieres.');
+          showMessage({
+            variant: 'info',
+            title: 'Ruta programada',
+            message: 'Como organizador de una ruta programada no puedes desapuntarte. Borra la ruta si ya no la quieres.',
+          });
           return;
         }
         await updateDoc(groupRef, {
@@ -671,21 +778,6 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `groups/${routeCode}`);
     }
-  };
-
-  const deleteRide = async (rideId: string) => {
-    setDeletingId(rideId);
-    setDeletingType('history');
-  };
-
-  const confirmDeleteRide = async (rideId: string) => {
-    try {
-      await deleteDoc(doc(db, 'rideHistory', rideId));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `rideHistory/${rideId}`);
-    }
-    setDeletingId(null);
-    setDeletingType(null);
   };
 
   const deleteScheduledRoute = async (e: React.MouseEvent, routeId: string) => {
@@ -712,15 +804,17 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           <div className="flex items-center gap-3 min-w-0">
             <button 
               onClick={onOpenProfile}
-              className="w-10 h-10 rounded-full overflow-hidden border-2 border-orange-500 hover:opacity-80 transition-opacity"
+              className={`w-11 h-11 rounded-full p-[2px] hover:opacity-90 transition-opacity ${getLevelRingWrapperClass(level, user?.isPremium === true || userData?.isPremium === true)}`}
             >
+              <span className="block w-full h-full rounded-full overflow-hidden bg-zinc-800 border border-zinc-900">
               {userData?.photoURL ? (
                 <img src={userData.photoURL} alt="Avatar" className="w-full h-full object-cover" />
               ) : (
-                <div className="w-full h-full bg-zinc-800 flex items-center justify-center">
+                <div className="w-full h-full flex items-center justify-center">
                   <UserIcon size={20} className="text-zinc-500" />
                 </div>
               )}
+              </span>
             </button>
           </div>
 
@@ -737,7 +831,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap justify-end">
             {isAdmin && (
               <button 
                 onClick={() => setShowAdminPanel(true)}
@@ -747,10 +841,38 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                 <Shield size={20} />
               </button>
             )}
+            <button
+              type="button"
+              onClick={() => setShowSupportModal(true)}
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full bg-orange-500/15 border border-orange-500/30 text-orange-400 hover:bg-orange-500/25 transition-colors shrink-0"
+              title="Apoyar MotoRide (Ko-fi)"
+            >
+              <HeartHandshake size={16} className="shrink-0" />
+              <span className="text-[11px] sm:text-xs font-black uppercase tracking-wide hidden sm:inline">
+                Apoyar
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowInvitesMailbox(true)}
+              className="relative p-2 bg-zinc-900 border border-zinc-800 rounded-full hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-orange-400"
+              title="Invitaciones a rutas"
+            >
+              <Inbox size={20} />
+              {(inviteInboxCount > 0 || user?.rideInvitePending?.groupId) && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-orange-500 text-[10px] font-black text-white flex items-center justify-center border-2 border-zinc-950">
+                  {inviteInboxCount > 0
+                    ? inviteInboxCount > 9
+                      ? '9+'
+                      : inviteInboxCount
+                    : '1'}
+                </span>
+              )}
+            </button>
             <a
               href={getSupportMailtoHref()}
               className="p-2 bg-zinc-900 border border-zinc-800 rounded-full hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-sky-400"
-              title="Contactar soporte (se incluye sistema y navegador en el mensaje)"
+              title="Contactar soporte"
             >
               <Mail size={20} />
             </a>
@@ -766,20 +888,47 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       </header>
 
       <main className="max-w-5xl mx-auto space-y-8 py-6 pl-[max(1.5rem,env(safe-area-inset-left,0px))] pr-[max(1.5rem,env(safe-area-inset-right,0px))]">
-        <div className="flex justify-end">
-          <button
-            onClick={() => setShowSupportModal(true)}
-            className="w-full max-w-sm bg-zinc-900 border border-zinc-800 hover:border-orange-500/40 rounded-2xl px-4 py-3 flex items-center justify-center gap-3 transition-all"
-          >
-            <div className="w-9 h-9 rounded-xl bg-orange-500/20 text-orange-400 flex items-center justify-center">
-              <HeartHandshake size={18} />
+        {/* Rutas planificadas por tus amigos */}
+        <section className="bg-zinc-900/40 border border-zinc-800 rounded-3xl p-6">
+          <h2 className="text-lg font-bold flex items-center gap-2 mb-4">
+            <Users className="text-orange-500" size={20} />
+            Rutas de amigos
+          </h2>
+          {friendsPlannedRoutes.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {friendsPlannedRoutes.map((route) => (
+                <div
+                  key={route.id}
+                  className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex flex-col gap-2"
+                >
+                  <p className="font-bold text-white truncate">{route.name}</p>
+                  <p className="text-[10px] text-zinc-500">
+                    {route.scheduledTimestamp
+                      ? new Date(route.scheduledTimestamp).toLocaleString([], {
+                          dateStyle: 'short',
+                          timeStyle: 'short',
+                        })
+                      : ''}
+                  </p>
+                  <p className="text-[10px] text-zinc-600 capitalize">
+                    {route.municipality}, {route.province}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => onJoinGroup(route.code)}
+                    className="mt-1 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold"
+                  >
+                    Ver / unirse con código
+                  </button>
+                </div>
+              ))}
             </div>
-            <div className="text-left">
-              <p className="text-sm font-bold text-white">Apoyar proyecto</p>
-              <p className="text-[11px] text-zinc-500">Ko-fi · desbloquea Premium (revisión manual)</p>
-            </div>
-          </button>
-        </div>
+          ) : (
+            <p className="text-sm text-zinc-500">
+              Cuando tus amigos programen rutas, aparecerán aquí para que puedas unirte.
+            </p>
+          )}
+        </section>
 
         {pointsFixError && (
           <div className="bg-red-500/10 border border-red-500/30 rounded-2xl px-4 py-3 text-sm text-red-200">
@@ -838,10 +987,20 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
         {/* Search & Discovery */}
         <section className="bg-zinc-900/50 border border-zinc-800 rounded-3xl p-6">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-            <h2 className="text-xl font-bold flex items-center gap-2">
-              <Search className="text-orange-500" size={20} />
-              Explorar rutas planificadas
-            </h2>
+            <div>
+              <h2 className="text-xl font-bold flex items-center gap-2">
+                <Search className="text-orange-500" size={20} />
+                Explorar rutas planificadas
+              </h2>
+              <p className="text-[11px] text-zinc-500 mt-1 max-w-xl">
+                Las rutas <span className="text-zinc-400">solo amigos</span> o <span className="text-zinc-400">privadas</span> solo las ves tú y quien corresponda; el resto usa código o enlace para unirse.
+              </p>
+              {exploreFromGpsHint && (
+                <p className="text-[10px] text-emerald-500/90 mt-1 flex items-center gap-1">
+                  <MapPin size={10} /> Provincia y municipio sugeridos desde tu ubicación (puedes cambiarlos).
+                </p>
+              )}
+            </div>
             <div className="flex flex-wrap gap-2">
               <div className="relative flex-1 sm:flex-none">
                 <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" size={14} />
@@ -876,9 +1035,16 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {nearbyRoutes.map(route => (
                 <div key={route.id} className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl hover:border-orange-500/50 transition-all group">
-                  <div className="flex justify-between items-start mb-3">
-                    <div className="bg-orange-500/10 text-orange-500 text-[10px] font-bold px-2 py-1 rounded-full uppercase">
-                      {route.isEsporadica ? 'Espontánea' : 'GPX'}
+                  <div className="flex justify-between items-start mb-3 gap-2 flex-wrap">
+                    <div className="flex flex-wrap gap-1.5">
+                      <div className="bg-orange-500/10 text-orange-500 text-[10px] font-bold px-2 py-1 rounded-full uppercase">
+                        {route.isEsporadica ? 'Espontánea' : 'GPX'}
+                      </div>
+                      {route.routeListing === 'friends_only' && (
+                        <div className="bg-blue-500/15 text-blue-400 text-[10px] font-bold px-2 py-1 rounded-full uppercase flex items-center gap-1">
+                          <HeartHandshake size={10} /> Solo amigos
+                        </div>
+                      )}
                     </div>
                   <div className="text-zinc-500 text-xs flex items-center gap-3">
                     <div className="flex items-center gap-1">
@@ -941,10 +1107,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           )}
         </section>
 
-        {/* Scheduled & History Tabs */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Scheduled Routes */}
-          <div className="lg:col-span-1 space-y-4">
+        <div className="max-w-xl mx-auto w-full space-y-4">
             <h3 className="text-lg font-bold flex items-center gap-2">
               <Calendar className="text-blue-500" size={18} />
               Mis Próximas Rutas
@@ -957,7 +1120,19 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                     <div key={route.id} className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl flex flex-col gap-3 group">
                       <div className="flex items-center justify-between">
                         <div className="min-w-0 flex-1">
-                          <p className="font-bold text-sm truncate pr-2">{route.name}</p>
+                          <div className="flex flex-wrap items-center gap-1.5 pr-2">
+                            <p className="font-bold text-sm truncate">{route.name}</p>
+                            {route.routeListing === 'friends_only' && (
+                              <span className="shrink-0 text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400">
+                                Solo amigos
+                              </span>
+                            )}
+                            {route.routeListing === 'unlisted' && (
+                              <span className="shrink-0 text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-zinc-700 text-zinc-300 flex items-center gap-0.5">
+                                <Lock size={9} /> Privada
+                              </span>
+                            )}
+                          </div>
                           <div className="flex items-center gap-3 text-[10px] text-zinc-500 mt-1">
                             <p>
                               {new Date(route.scheduledTimestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
@@ -1038,97 +1213,19 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                 <p className="text-zinc-600 text-xs italic">No tienes rutas programadas</p>
               )}
             </div>
-          </div>
-
-          {/* Ride History */}
-          <div className="lg:col-span-2 space-y-4">
-            <h3 className="text-lg font-bold flex items-center gap-2">
-              <Activity className="text-orange-500" size={18} />
-              Historial Reciente
-            </h3>
-            {indexBuilding && (
-              <div className="bg-blue-500/10 border border-blue-500/20 p-4 rounded-2xl flex items-center gap-3 animate-pulse">
-                <Clock className="text-blue-400" size={18} />
-                <p className="text-xs text-blue-400 font-medium">Optimizando base de datos... Tu historial aparecerá en un momento.</p>
-              </div>
-            )}
-            <div className="grid gap-4">
-              {rideHistory.length > 0 ? (
-                rideHistory.map(ride => (
-                  <div key={ride.id} className="bg-zinc-900 border border-zinc-800 p-5 rounded-3xl relative group hover:border-zinc-700 transition-all">
-                    <div className="absolute top-4 right-4 flex items-center gap-2">
-                      {deletingId === ride.id && deletingType === 'history' ? (
-                        <div className="flex items-center gap-1 animate-in fade-in slide-in-from-right-2 bg-zinc-950 p-1 rounded-lg border border-zinc-800 shadow-xl">
-                          <button 
-                            onClick={() => confirmDeleteRide(ride.id)}
-                            className="bg-red-600 text-white text-[10px] px-3 py-1.5 rounded-md font-bold hover:bg-red-700 transition-colors"
-                          >
-                            Confirmar Borrado
-                          </button>
-                          <button 
-                            onClick={() => setDeletingId(null)}
-                            className="bg-zinc-800 text-zinc-400 text-[10px] px-3 py-1.5 rounded-md hover:text-white transition-colors"
-                          >
-                            Cancelar
-                          </button>
-                        </div>
-                      ) : (
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); deleteRide(ride.id); }}
-                          className="text-zinc-600 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      )}
-                    </div>
-                    
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                      <div>
-                        <h4 className="font-bold text-orange-500">{ride.groupName || 'Ruta sin nombre'}</h4>
-                        <p className="text-xs text-zinc-500">
-                          {new Date(ride.endTime).toLocaleDateString()} • {new Date(ride.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </p>
-                      </div>
-                      
-                      <div className="flex items-center gap-6">
-                        <div className="text-center">
-                          <p className="text-[10px] text-zinc-500 uppercase font-bold">Distancia</p>
-                          <p className="font-bold">{ride.distance?.toFixed(1)} km</p>
-                        </div>
-                        <div className="text-center">
-                          <p className="text-[10px] text-zinc-500 uppercase font-bold">Inclinación</p>
-                          <p className="font-bold text-sm">{Math.max(ride.maxLeanLeft || 0, ride.maxLeanRight || 0)}°</p>
-                        </div>
-                        <div className="bg-yellow-500/10 px-3 py-1 rounded-xl text-center">
-                          <p className="text-[10px] text-yellow-500 uppercase font-bold">Puntos</p>
-                          <p className="font-bold text-yellow-500">{ride.score || 0}</p>
-                        </div>
-                      </div>
-                    </div>
-                    {ride.routeGeoJSON && (
-                      <div className="mt-4 flex justify-end">
-                        <button 
-                          onClick={() => onRepeatRoute(ride.routeGeoJSON)}
-                          className="flex items-center gap-2 text-xs font-bold bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-xl transition-all"
-                        >
-                          <Play size={14} /> Repetir Ruta
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ))
-              ) : (
-                <div className="text-center py-12 bg-zinc-900/30 rounded-3xl border border-zinc-900">
-                  <p className="text-zinc-600 text-sm">Aún no has realizado ninguna ruta</p>
-                </div>
-              )}
-            </div>
-          </div>
         </div>
       </main>
 
       {/* Friends Modal */}
       {showFriendsModal && <FriendsModal onClose={() => setShowFriendsModal(false)} onRepeatRoute={onRepeatRoute} />}
+      <InvitesMailboxModal
+        open={showInvitesMailbox}
+        onClose={() => setShowInvitesMailbox(false)}
+        onJoinGroup={(code) => {
+          setShowInvitesMailbox(false);
+          onJoinGroup(code);
+        }}
+      />
       {showAdminPanel && isAdmin && <AdminPointsPanel onClose={() => setShowAdminPanel(false)} />}
 
       {/* Resultado generar ruta (sustituye alert nativo) */}
@@ -1452,6 +1549,46 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                   </div>
                 )}
 
+                {routeType === 'scheduled' && (
+                  <div className="p-4 rounded-2xl border border-zinc-800 bg-zinc-950/90 space-y-3">
+                    <div className="flex items-center gap-2 text-zinc-400">
+                      <Shield size={16} className="text-blue-400 shrink-0" />
+                      <span className="text-xs font-bold uppercase tracking-wider">Privacidad</span>
+                    </div>
+                    <p className="text-[11px] text-zinc-500 leading-relaxed">
+                      Controla quién ve esta ruta en <span className="text-zinc-400">Explorar rutas planificadas</span>. El código y el enlace siguen sirviendo para unirse.
+                    </p>
+                    <div className="grid grid-cols-1 gap-2">
+                      {(['public', 'friends_only', 'unlisted'] as const).map((key) => {
+                        const meta = ROUTE_LISTING_LABELS[key];
+                        const Icon = key === 'public' ? Globe : key === 'friends_only' ? HeartHandshake : Lock;
+                        const active = routeListing === key;
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => setRouteListing(key)}
+                            className={`flex items-start gap-3 p-3 rounded-xl border text-left transition-all ${
+                              active
+                                ? 'border-orange-500/60 bg-orange-500/10 ring-1 ring-orange-500/30'
+                                : 'border-zinc-800 bg-zinc-900/50 hover:border-zinc-700'
+                            }`}
+                          >
+                            <Icon
+                              size={18}
+                              className={`shrink-0 mt-0.5 ${active ? 'text-orange-400' : 'text-zinc-500'}`}
+                            />
+                            <span className="min-w-0">
+                              <span className="block text-sm font-bold text-white">{meta.title}</span>
+                              <span className="block text-[10px] text-zinc-500 mt-0.5 leading-snug">{meta.description}</span>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {(routeType === 'scheduled' || !isEsporadica) && (
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1">
@@ -1473,6 +1610,11 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                       />
                     </div>
                   </div>
+                )}
+                {(routeType === 'scheduled' || !isEsporadica) && (
+                  <p className="text-[10px] text-zinc-500 mt-2 ml-1 leading-relaxed">
+                    Provincia y municipio se rellenan con tu ubicación al abrir este formulario; puedes cambiarlos.
+                  </p>
                 )}
               </div>
             </div>
@@ -1504,6 +1646,18 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
               <p className="text-xs text-zinc-500 mt-1">
                 Comparte el <strong className="text-zinc-300">código</strong> o el <strong className="text-zinc-300">enlace</strong> para que se apunten desde la app.
               </p>
+              {postScheduleInvite.routeListing === 'friends_only' && (
+                <p className="text-xs text-blue-300/90 mt-2 flex items-start gap-2">
+                  <HeartHandshake size={14} className="shrink-0 mt-0.5" />
+                  Solo tus amigos verán esta ruta en el explorador; otros pueden unirse con el código o enlace.
+                </p>
+              )}
+              {postScheduleInvite.routeListing === 'unlisted' && (
+                <p className="text-xs text-zinc-400 mt-2 flex items-start gap-2">
+                  <Lock size={14} className="shrink-0 mt-0.5" />
+                  Esta ruta no aparece en el explorador público: comparte código o enlace con quien quieras.
+                </p>
+              )}
             </div>
             <div className="p-6 space-y-4">
               <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 text-center">

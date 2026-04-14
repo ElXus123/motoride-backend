@@ -18,9 +18,11 @@ import {
 import { X, Shield, Save, PlusCircle, Search, Crown, Trash2 } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppMessage } from '../contexts/AppMessageContext';
 
 export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
   const { user } = useAuth();
+  const showMessage = useAppMessage();
   const isAdmin = user?.email?.toLowerCase() === 'juarp123@gmail.com';
   const [baseMultiplier, setBaseMultiplier] = useState(1);
   const [distanceMultiplier, setDistanceMultiplier] = useState(1);
@@ -112,10 +114,18 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
     try {
       await updateDoc(doc(db, 'users', uid), { isPremium });
       setPremiumSearchResults((prev) => prev.map((u) => (u.id === uid ? { ...u, isPremium } : u)));
-      window.alert(isPremium ? 'Usuario marcado como Premium.' : 'Premium desactivado para este usuario.');
+      showMessage({
+        variant: 'success',
+        title: 'Premium',
+        message: isPremium ? 'Usuario marcado como Premium.' : 'Premium desactivado para este usuario.',
+      });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${uid}`);
-      window.alert('No se pudo actualizar el estado Premium. ¿Reglas de Firestore desplegadas?');
+      showMessage({
+        variant: 'error',
+        title: 'Premium',
+        message: 'No se pudo actualizar el estado Premium. ¿Reglas de Firestore desplegadas?',
+      });
     }
   };
 
@@ -135,7 +145,7 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
       updatedAt: Date.now(),
       updatedBy: user?.uid || null
     }, { merge: true });
-    alert('Configuración de puntos actualizada.');
+    showMessage({ variant: 'success', title: 'Admin', message: 'Configuración de puntos actualizada.' });
   };
 
   const createEvent = async () => {
@@ -182,10 +192,10 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
         if (ops >= 450) await flush();
       }
       await flush();
-      alert('Reset completado: grupos eliminados.');
+      showMessage({ variant: 'success', title: 'Reset', message: 'Reset completado: grupos eliminados.' });
     } catch (error) {
       console.error(error);
-      alert('No se pudo completar el reset. Revisa permisos de reglas.');
+      showMessage({ variant: 'error', title: 'Reset', message: 'No se pudo completar el reset. Revisa permisos de reglas.' });
     }
   };
 
