@@ -49,6 +49,7 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
   const audioRefs = useRef<{ [key: string]: HTMLAudioElement }>({});
   const canUseVoiceRef = useRef(canUseVoice);
   canUseVoiceRef.current = canUseVoice;
+  const joinedVoiceRoomRef = useRef<string | null>(null);
 
   const clearMicError = useCallback(() => setMicError(null), []);
 
@@ -93,6 +94,19 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
     }
     setPeers({ ...peersRef.current });
   };
+
+  const rebuildVoiceRoom = useCallback(
+    (gid?: string | null) => {
+      const targetGroup = gid || groupId;
+      if (!targetGroup || !canUseVoiceRef.current || !masterStreamRef.current) return;
+      // Tras reconexión del socket, recreamos malla WebRTC para evitar peers colgados.
+      Object.keys(peersRef.current).forEach((peerId) => removePeer(peerId));
+      socket.emit('join-voice', targetGroup);
+      joinedVoiceRoomRef.current = targetGroup;
+      setIsVoiceActive(true);
+    },
+    [groupId]
+  );
 
   const addAudioStream = (peerId: string, stream: MediaStream) => {
     if (!audioRefs.current[peerId]) {
@@ -143,6 +157,7 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
       }
       setIsVoiceActive(false);
       setPeers({});
+      joinedVoiceRoomRef.current = null;
       if (gid) {
         socket.emit('leave-voice', gid);
       }
@@ -253,12 +268,39 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
     socket.on('webrtc-signal', handleSignal);
     socket.on('user-left-voice', handleUserLeft);
 
+    const handleSocketReconnect = () => {
+      rebuildVoiceRoom(groupId);
+    };
+    const handleSocketConnect = () => {
+      if (joinedVoiceRoomRef.current === groupId && isVoiceActive) {
+        rebuildVoiceRoom(groupId);
+      }
+    };
+    const handleSocketDisconnect = () => {
+      // No desactivamos voz: mantenemos intención activa y reconstruimos al reconectar.
+      Object.keys(peersRef.current).forEach((peerId) => removePeer(peerId));
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && isVoiceActive && joinedVoiceRoomRef.current === groupId) {
+        // Safari/iOS puede congelar WebRTC al volver de segundo plano; forzamos reenganche.
+        rebuildVoiceRoom(groupId);
+      }
+    };
+    socket.on('reconnect', handleSocketReconnect);
+    socket.on('connect', handleSocketConnect);
+    socket.on('disconnect', handleSocketDisconnect);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
       socket.off('user-joined-voice', handleUserJoined);
       socket.off('webrtc-signal', handleSignal);
       socket.off('user-left-voice', handleUserLeft);
+      socket.off('reconnect', handleSocketReconnect);
+      socket.off('connect', handleSocketConnect);
+      socket.off('disconnect', handleSocketDisconnect);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [groupId, canUseVoice]);
+  }, [groupId, canUseVoice, isVoiceActive, rebuildVoiceRoom]);
 
   useEffect(() => {
     if (canUseVoice) return;
@@ -273,6 +315,7 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
     Object.keys(peersRef.current).forEach((peerId) => removePeer(peerId));
     setIsVoiceActive(false);
     setPeers({});
+    joinedVoiceRoomRef.current = null;
     if (groupId) {
       socket.emit('leave-voice', groupId);
     }
@@ -287,6 +330,7 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
         masterStreamRef.current.getTracks().forEach((track) => track.stop());
         masterStreamRef.current = null;
       }
+      joinedVoiceRoomRef.current = null;
       socket.emit('leave-voice', groupId);
       setIsVoiceActive(false);
       return;
@@ -342,6 +386,7 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
         }
         masterStreamRef.current = stream;
         socket.emit('join-voice', groupId);
+        joinedVoiceRoomRef.current = groupId;
         setIsVoiceActive(true);
         setMicError(null);
       })
