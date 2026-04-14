@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import Dashboard from './Dashboard';
 import MapView from './MapView';
 import Profile from './Profile';
+import PendingRideInviteOverlay from './PendingRideInviteOverlay';
 import { useAuth } from '../contexts/AuthContext';
 import { doc, getDoc, updateDoc, arrayUnion } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
@@ -93,45 +94,60 @@ export default function MainApp() {
     if (showProfile) window.history.pushState({ layer: 'profile' }, '');
   }, [showProfile]);
 
+  const inviteOverlay =
+    user?.rideInvitePending?.groupId ? (
+      <PendingRideInviteOverlay onJoinGroup={(id) => setActiveGroupId(id)} activeGroupId={activeGroupId} />
+    ) : null;
+
   if (autoJoining) {
     return (
-      <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center p-6 text-center">
-        <div className="w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-        <p className="text-zinc-400 font-medium">Uniéndote al grupo automáticamente...</p>
-      </div>
+      <>
+        {inviteOverlay}
+        <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center p-6 text-center">
+          <div className="w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+          <p className="text-zinc-400 font-medium">Uniéndote al grupo automáticamente...</p>
+        </div>
+      </>
     );
   }
 
   if (showProfile) {
-    return <Profile onBack={() => setShowProfile(false)} />;
+    return (
+      <>
+        {inviteOverlay}
+        <Profile onBack={() => setShowProfile(false)} />
+      </>
+    );
   }
 
   if (activeGroupId || repeatedRoute) {
     return (
-      <MapView 
-        groupId={activeGroupId || 'REPEATED'} 
-        preloadedRoute={repeatedRoute}
-        prepareHistoryLeave={() => {
-          bypassRoutePopRef.current = true;
-        }}
-        onPromoteFromRepeat={(liveCode) => {
-          setActiveGroupId(liveCode);
-          setRepeatedRoute(null);
-        }}
-        onLeave={() => {
-          routeHistoryInsertedRef.current = false;
-          setActiveGroupId(null);
-          setRepeatedRoute(null);
-        }} 
-      />
+      <>
+        {inviteOverlay}
+        <MapView
+          groupId={activeGroupId || 'REPEATED'}
+          preloadedRoute={repeatedRoute}
+          prepareHistoryLeave={() => {
+            bypassRoutePopRef.current = true;
+          }}
+          onPromoteFromRepeat={(liveCode) => {
+            setActiveGroupId(liveCode);
+            setRepeatedRoute(null);
+          }}
+          onLeave={() => {
+            routeHistoryInsertedRef.current = false;
+            setActiveGroupId(null);
+            setRepeatedRoute(null);
+          }}
+        />
+      </>
     );
   }
 
   return (
-    <Dashboard 
-      onJoinGroup={(id) => setActiveGroupId(id)} 
-      onRepeatRoute={(route) => setRepeatedRoute(route)}
-      onOpenProfile={() => setShowProfile(true)} 
-    />
+    <>
+      {inviteOverlay}
+      <Dashboard onJoinGroup={(id) => setActiveGroupId(id)} onRepeatRoute={(route) => setRepeatedRoute(route)} onOpenProfile={() => setShowProfile(true)} />
+    </>
   );
 }

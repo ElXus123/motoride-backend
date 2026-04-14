@@ -79,6 +79,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               displayName: data.displayName || prev.displayName, 
               photoURL: data.photoURL || prev.photoURL,
               isPremium: data.isPremium === true,
+              rideInvitePending: data.rideInvitePending ?? null,
             } : null);
           }
         }, (err) => {

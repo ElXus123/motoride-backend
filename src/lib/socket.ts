@@ -7,9 +7,11 @@ const socket = io(SOCKET_URL, {
   autoConnect: true,
   reconnection: true,
   reconnectionAttempts: Infinity,
-  reconnectionDelay: 1000,
-  reconnectionDelayMax: 5000,
-  timeout: 15000,
+  /** Reintentos más rápidos al principio: microcortes de red suelen recuperarse en <2s. */
+  reconnectionDelay: 400,
+  reconnectionDelayMax: 12000,
+  randomizationFactor: 0.45,
+  timeout: 20000,
   transports: ['websocket', 'polling'],
 });
 

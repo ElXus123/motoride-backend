@@ -31,18 +31,24 @@ import { motion, AnimatePresence } from 'motion/react';
 
 /**
  * Modo bolsillo / MirrorLink: el móvil no va fijado al chasis → el IMU no mide la inclinación de la moto.
- * Casi todo el peso va al GPS (curvatura + velocidad); el sensor solo suaviza un poco picos del rumbo.
+ * En **bolsillo** damos aún más peso al GPS que en MirrorLink (menos lecturas “locas” del sensor).
  */
-function blendLeanPocketMirror(sensorDeg: number, gpsDeg: number, speedMps: number): number {
+function blendLeanPocketMirror(
+  sensorDeg: number,
+  gpsDeg: number,
+  speedMps: number,
+  mode: 'pocket' | 'mirrorlink'
+): number {
   if (speedMps < 3) return 0;
+  const sensorAtten = sensorDeg * (mode === 'pocket' ? 0.22 : 0.32);
   let wGps: number;
-  if (speedMps >= 14) wGps = 0.94;
-  else if (speedMps >= 10) wGps = 0.9;
-  else if (speedMps >= 7) wGps = 0.86;
-  else if (speedMps >= 5) wGps = 0.8;
-  else wGps = 0.72;
-  const blended = wGps * gpsDeg + (1 - wGps) * sensorDeg;
-  return Math.max(-60, Math.min(60, Math.round(blended)));
+  if (speedMps >= 14) wGps = mode === 'pocket' ? 0.99 : 0.97;
+  else if (speedMps >= 10) wGps = mode === 'pocket' ? 0.965 : 0.94;
+  else if (speedMps >= 7) wGps = mode === 'pocket' ? 0.93 : 0.9;
+  else if (speedMps >= 5) wGps = mode === 'pocket' ? 0.88 : 0.85;
+  else wGps = mode === 'pocket' ? 0.84 : 0.8;
+  const blended = wGps * gpsDeg + (1 - wGps) * sensorAtten;
+  return Math.max(-60, Math.min(60, blended));
 }
 
 /** Por debajo de esto el modelo v·ω/g pierde sentido; alineado con bolsillo (blend desde 3 m/s). */
@@ -170,7 +176,10 @@ const getDirectionIcon = (type?: string, modifier?: string) => {
 };
 
 const MotorcycleIcon = ({ angle }: { angle: number }) => (
-  <div style={{ transform: `rotate(${angle}deg)`, transformOrigin: 'bottom center', transition: 'transform 0.1s ease-out' }} className="w-24 h-24 flex items-center justify-center">
+  <div
+    style={{ transform: `rotate(${angle}deg)`, transformOrigin: 'bottom center', transition: 'transform 45ms linear' }}
+    className="w-24 h-24 flex items-center justify-center"
+  >
     <svg viewBox="0 0 100 100" className="w-full h-full drop-shadow-[0_10px_10px_rgba(0,0,0,0.5)]">
       {/* Front View Classic/Cruiser - Based on User Image */}
       
@@ -445,6 +454,8 @@ export default function MapView({
   const photoURLToUse = customPhotoURL || user?.photoURL || '';
 
   const [locations, setLocations] = useState<any[]>([]);
+  /** Fuerza re-render para caducar avisos de otros a los 30s aunque no llegue otro paquete socket. */
+  const [peerAlertTick, setPeerAlertTick] = useState(0);
   const [copied, setCopied] = useState(false);
   const [isFollowing, setIsFollowing] = useState(true);
   const lastHeadingRef = useRef<number | null>(null);
@@ -708,24 +719,35 @@ export default function MapView({
   const [inviteModalContext, setInviteModalContext] = useState<{ groupId: string; groupName: string } | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const offlineDebounceRef = useRef<number | null>(null);
 
-  // Connection monitoring and auto-reconnection
+  // Conexión: ignora microcortes (<~3s) para no tapar el mapa con el banner en cada parpadeo.
   useEffect(() => {
+    const clearOfflineTimer = () => {
+      if (offlineDebounceRef.current != null) {
+        window.clearTimeout(offlineDebounceRef.current);
+        offlineDebounceRef.current = null;
+      }
+    };
     const handleOnline = () => {
+      clearOfflineTimer();
       setIsOnline(true);
-      // Force a small refresh of the group data to ensure we are synced
       if (groupId && groupId !== 'REPEATED') {
-        getDoc(doc(db, 'groups', groupId)).then(snap => {
+        getDoc(doc(db, 'groups', groupId)).then((snap) => {
           if (snap.exists()) setGroup(snap.data());
         });
       }
     };
-    const handleOffline = () => setIsOnline(false);
+    const handleOffline = () => {
+      clearOfflineTimer();
+      offlineDebounceRef.current = window.setTimeout(() => setIsOnline(false), 2800);
+    };
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
     return () => {
+      clearOfflineTimer();
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
@@ -765,6 +787,15 @@ export default function MapView({
     weakMapNoticeDismissedRef.current = false;
     setWeakMapTilesNotice(false);
   }, [groupId]);
+
+  useEffect(() => {
+    if (!weakMapTilesNotice) return;
+    const id = window.setTimeout(() => {
+      weakMapNoticeDismissedRef.current = true;
+      setWeakMapTilesNotice(false);
+    }, 30000);
+    return () => window.clearTimeout(id);
+  }, [weakMapTilesNotice]);
 
   const [isLandscape, setIsLandscape] = useState(window.innerWidth > window.innerHeight);
   const [isCompactUI, setIsCompactUI] = useState(window.innerWidth < 420 || window.innerHeight < 760);
@@ -1035,6 +1066,8 @@ export default function MapView({
 
   const leftTurnsRef = useRef(0);
   const rightTurnsRef = useRef(0);
+  /** Entrada en curva con ≥20 km/h e inclinación >10° → permite puntuar al salir aunque baje un poco la velocidad. */
+  const curveEntryQualifiedRef = useRef(false);
   const [parsedRoute, setParsedRoute] = useState<any>(null);
 
   // iPhone/Safari: requestPermission() debe ir tras un gesto del usuario; no llamar solo al montar.
@@ -1124,6 +1157,13 @@ export default function MapView({
     return unsub;
   }, [groupId, preloadedRoute, user?.uid]);
 
+  useEffect(() => {
+    const has = locations.some((l) => l.alert);
+    if (!has) return;
+    const id = window.setInterval(() => setPeerAlertTick((t) => t + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [locations]);
+
   // Listen to locations of group members via Socket.io
   useEffect(() => {
     const handleLocationUpdate = (data: any) => {
@@ -1186,7 +1226,7 @@ export default function MapView({
       });
       setTimeout(() => {
         setLocations((prev) => prev.map((l) => (l.uid === data.uid ? { ...l, alert: null } : l)));
-      }, 60000);
+      }, 30000);
     };
 
     socket.on('location-updated', handleLocationUpdate);
@@ -1384,7 +1424,7 @@ export default function MapView({
       const now = Date.now();
       const dt = (now - lastHeadingTimeRef.current) / 1000; // seconds
       
-      if (dt > 0.5) { // Update every 0.5s to avoid jitter
+      if (dt > 0.22) {
         let deltaHeading = headingOrCourseForTelemetry - lastHeadingRef.current;
         // Normalize deltaHeading to [-180, 180]
         if (deltaHeading > 180) deltaHeading -= 360;
@@ -1401,14 +1441,17 @@ export default function MapView({
           // But since r = v / |omega|, theta = atan(v * |omega| / g)
           const thetaRad = Math.atan((speed * Math.abs(angularVelocity)) / g);
           let thetaDeg = (thetaRad * 180) / Math.PI;
-          
+          const cap = 48;
+          if (thetaDeg > cap) thetaDeg = cap;
+          if (thetaDeg < -cap) thetaDeg = -cap;
+
           // Apply direction
           if (angularVelocity < 0) thetaDeg = -thetaDeg;
-          
-          // Smooth the estimate
-          setEstimatedLeanAngle(prev => Math.round(prev * 0.7 + thetaDeg * 0.3));
+
+          // Smooth the estimate (float para fluidez; la UI redondea grados enteros)
+          setEstimatedLeanAngle((prev) => prev * 0.62 + thetaDeg * 0.38);
         } else {
-          setEstimatedLeanAngle(prev => Math.round(prev * 0.8));
+          setEstimatedLeanAngle((prev) => prev * 0.82);
         }
 
         lastHeadingRef.current = headingOrCourseForTelemetry;
@@ -1456,7 +1499,8 @@ export default function MapView({
       isPocketLocked && isRecording && (touchLockKind === 'pocket' || touchLockKind === 'mirrorlink');
     if (telemetryFromPocket) {
       if (speed !== null && speed >= 3) {
-        return blendLeanPocketMirror(sensorLeanAngle, estimatedLeanAngle, speed);
+        const mode = touchLockKind === 'mirrorlink' ? 'mirrorlink' : 'pocket';
+        return blendLeanPocketMirror(sensorLeanAngle, estimatedLeanAngle, speed, mode);
       }
       return 0;
     }
@@ -1476,17 +1520,18 @@ export default function MapView({
     isScreenShareLikeMode,
   ]);
 
-  // Curve detection & scoring
+  // Curve detection & scoring (>20 km/h e inclinación >10° al entrar; puntuación si hubo pico >10°)
   useEffect(() => {
     if (!isRecording) return;
     const currentSpeed = (speed || 0) * 3.6;
-    const MIN_CURVE_SPEED_KMH = 15;
-    const CURVE_START_DEG = 15;
+    const MIN_CURVE_SPEED_KMH = 20;
+    const CURVE_START_DEG = 10;
     const CURVE_END_DEG = 5;
     const absAngle = Math.abs(leanAngle);
     if (currentSpeed >= MIN_CURVE_SPEED_KMH && absAngle > CURVE_START_DEG) {
       if (!inCurve) {
         setInCurve(true);
+        curveEntryQualifiedRef.current = true;
         if (leanAngle > 0) {
           rightTurnsRef.current += 1;
         } else {
@@ -1496,12 +1541,20 @@ export default function MapView({
       if (absAngle > currentCurveMax) setCurrentCurveMax(absAngle);
     } else if ((currentSpeed < MIN_CURVE_SPEED_KMH || absAngle <= CURVE_END_DEG) && inCurve) {
       setInCurve(false);
-      if (currentSpeed >= MIN_CURVE_SPEED_KMH) {
-        setScore(prev => Math.ceil(prev + currentCurveMax));
+      if (curveEntryQualifiedRef.current && currentCurveMax > CURVE_START_DEG) {
+        setScore((prev) => Math.ceil(prev + currentCurveMax));
       }
+      curveEntryQualifiedRef.current = false;
       setCurrentCurveMax(0);
     }
   }, [leanAngle, isRecording, inCurve, currentCurveMax, speed]);
+
+  useEffect(() => {
+    if (isRecording) return;
+    setInCurve(false);
+    setCurrentCurveMax(0);
+    curveEntryQualifiedRef.current = false;
+  }, [isRecording]);
 
   const [showSummary, setShowSummary] = useState(false);
   const [summaryData, setSummaryData] = useState<any>(null);
@@ -2101,7 +2154,7 @@ export default function MapView({
         : {}),
     });
 
-    setTimeout(() => setAlertType(null), 60000); // Clear after 1 min
+    setTimeout(() => setAlertType(null), 30000);
   };
 
   const currentSpeedKmh = speed ? Math.round(speed * 3.6) : 0;
@@ -2359,10 +2412,13 @@ export default function MapView({
     [otherLocations, memberPremiumByUid]
   );
 
-  // Avisos de otros usuarios (ventana algo mayor para leer distancia y actuar).
+  const PEER_ALERT_TTL_MS = 30000;
   const activeAlerts = useMemo(
-    () => otherLocations.filter((loc) => loc.alert && Date.now() - loc.alert.timestamp < 90000),
-    [otherLocations]
+    () =>
+      otherLocations.filter(
+        (loc) => loc.alert && Date.now() - loc.alert.timestamp < PEER_ALERT_TTL_MS
+      ),
+    [otherLocations, peerAlertTick]
   );
 
   const rankingLocations = useMemo(() => {
@@ -3299,7 +3355,9 @@ export default function MapView({
                   </div>
                 </div>
                 <div className="mt-1 flex flex-col items-center">
-                  <span className="text-lg sm:text-2xl font-black leading-none text-white tabular-nums">{Math.abs(leanAngle)}°</span>
+                  <span className="text-lg sm:text-2xl font-black leading-none text-white tabular-nums">
+                    {Math.round(Math.abs(leanAngle))}°
+                  </span>
                 </div>
               </div>
             </div>
@@ -3448,13 +3506,14 @@ export default function MapView({
         />
         <TileLayer
           url="https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png"
-          keepBuffer={320}
+          keepBuffer={260}
           updateWhenIdle={false}
-          updateWhenZooming
+          updateWhenZooming={false}
           maxZoom={20}
           maxNativeZoom={19}
           detectRetina={false}
           crossOrigin
+          preferCanvas
           className="motoride-base-tiles"
           errorTileUrl={LEAFLET_LIGHT_ERROR_TILE}
           eventHandlers={{
@@ -3736,13 +3795,11 @@ export default function MapView({
         groupId={inviteModalContext?.groupId ?? groupId}
         groupName={inviteModalContext?.groupName ?? group?.name ?? 'Ruta'}
         memberUids={
-          inviteModalContext && user?.uid
-            ? [user.uid]
-            : Array.isArray(group?.members) && group.members.length > 0
-              ? group.members.filter(Boolean)
-              : user?.uid
-                ? [user.uid]
-                : []
+          Array.isArray(group?.members) && group.members.length > 0
+            ? group.members.filter(Boolean)
+            : user?.uid
+              ? [user.uid]
+              : []
         }
       />
     </div>

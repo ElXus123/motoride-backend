@@ -155,7 +155,7 @@ export const useLeanAngle = (speedMps?: number | null) => {
 
       const win = rollMedianWindowRef.current;
       win.push(roll);
-      if (win.length > 9) win.shift();
+      if (win.length > 5) win.shift();
       const sorted = [...win].sort((a, b) => a - b);
       const rollStable = sorted[Math.floor(sorted.length / 2)];
 
@@ -178,15 +178,14 @@ export const useLeanAngle = (speedMps?: number | null) => {
         gpsSaysStopped || imuSaysStill || (!gpsLikelyMoving && jitteryOrientation);
 
       const speedNow = typeof v === 'number' && Number.isFinite(v) ? Math.abs(v) : 0;
+      /** Misma reactividad que a alta velocidad en cuanto el GPS indica marcha real. */
       const alpha = physicallyStill
         ? 0.02
         : speedUnknown
-          ? 0.09
-          : speedNow >= 11.2
+          ? 0.12
+          : gpsLikelyMoving
             ? 0.22
-            : speedNow >= 7
-              ? 0.17
-              : 0.13;
+            : 0.16;
       smoothedAngleRef.current =
         smoothedAngleRef.current + alpha * (rollStable - smoothedAngleRef.current);
 
@@ -214,16 +213,15 @@ export const useLeanAngle = (speedMps?: number | null) => {
       }
 
       let finalAngle = smoothedAngleRef.current - calibrationOffset - dynamicBiasRef.current;
-      if (!physicallyStill && !speedUnknown && speedNow >= 11.2) {
-        // A >40 km/h hacemos la lectura un poco más sensible.
-        finalAngle *= 1.1;
+      if (!physicallyStill && !speedUnknown && gpsLikelyMoving) {
+        finalAngle *= speedNow >= 11.2 ? 1.1 : 1.06;
       }
       if (finalAngle > 60) finalAngle = 60;
       if (finalAngle < -60) finalAngle = -60;
       const deadDeg = physicallyStill ? 4.8 : speedUnknown ? 2.2 : 1.0;
       if (Math.abs(finalAngle) < deadDeg) finalAngle = 0;
 
-      const displayAngle = Number(finalAngle.toFixed(1));
+      const displayAngle = finalAngle;
       const roundedAngle = Math.round(finalAngle);
       setLeanAngle(displayAngle);
 
