@@ -54,14 +54,17 @@ const AppContent = () => {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isSafari, setIsSafari] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
+  const [isChromeIOS, setIsChromeIOS] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const ua = window.navigator.userAgent;
     const safariDetected = /Safari/i.test(ua) && !/Chrome|CriOS|Edg|OPR|SamsungBrowser/i.test(ua);
     const iosDetected = /iPhone|iPad|iPod/i.test(ua);
+    const chromeIosDetected = /CriOS/i.test(ua) && iosDetected;
     setIsSafari(safariDetected);
     setIsIOS(iosDetected);
+    setIsChromeIOS(chromeIosDetected);
 
     const alreadyDismissed = window.localStorage.getItem('motoride_install_notice_dismissed') === 'true';
     const alreadyInstalled = window.localStorage.getItem('motoride_app_installed') === 'true';
@@ -135,7 +138,7 @@ const AppContent = () => {
           title: 'Pantalla completa',
           variant: 'info',
           message:
-            'En iPhone no funciona la pantalla completa dentro del navegador. Instala la app desde Safari: abajo, Compartir → Añadir a pantalla de inicio. Luego ábrela desde el icono en tu pantalla de inicio.',
+            'En iPhone no suele funcionar la pantalla completa en el navegador. Instala MotoRide en la pantalla de inicio: en Safari, Compartir → Añadir a pantalla de inicio; en Chrome, Compartir → Ver más → Añadir a pantalla de inicio. Luego ábrela desde el icono.',
         });
       }
     } catch (err) {
@@ -144,7 +147,7 @@ const AppContent = () => {
         title: 'Pantalla completa',
         variant: 'info',
         message:
-          'No se pudo usar pantalla completa aquí. En iPhone: instala MotoRide desde Safari (Compartir → Añadir a pantalla de inicio) y ábrela desde el icono.',
+          'No se pudo usar pantalla completa aquí. En iPhone: añade MotoRide a la pantalla de inicio (Safari: Compartir → Añadir a pantalla de inicio; Chrome: Compartir → Ver más → Añadir a pantalla de inicio) y ábrela desde el icono.',
       });
     }
   };
@@ -197,32 +200,61 @@ const AppContent = () => {
               </div>
             </div>
 
-            {(deferredPrompt || isSafari) && (
+            {(deferredPrompt || isSafari || isChromeIOS || isIOS) && (
             <div className="rounded-2xl border border-zinc-700 bg-zinc-900/60 p-3 mb-3 text-sm text-zinc-200">
               <p className="font-semibold mb-2">Cómo ponerla en tu móvil</p>
-              {isSafari ? (
+              {deferredPrompt && !isIOS ? (
                 <>
-                  <p className="text-zinc-300 mb-2">Si tienes <strong className="text-zinc-200">iPhone</strong>, usa el navegador <strong className="text-zinc-200">Safari</strong> (el que viene por defecto).</p>
+                  <p className="text-zinc-300 mb-2">En <strong className="text-zinc-200">Android</strong> u ordenador con Chrome/Edge:</p>
                   <ol className="list-decimal list-inside space-y-1.5 text-zinc-300">
-                    <li>Abre esta página en Safari.</li>
-                    <li>Abajo, toca el botón <strong className="text-zinc-200">Compartir</strong> (cuadrado con una flecha hacia arriba).</li>
-                    <li>Toca <strong className="text-zinc-200">Añadir a pantalla de inicio</strong> y luego <strong className="text-zinc-200">Añadir</strong>. Ya tendrás el icono como una app normal.</li>
+                    <li>Pulsa <strong className="text-zinc-200">Instalar app</strong> si aparece (abajo o en la barra).</li>
+                    <li>Si no, abre el menú <strong className="text-zinc-200">⋮</strong> o <strong className="text-zinc-200">Instalar aplicación</strong>.</li>
                   </ol>
                 </>
-              ) : (
+              ) : isChromeIOS ? (
                 <>
-                  <p className="text-zinc-300">1) Abrela en Chrome.</p>
-                  <p className="text-zinc-300">2) Pulsa Instalar app (si aparece abajo).</p>
-                  <p className="text-zinc-300">3) Si no aparece, usa el menu (tres puntos) → Instalar aplicacion.</p>
+                  <p className="text-zinc-300 mb-2">
+                    En <strong className="text-zinc-200">Chrome para iPhone</strong> la opción va en <strong className="text-zinc-200">Compartir</strong> y luego en <strong className="text-zinc-200">Ver más</strong>:
+                  </p>
+                  <ol className="list-decimal list-inside space-y-1.5 text-zinc-300">
+                    <li>Abre esta página en Chrome.</li>
+                    <li>Abajo, toca <strong className="text-zinc-200">Compartir</strong> (cuadrado con flecha hacia arriba).</li>
+                    <li>
+                      Desplázate y toca <strong className="text-zinc-200">Ver más</strong> (o despliega la lista de acciones) hasta ver{' '}
+                      <strong className="text-zinc-200">Añadir a pantalla de inicio</strong>.
+                    </li>
+                    <li>Toca <strong className="text-zinc-200">Añadir</strong>. Abre MotoRide desde el icono en tu pantalla de inicio.</li>
+                  </ol>
                 </>
+              ) : isSafari && isIOS ? (
+                <>
+                  <p className="text-zinc-300 mb-2">En <strong className="text-zinc-200">Safari</strong> (iPhone o iPad):</p>
+                  <ol className="list-decimal list-inside space-y-1.5 text-zinc-300">
+                    <li>Abre esta página en Safari.</li>
+                    <li>Abajo, toca <strong className="text-zinc-200">Compartir</strong> (cuadrado con flecha hacia arriba).</li>
+                    <li>
+                      Toca <strong className="text-zinc-200">Añadir a pantalla de inicio</strong> y luego <strong className="text-zinc-200">Añadir</strong>.
+                    </li>
+                  </ol>
+                </>
+              ) : isIOS ? (
+                <p className="text-zinc-300">
+                  Abre el menú <strong className="text-zinc-200">Compartir</strong> del navegador y busca <strong className="text-zinc-200">Añadir a pantalla de inicio</strong>. Si no aparece, abre la página en <strong className="text-zinc-200">Safari</strong> o en <strong className="text-zinc-200">Chrome</strong> y sigue los pasos de arriba.
+                </p>
+              ) : (
+                <p className="text-zinc-300">
+                  Si tu navegador muestra <strong className="text-zinc-200">Instalar</strong> o un icono de instalación en la barra de direcciones, úsalo. Si no, revisa el menú del navegador (Archivo, Aplicación o ⋮).
+                </p>
               )}
             </div>
             )}
 
-            {(isSafari || isIOS) && (
+            {(isSafari || isChromeIOS || isIOS) && (
               <div className="rounded-2xl border border-blue-500/30 bg-blue-500/10 p-3 mb-3 text-sm text-zinc-200">
                 <p className="font-semibold mb-2">En iPhone: mapa a pantalla llena</p>
-                <p className="text-zinc-300 mb-3">Lo más cómodo es abrir MotoRide desde el <strong className="text-zinc-200">icono que añadiste</strong> (no desde Safari). Si aún la tienes solo en el navegador, puedes probar este botón; si no hace nada, sigue los pasos de arriba para instalarla.</p>
+                <p className="text-zinc-300 mb-3">
+                  Lo más cómodo es abrir MotoRide desde el <strong className="text-zinc-200">icono que añadiste</strong> (no desde el navegador). Si aún no la has añadido, sigue los pasos de arriba (Safari o Chrome con Compartir → Ver más). Puedes probar este botón; si no hace nada, instálala primero.
+                </p>
                 <button
                   onClick={requestFullscreen}
                   className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl py-2.5 transition-colors"
@@ -251,7 +283,7 @@ const AppContent = () => {
               ) : null}
               <button
                 onClick={dismissInstallNotice}
-                className="px-4 py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-100 font-semibold transition-colors"
+                className={`rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-100 font-semibold transition-colors py-3 px-4 ${deferredPrompt ? '' : 'w-full'}`}
               >
                 Continuar web
               </button>

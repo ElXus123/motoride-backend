@@ -35,6 +35,7 @@ import { requestUserLocation, reverseGeocodeProvinceMunicipality } from '../lib/
 import { getLevelRingWrapperClass } from '../lib/levelRing';
 import { canEnterScheduledRouteSession } from '../lib/scheduledRouteAccess';
 import { sortNominatimResults, pickBestNominatimResult } from '../lib/nominatimPick';
+import appIcon from '../../ICONO.png';
 import FriendsModal from './FriendsModal';
 import InvitesMailboxModal from './InvitesMailboxModal';
 import InviteFriendsModal from './InviteFriendsModal';
@@ -914,156 +915,183 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     []
   );
 
+  const isPremiumUser = user?.isPremium === true || userData?.isPremium === true;
+  const displayName = userData?.displayName || user?.displayName || 'Motero';
+
+  const renderHeaderAvatar = () => (
+    <button
+      type="button"
+      onClick={onOpenProfile}
+      className={`shrink-0 w-10 h-10 sm:w-11 sm:h-11 rounded-full p-[2px] hover:opacity-90 transition-opacity ${getLevelRingWrapperClass(level, isPremiumUser)}`}
+    >
+      <span className="block w-full h-full rounded-full overflow-hidden bg-zinc-800 border border-zinc-900">
+        {userData?.photoURL ? (
+          <img src={userData.photoURL} alt="Avatar" className="w-full h-full object-cover" />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center">
+            <UserIcon size={20} className="text-zinc-500" />
+          </div>
+        )}
+      </span>
+    </button>
+  );
+
+  const renderHeaderProfileCard = () => (
+    <button
+      type="button"
+      onClick={onOpenProfile}
+      className="flex w-full min-w-0 flex-col gap-0 py-1 text-center rounded-[1.25rem] focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/70 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 sm:max-w-[min(100%,20rem)] sm:mx-auto"
+      aria-label={`Abrir perfil: nivel ${level} y experiencia hacia el nivel ${level + 1}`}
+    >
+      <div className="relative flex flex-col gap-1.5 sm:gap-2 rounded-[1.15rem] sm:rounded-[1.35rem] border border-zinc-800 bg-zinc-900/80 px-2.5 py-2 sm:px-3.5 sm:py-3 transition-colors hover:border-zinc-700 hover:bg-zinc-900">
+        {isOffline && (
+          <span
+            className="absolute right-2 top-2 h-1.5 w-1.5 animate-pulse rounded-full bg-red-500 ring-1 ring-red-900/40"
+            title="Modo sin conexión"
+          />
+        )}
+        <div className="flex min-h-0 w-full min-w-0 flex-nowrap items-center justify-center gap-1.5 sm:gap-2 text-center">
+          <span className="shrink-0 whitespace-nowrap rounded-full bg-orange-500/15 px-1.5 py-0.5 sm:px-2 sm:py-1 text-[10px] sm:text-[11px] font-black text-orange-400">
+            Lv. {level}
+          </span>
+          {isPremiumUser && (
+            <span className="shrink-0">
+              <PremiumBadge compact />
+            </span>
+          )}
+          <p className="min-w-0 flex-1 truncate text-center text-xs font-bold text-white sm:text-sm sm:max-w-[18rem]">
+            {displayName}
+          </p>
+        </div>
+        <div
+          className="h-1.5 w-full shrink-0 overflow-hidden rounded-full bg-zinc-800/95 ring-1 ring-zinc-700/60 pointer-events-none"
+          aria-hidden
+        >
+          <div
+            className="h-full rounded-full bg-gradient-to-r from-orange-600 via-amber-500 to-amber-400 transition-[width] duration-500 ease-out"
+            style={{ width: `${levelProgressPercent}%` }}
+          />
+        </div>
+      </div>
+    </button>
+  );
+
+  const renderHeaderActions = () => (
+    <>
+      <button
+        type="button"
+        onClick={() => setShowSupportModal(true)}
+        className="flex items-center justify-center gap-1.5 min-h-[40px] min-w-[40px] sm:min-h-0 sm:min-w-0 px-2 sm:px-3 py-1.5 rounded-full bg-orange-500/15 border border-orange-500/30 text-orange-400 hover:bg-orange-500/25 transition-colors shrink-0"
+        title="Apoyar MotoRide (Ko-fi)"
+      >
+        <HeartHandshake size={16} className="shrink-0" />
+        <span className="text-[11px] sm:text-xs font-black uppercase tracking-wide hidden sm:inline">Apoyar</span>
+      </button>
+      <button
+        type="button"
+        onClick={() => setShowInvitesMailbox(true)}
+        className="relative flex min-h-[40px] min-w-[40px] items-center justify-center p-0 sm:p-2 bg-zinc-900 border border-zinc-800 rounded-full hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-orange-400 shrink-0"
+        title="Invitaciones a rutas"
+      >
+        <Inbox size={20} />
+        {(inviteInboxCount > 0 || user?.rideInvitePending?.groupId) && (
+          <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-orange-500 text-[10px] font-black text-white flex items-center justify-center border-2 border-zinc-950">
+            {inviteInboxCount > 0 ? (inviteInboxCount > 9 ? '9+' : inviteInboxCount) : '1'}
+          </span>
+        )}
+      </button>
+      <button
+        type="button"
+        onClick={() => setShowFriendsModal(true)}
+        className="relative flex min-h-[40px] min-w-[40px] items-center justify-center p-0 sm:p-2 bg-zinc-900 border border-zinc-800 rounded-full hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-white shrink-0"
+        aria-label={
+          pendingFriendRequestCount > 0
+            ? `Amigos, ${pendingFriendRequestCount} solicitud${pendingFriendRequestCount === 1 ? '' : 'es'} pendiente${pendingFriendRequestCount === 1 ? '' : 's'}`
+            : 'Amigos y Comunidad'
+        }
+        title={
+          pendingFriendRequestCount > 0
+            ? `Amigos y Comunidad (${pendingFriendRequestCount} solicitud${pendingFriendRequestCount === 1 ? '' : 'es'} pendiente${pendingFriendRequestCount === 1 ? '' : 's'})`
+            : 'Amigos y Comunidad'
+        }
+      >
+        <Users size={20} />
+        {pendingFriendRequestCount > 0 && (
+          <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-zinc-950" aria-hidden />
+        )}
+      </button>
+    </>
+  );
+
   return (
     <div className="min-h-dvh bg-zinc-950 text-white overflow-x-hidden pb-[env(safe-area-inset-bottom,0px)]">
-      {/* Header — respeta notch / Dynamic Island (pt = max padding, safe-area) */}
-      <header className="sticky top-0 z-30 bg-zinc-950/80 backdrop-blur-md border-b border-zinc-900 pl-[max(1.5rem,env(safe-area-inset-left,0px))] pr-[max(1.5rem,env(safe-area-inset-right,0px))] pt-[max(1rem,env(safe-area-inset-top,0px))] pb-4">
-        <div className="max-w-5xl mx-auto grid grid-cols-[auto_1fr_auto] items-center gap-3">
-          <div className="flex items-center gap-3 min-w-0">
-            <button 
-              onClick={onOpenProfile}
-              className={`w-11 h-11 rounded-full p-[2px] hover:opacity-90 transition-opacity ${getLevelRingWrapperClass(level, user?.isPremium === true || userData?.isPremium === true)}`}
-            >
-              <span className="block w-full h-full rounded-full overflow-hidden bg-zinc-800 border border-zinc-900">
-              {userData?.photoURL ? (
-                <img src={userData.photoURL} alt="Avatar" className="w-full h-full object-cover" />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center">
-                  <UserIcon size={20} className="text-zinc-500" />
-                </div>
-              )}
-              </span>
-            </button>
+      {/* Header — móvil: fila avatar+acciones y tarjeta a ancho completo; sm+: tres columnas */}
+      <header className="sticky top-0 z-30 bg-zinc-950/80 backdrop-blur-md border-b border-zinc-900 pl-[max(1rem,env(safe-area-inset-left,0px))] pr-[max(1rem,env(safe-area-inset-right,0px))] sm:pl-[max(1.5rem,env(safe-area-inset-left,0px))] sm:pr-[max(1.5rem,env(safe-area-inset-right,0px))] pt-[max(1rem,env(safe-area-inset-top,0px))] pb-3 sm:pb-4">
+        <div className="max-w-5xl mx-auto">
+          <div className="flex flex-col gap-2 sm:hidden">
+            <div className="flex items-center justify-between gap-2 min-w-0">
+              {renderHeaderAvatar()}
+              <div className="flex items-center gap-1 shrink-0">{renderHeaderActions()}</div>
+            </div>
+            <div className="min-w-0 w-full">{renderHeaderProfileCard()}</div>
           </div>
 
-          <div className="flex items-center justify-center min-w-0 px-1">
-            <button
-              type="button"
-              onClick={onOpenProfile}
-              className="flex w-full max-w-[min(100%,20rem)] flex-col gap-0 py-1 text-center rounded-[1.25rem] focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/70 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
-              aria-label={`Abrir perfil: nivel ${level} y experiencia hacia el nivel ${level + 1}`}
-            >
-              <div className="relative flex flex-col gap-2 rounded-[1.25rem] border border-zinc-800 bg-zinc-900/80 px-3 py-2.5 transition-colors hover:border-zinc-700 hover:bg-zinc-900 sm:rounded-[1.35rem] sm:px-3.5 sm:py-3">
-                {isOffline && (
-                  <span
-                    className="absolute right-2.5 top-2.5 h-1.5 w-1.5 animate-pulse rounded-full bg-red-500 ring-1 ring-red-900/40"
-                    title="Modo sin conexión"
-                  />
-                )}
-                <div className="flex min-h-0 w-full flex-wrap items-center justify-center gap-2 text-center">
-                  <span className="shrink-0 whitespace-nowrap rounded-full bg-orange-500/15 px-2 py-1 text-[11px] font-black text-orange-400">
-                    Lv. {level}
-                  </span>
-                  {(user?.isPremium === true || userData?.isPremium === true) && (
-                    <span className="shrink-0">
-                      <PremiumBadge compact />
-                    </span>
-                  )}
-                  <p className="max-w-[min(100%,14rem)] truncate text-sm font-bold text-white sm:max-w-[18rem]">
-                    {userData?.displayName || user?.displayName || 'Motero'}
-                  </p>
-                </div>
-                <div
-                  className="h-1.5 w-full shrink-0 overflow-hidden rounded-full bg-zinc-800/95 ring-1 ring-zinc-700/60 pointer-events-none"
-                  aria-hidden
-                >
-                  <div
-                    className="h-full rounded-full bg-gradient-to-r from-orange-600 via-amber-500 to-amber-400 transition-[width] duration-500 ease-out"
-                    style={{ width: `${levelProgressPercent}%` }}
-                  />
-                </div>
-              </div>
-            </button>
-          </div>
-
-          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap justify-end">
-            <button
-              type="button"
-              onClick={() => setShowSupportModal(true)}
-              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full bg-orange-500/15 border border-orange-500/30 text-orange-400 hover:bg-orange-500/25 transition-colors shrink-0"
-              title="Apoyar MotoRide (Ko-fi)"
-            >
-              <HeartHandshake size={16} className="shrink-0" />
-              <span className="text-[11px] sm:text-xs font-black uppercase tracking-wide hidden sm:inline">
-                Apoyar
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowInvitesMailbox(true)}
-              className="relative p-2 bg-zinc-900 border border-zinc-800 rounded-full hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-orange-400"
-              title="Invitaciones a rutas"
-            >
-              <Inbox size={20} />
-              {(inviteInboxCount > 0 || user?.rideInvitePending?.groupId) && (
-                <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-orange-500 text-[10px] font-black text-white flex items-center justify-center border-2 border-zinc-950">
-                  {inviteInboxCount > 0
-                    ? inviteInboxCount > 9
-                      ? '9+'
-                      : inviteInboxCount
-                    : '1'}
-                </span>
-              )}
-            </button>
-            <button 
-              type="button"
-              onClick={() => setShowFriendsModal(true)}
-              className="relative p-2 bg-zinc-900 border border-zinc-800 rounded-full hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-white"
-              aria-label={
-                pendingFriendRequestCount > 0
-                  ? `Amigos, ${pendingFriendRequestCount} solicitud${pendingFriendRequestCount === 1 ? '' : 'es'} pendiente${pendingFriendRequestCount === 1 ? '' : 's'}`
-                  : 'Amigos y Comunidad'
-              }
-              title={
-                pendingFriendRequestCount > 0
-                  ? `Amigos y Comunidad (${pendingFriendRequestCount} solicitud${pendingFriendRequestCount === 1 ? '' : 'es'} pendiente${pendingFriendRequestCount === 1 ? '' : 's'})`
-                  : 'Amigos y Comunidad'
-              }
-            >
-              <Users size={20} />
-              {pendingFriendRequestCount > 0 && (
-                <span
-                  className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-zinc-950"
-                  aria-hidden
-                />
-              )}
-            </button>
+          <div className="hidden sm:grid sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center sm:gap-3">
+            <div className="flex items-center min-w-0">{renderHeaderAvatar()}</div>
+            <div className="flex items-center justify-center min-w-0 px-1">{renderHeaderProfileCard()}</div>
+            <div className="flex items-center gap-2 justify-end shrink-0 flex-nowrap">{renderHeaderActions()}</div>
           </div>
         </div>
       </header>
 
       <main className="max-w-5xl mx-auto space-y-8 py-6 pl-[max(1.5rem,env(safe-area-inset-left,0px))] pr-[max(1.5rem,env(safe-area-inset-right,0px))]">
-        {/* Quick Actions */}
+        {/* Quick Actions — estética alineada con cabecera zinc + acento naranja */}
         <div className="grid grid-cols-1 gap-6">
-          <div className="bg-gradient-to-br from-orange-500 to-orange-600 p-8 rounded-[2rem] shadow-xl shadow-orange-500/10 relative overflow-hidden group">
-            <div className="relative z-10">
-              <h2 className="text-3xl font-black mb-2 leading-tight">¿Listo para rodar?</h2>
-              <p className="text-orange-100 mb-6 text-base opacity-90 max-w-md">Crea una ruta instantánea o programa una para el futuro con tus amigos.</p>
-              <div className="flex w-full max-w-xl flex-nowrap items-center gap-1.5 sm:gap-2.5">
+          <div className="relative overflow-hidden rounded-[1.75rem] border border-orange-500/20 bg-gradient-to-br from-zinc-900 via-zinc-900 to-orange-950/35 p-6 sm:p-8 shadow-[0_0_0_1px_rgba(24,24,27,0.8),0_24px_48px_-16px_rgba(0,0,0,0.55)] ring-1 ring-orange-500/10">
+            <div
+              className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_90%_55%_at_50%_-15%,rgba(249,115,22,0.18),transparent_55%)]"
+              aria-hidden
+            />
+            <div className="pointer-events-none absolute -right-12 -bottom-12 h-44 w-44 rounded-full bg-orange-500/15 blur-3xl" aria-hidden />
+            <div className="pointer-events-none absolute right-6 top-5 h-14 w-14 rounded-2xl opacity-[0.14] ring-1 ring-orange-400/40 overflow-hidden sm:h-16 sm:w-16">
+              <img src={appIcon} alt="" className="h-full w-full object-cover" />
+            </div>
+            <div className="relative z-10 max-w-xl pr-16 sm:pr-20">
+              <h2 className="text-2xl sm:text-3xl font-black mb-2 leading-tight text-white tracking-tight">
+                ¿Listo para rodar?
+              </h2>
+              <p className="text-zinc-400 mb-6 text-sm sm:text-base leading-relaxed">
+                Crea una ruta al momento o programa una con tus amigos. Elige cómo quieres empezar.
+              </p>
+              <div className="flex w-full flex-col gap-3 sm:max-w-xl sm:flex-row sm:flex-nowrap sm:items-stretch sm:gap-3">
                 <button
                   type="button"
                   onClick={() => {
                     setLoading(false);
                     setShowCreateModal(true);
                   }}
-                  className="min-h-[52px] min-w-0 flex-1 bg-white text-orange-600 px-3 sm:px-6 py-3.5 rounded-2xl text-sm sm:text-base font-bold flex items-center justify-center gap-1.5 sm:gap-2 hover:bg-orange-50 shadow-lg transition-all active:scale-[0.98]"
+                  className="min-h-[52px] w-full sm:flex-1 rounded-2xl bg-gradient-to-r from-orange-500 via-orange-500 to-amber-500 px-4 py-3.5 text-sm sm:text-base font-black text-zinc-950 shadow-lg shadow-orange-500/25 transition-all hover:brightness-105 active:scale-[0.99] flex items-center justify-center gap-2"
                 >
-                  <Plus size={20} strokeWidth={2.5} className="shrink-0 sm:w-[22px] sm:h-[22px]" />
-                  <span className="truncate">Crear Ruta</span>
+                  <Plus size={22} strokeWidth={2.5} className="shrink-0" />
+                  <span>Crear ruta</span>
                 </button>
-                <div className="flex shrink-0 items-center justify-center text-white/90" aria-hidden>
-                  <ChevronRight size={20} strokeWidth={2.5} className="opacity-95 sm:w-[22px] sm:h-[22px]" />
+                <div className="hidden shrink-0 items-center justify-center text-orange-400/80 sm:flex" aria-hidden>
+                  <ChevronRight size={22} strokeWidth={2.5} />
                 </div>
                 <button
                   type="button"
                   onClick={() => setShowJoinCodeModal(true)}
-                  className="min-h-[52px] min-w-0 flex-1 rounded-2xl border-2 border-white/40 bg-white/15 px-3 sm:px-6 py-3.5 text-sm sm:text-base font-bold text-white shadow-lg transition-all hover:bg-white/25 active:scale-[0.98]"
+                  className="min-h-[52px] w-full sm:flex-1 rounded-2xl border border-zinc-600/90 bg-zinc-800/90 px-4 py-3.5 text-sm sm:text-base font-bold text-zinc-100 shadow-inner transition-all hover:border-zinc-500 hover:bg-zinc-800 active:scale-[0.99]"
                 >
-                  <span className="truncate">Unirse Ruta</span>
+                  Unirse con código
                 </button>
               </div>
             </div>
-            <MapIcon size={200} className="absolute -right-10 -bottom-10 text-white opacity-10 group-hover:scale-110 transition-transform duration-500" />
+            <MapIcon
+              size={160}
+              className="pointer-events-none absolute -left-6 -bottom-8 text-orange-500/[0.07] sm:-left-4 sm:-bottom-6"
+              aria-hidden
+            />
           </div>
         </div>
 

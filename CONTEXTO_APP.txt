@@ -1,5 +1,5 @@
 MotoRide — registro de contexto / cambios recientes
-Ultima actualizacion: 2026-04-15 (bloque 19 — novedades UI, precipitaciones, changelog unificado)
+Ultima actualizacion: 2026-04-16 (bloque 20 — CTA inicio, tutorial Chrome iOS, novedades simplificadas)
 
 === Contacto y soporte ===
 - Correo publico de contacto: motorideapp1@gmail.com
@@ -8,7 +8,7 @@ Ultima actualizacion: 2026-04-15 (bloque 19 — novedades UI, precipitaciones, c
 - Cuenta admin (panel) y reglas Firestore siguen usando juarp123@gmail.com salvo que se migre a mano.
 
 === iPhone / Safari (textos de la app) ===
-- src/App.tsx: modal de instalacion PWA (pasos claros en Safari), pantalla completa, correccion «Anadir» -> «Añadir».
+- src/App.tsx: modal de instalacion PWA — Safari (Compartir → Añadir a pantalla de inicio); Chrome iOS (CriOS: Compartir → Ver mas / mas acciones → Añadir a pantalla de inicio). Pantalla completa y mensajes alineados con ambos flujos.
 - src/components/MapView.tsx: mensaje inclinometro iPhone simplificado.
 - src/hooks/useVoiceChat.ts: permisos de microfono (Safari «aA», Ajustes) y aviso si no hay getUserMedia (abrir fuera de apps embebidas).
 
@@ -173,3 +173,16 @@ Fecha: 2026-04-14
 - `src/lib/precipitationRisk.ts` + `src/components/MapView.tsx` (ya en main desde commit anterior)
   - Consulta Open-Meteo en posicion, anillo ~10 km y puntos de la ruta; banner ~30 s, cooldown entre avisos.
 - Deploy Cloudflare Workers: nombre en `wrangler.jsonc` puede diferir del Worker enlazado en CI (p. ej. esperado `app`); el build puede sobreescribir el nombre; alinear nombre en dashboard o en config si se quiere evitar el aviso.
+
+=== RESUMEN DESDE EL ULTIMO LOG (POST BLOQUE 19) ===
+
+20) CTA INICIO, TUTORIAL INSTALACION CHROME IOS, NOVEDADES SIMPLIFICADAS
+- `src/components/Dashboard.tsx`
+  - Bloque «¿Listo para rodar?»: deja el bloque naranja plano; ahora fondo zinc con gradiente, borde y halo naranja, logo pequeño en esquina, texto en zinc-400. Botones: «Crear ruta» con gradiente naranja/ámbar; «Unirse con código» estilo zinc; columna en móvil y fila desde `sm`; chevron decorativo solo en `sm+`.
+- `src/App.tsx`
+  - Estado `isChromeIOS` (`CriOS` + iPhone/iPad/iPod).
+  - Panel «Cómo ponerla en tu móvil» visible si `beforeinstallprompt`, Safari, Chrome iOS o iOS en general.
+  - Ramas: Android/escritorio con `beforeinstallprompt`; Chrome iPhone (Compartir → Ver más → Añadir a pantalla de inicio); Safari iOS (lista corta); otros iOS (texto genérico); escritorio sin iOS (instalación desde navegador).
+  - Bloque pantalla completa también si `isChromeIOS`. Mensajes de error/info de pantalla completa actualizados (Safari y Chrome iOS).
+- `src/components/WhatsNewModal.tsx`
+  - `WHATS_NEW_VERSION` `2026.04.16`. Lista reducida a frases simples (`HIGHLIGHTS`), sin horas ni etiquetas novedad/arreglo; botón «Entendido».
