@@ -3,17 +3,19 @@ import { Check } from 'lucide-react';
 import appLogo from '../../ICONO.png';
 
 /** Sube este valor cuando cambien las novedades para volver a mostrar el aviso una vez por dispositivo. */
-export const WHATS_NEW_VERSION = '2026.04.22';
+export const WHATS_NEW_VERSION = '2026.04.15';
 
 const STORAGE_KEY = 'motoride_whats_new_seen_version';
 
 /** Textos breves para cualquier usuario (sin tecnicismos). */
 const HIGHLIGHTS: string[] = [
-  'Inclinómetro renovado: combina el giro del móvil y la gravedad como referencia de la moto y, en curvas, usa también la velocidad y el giro para acercarse mejor al ángulo real (no solo “mirar hacia abajo”).',
+  'Inclinómetro: a muy baja velocidad se apoya más en la gravedad (moto parada o casi); al ir más rápido combina giro, gravedad y la física de la curva para que el ángulo sea más estable y fiel.',
+  'Mapa al grabar: la cámara se aleja un poco cuando vas más rápido y se carga más mapa de reserva al girar la vista con el rumbo, para que no se vean huecos en los bordes.',
+  'Resumen al terminar la ruta: pantalla de cierre más cuidada y una imagen para compartir con mejor diseño (WhatsApp, etc.).',
+  'Archivos GPX: lectura más fiable (más tipos de track) y mensajes claros al subir o si el archivo no trae una ruta válida.',
+  'Planificar destino: si eliges un resultado de la lista (o escribes coordenadas), la ruta apunta mejor al sitio que querías.',
   'Dos ceros guardados: uno con el móvil en el soporte o manillar y otro en bolsillo o MirrorLink; al terminar la cuenta atrás del modo bolsillo se ajusta el cero con el teléfono ya guardado.',
   'Si llevas el móvil suelto en el pantalón, la inclinación va más suavizada para que en la pantalla de la moto no salten tanto los números.',
-  'Al crear una ruta, el buscador de destino va más fino: menos fallos al escribir y la ruta encaja con la sugerencia que elijas.',
-  'En el mapa, el bloque de marcha (velocidad, tiempo y clima) sigue compacto y legible al rodar.',
   'Si vas a rodar y puede llover en tu ruta o cerca de ti (unos 10 km), verás un aviso unos segundos. Conduce con cuidado.',
   'Instalación en iPhone: en Safari usa Compartir → Añadir a pantalla de inicio. En Chrome, Compartir → Ver más → Añadir a pantalla de inicio.',
   'Rutas con amigos: invitaciones, visibilidad de rutas y lista de apuntados en rutas programadas.',

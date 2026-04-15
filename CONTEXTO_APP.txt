@@ -1,5 +1,5 @@
 MotoRide — registro de contexto / cambios recientes
-Ultima actualizacion: 2026-04-22 (bloque 22 — inclinometro Kalman/cinematica, cero manillar vs bolsillo, novedades)
+Ultima actualizacion: 2026-04-15 (bloques 23-24 — inclinometro complementario, zoom mapa, resumen/GPX/planificador; merge en main)
 
 === Contacto y soporte ===
 - Correo publico de contacto: motorideapp1@gmail.com
@@ -222,3 +222,30 @@ Fecha: 2026-04-14
   - Tras bloqueo táctil (~850 ms): `calibrate()` para fijar cero IMU en bolsillo/MirrorLink.
 - `src/components/WhatsNewModal.tsx`
   - `WHATS_NEW_VERSION` incrementada; lista `HIGHLIGHTS` actualizada con inclinometro y calibración dual (lenguaje claro para usuario).
+
+=== RESUMEN DESDE EL ULTIMO LOG (POST BLOQUE 22) ===
+
+23) INCLINOMETRO HIBRIDO (COMPLEMENTARIO + CINEMATICA) Y MAPA (ZOOM / BUFFER)
+- `src/hooks/useLeanAngle.ts`
+  - Por debajo de ~5 km/h: angulo desde gravedad en marco moto; sin mezclar termino cinemático v·ω/g.
+  - Desde ~5 km/h: θ = atan((v·ω)/g) mezclado con acelerometro según peso; fusión con `complementaryAngleRad` (giro + corrección) en lugar del Kalman escalar.
+  - Zona muerta reducida a baja velocidad para no forzar 0° si el dispositivo sigue inclinado.
+- `src/lib/motorcycleLean/kinematicLean.ts`
+  - `DEFAULT_KINEMATIC_MIN_SPEED_MPS` (5 km/h); ajuste de `kinematicBlendWeight`.
+- `src/components/MapView.tsx` (`MapController`, `TileLayer`)
+  - Zoom dinámico al grabar: interpolación lineal ~5 km/h → zoom 18, ~120 km/h → zoom 12, con suavizado; velocidad sin redondear para el seguimiento.
+  - `keepBuffer` mayor en mapa base y capa radar cuando el mapa gira con el rumbo (menos “cuadrados” vacíos).
+- Rama/merge: `cursor/hybrid-lean-map-zoom-6707` → `main`.
+
+24) RESUMEN COMPARTIDO, GPX, PLANIFICADOR DE DESTINO (PRECISION)
+- `src/lib/gpx.ts`
+  - Parseo robusto: `trkpt`/`rtept` si no hay LineString; unión de segmentos / MultiLineString; validación XML.
+- `src/components/MapView.tsx`
+  - Imagen de resumen compartido rediseñada (vertical, tarjeta, logo); texto de compartir más completo; modal de fin de ruta con estética mejorada.
+  - Subida GPX: mensaje de éxito, reset del input file, errores más claros.
+- `src/components/Dashboard.tsx`
+  - Misma lógica GPX/feedback al crear ruta; texto de ayuda: elegir sugerencia de la lista o coordenadas para destino fiable.
+- `src/lib/routePlannerDestination.ts`, `src/lib/nominatimPick.ts`
+  - `PickedDestination` con `osmType`/`osmId`; `fetchNominatimPlaceByOsmId` (lookup Nominatim) antes de OSRM para coords canónicas del lugar elegido.
+  - Búsqueda Nominatim con `dedupe=1`.
+- Rama/merge: `cursor/summary-gpx-planner-6707` → `main`.
