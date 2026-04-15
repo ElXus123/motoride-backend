@@ -139,13 +139,15 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     code: string;
     ts: number;
   } | null>(null);
-  /** Abrir bloque «Apuntados» desde el botón inferior (por id de ruta/grupo). */
-  const [attendeesExpandNonceByRouteId, setAttendeesExpandNonceByRouteId] = useState<Record<string, number>>({});
-  const bumpAttendeesList = (routeId: string) => {
-    setAttendeesExpandNonceByRouteId((prev) => ({
-      ...prev,
-      [routeId]: (prev[routeId] ?? 0) + 1,
-    }));
+  /** Un solo popup de apuntados para toda la pantalla (evita 2 modales si la misma ruta sale en Explorar + Mis próximas, etc.). */
+  const [attendeesListMemberUids, setAttendeesListMemberUids] = useState<string[]>([]);
+  const [attendeesListOpenNonce, setAttendeesListOpenNonce] = useState(0);
+  const bumpAttendeesList = (memberUids: unknown) => {
+    const list = Array.isArray(memberUids)
+      ? memberUids.map((u) => String(u || '').trim()).filter(Boolean)
+      : [];
+    setAttendeesListMemberUids(list);
+    setAttendeesListOpenNonce((n) => n + 1);
   };
 
   // Create Route Form State
@@ -1227,11 +1229,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                     <MapPin size={12} />
                     {route.municipality}, {route.province}
                   </p>
-                  <ScheduledRouteAttendees
-                    memberUids={Array.isArray(route.members) ? route.members : []}
-                    className="mb-3"
-                    expandNonce={attendeesExpandNonceByRouteId[route.id] ?? 0}
-                  />
+                  <div className="mb-3" aria-hidden />
                     <div className="flex gap-2">
                       {route.routeGeoJSON && (
                         <button 
@@ -1264,7 +1262,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                     </div>
                     <button
                       type="button"
-                      onClick={() => bumpAttendeesList(route.id)}
+                      onClick={() => bumpAttendeesList(route.members)}
                       className="mt-4 w-full py-2 rounded-xl border border-zinc-600/60 bg-zinc-800/50 text-zinc-100 text-xs font-bold flex items-center justify-center gap-2 hover:bg-zinc-800 hover:border-zinc-500 transition-colors"
                     >
                       <ListOrdered size={14} className="text-orange-400 shrink-0" />
@@ -1326,11 +1324,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                       <MapPin size={10} />
                       {route.municipality}, {route.province}
                     </p>
-                    <ScheduledRouteAttendees
-                      memberUids={Array.isArray(route.members) ? route.members : []}
-                      className="mb-3"
-                      expandNonce={attendeesExpandNonceByRouteId[route.id] ?? 0}
-                    />
+                    <div className="mb-3" aria-hidden />
                     <div className="flex gap-2">
                       {route.routeGeoJSON && (
                         <button
@@ -1375,7 +1369,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                     </div>
                     <button
                       type="button"
-                      onClick={() => bumpAttendeesList(route.id)}
+                      onClick={() => bumpAttendeesList(route.members)}
                       className="mt-3 w-full py-2 rounded-xl border border-zinc-600/60 bg-zinc-800/50 text-zinc-100 text-xs font-bold flex items-center justify-center gap-2 hover:bg-zinc-800 hover:border-zinc-500 transition-colors"
                     >
                       <ListOrdered size={14} className="text-orange-400 shrink-0" />
@@ -1461,11 +1455,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                         </div>
                       </div>
 
-                      <ScheduledRouteAttendees
-                        memberUids={Array.isArray(route.members) ? route.members : []}
-                        className="mb-3"
-                        expandNonce={attendeesExpandNonceByRouteId[route.id] ?? 0}
-                      />
+                      <div className="mb-3" aria-hidden />
                       
                       <div className="flex flex-wrap gap-2">
                         {route.routeGeoJSON && (
@@ -1515,7 +1505,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                       </div>
                       <button
                         type="button"
-                        onClick={() => bumpAttendeesList(route.id)}
+                        onClick={() => bumpAttendeesList(route.members)}
                         className="mt-3 w-full py-2 rounded-xl border border-zinc-600/60 bg-zinc-800/50 text-zinc-100 text-[10px] font-bold flex items-center justify-center gap-1.5 hover:bg-zinc-800 hover:border-zinc-500 transition-colors"
                       >
                         <ListOrdered size={12} className="text-orange-400 shrink-0" />
@@ -1529,6 +1519,11 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
               )}
             </div>
         </div>
+
+        <ScheduledRouteAttendees
+          memberUids={attendeesListMemberUids}
+          expandNonce={attendeesListOpenNonce}
+        />
       </main>
 
       {/* Friends Modal */}
