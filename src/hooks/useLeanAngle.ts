@@ -19,6 +19,11 @@ import {
 } from '../lib/motorcycleLean/kinematicLean';
 import { PocketInstabilityTracker } from '../lib/motorcycleLean/pocketDetection';
 import { evaluateCurvePlausibility, lateralAccelMagnitude } from '../lib/motorcycleLean/curveDetection';
+import {
+  getScreenOrientationAngleDeg,
+  orientationBucket,
+  remapDeviceVectorToNaturalPortrait,
+} from '../lib/motorcycleLean/deviceScreenFrame';
 
 /** Manillar/soporte: móvil fijo. Bolsillo/MirrorLink: móvil en el cuerpo; el cero debe ser independiente. */
 export type LeanCalibrationProfile = 'handlebar' | 'pocket';
@@ -79,6 +84,8 @@ export const useLeanAngle = (
   const calibratedRef = useRef(false);
   const displayLpRef = useRef(0);
   const straightAccumSecRef = useRef(0);
+  /** Último bucket de orientación (0/90/180/270): al cambiar, el marco IMU respecto a la app cambia → recalibrar. */
+  const lastOrientationBucketRef = useRef<0 | 90 | 180 | 270>(0);
 
   useEffect(() => {
     speedRef.current = speedMps;
@@ -202,34 +209,41 @@ export const useLeanAngle = (
     const assumedHz = 30;
     const dtDefault = 1 / assumedHz;
 
-    const updateMotionStationary = (event: DeviceMotionEvent) => {
+    const updateMotionStationary = (event: DeviceMotionEvent, screenDeg: number) => {
       const rr = event.rotationRate;
       const accLin = event.acceleration;
       const accg = event.accelerationIncludingGravity;
 
+      const rrAny = rr as { x?: number; y?: number; z?: number; alpha?: number; beta?: number; gamma?: number } | null;
+      const wxR = rrAny?.x != null ? rrAny.x : (rr?.beta ?? 0);
+      const wyR = rrAny?.y != null ? rrAny.y : (rr?.gamma ?? 0);
+      const wzR = rrAny?.z != null ? rrAny.z : (rr?.alpha ?? 0);
+      const wRemap = remapDeviceVectorToNaturalPortrait(wxR, wyR, wzR, screenDeg);
+
       let still = true;
       let hasHint = false;
 
-      if (rr && (rr.alpha != null || rr.beta != null || rr.gamma != null)) {
+      if (rr && (rr.alpha != null || rr.beta != null || rr.gamma != null || rrAny?.x != null)) {
         hasHint = true;
-        const spin =
-          Math.abs(rr.alpha ?? 0) + Math.abs(rr.beta ?? 0) + Math.abs(rr.gamma ?? 0);
+        const spin = Math.abs(wRemap[0]) + Math.abs(wRemap[1]) + Math.abs(wRemap[2]);
         still = still && spin < 7;
       }
 
       if (accLin && accLin.x != null && accLin.y != null && accLin.z != null) {
         hasHint = true;
-        const m = Math.sqrt(accLin.x * accLin.x + accLin.y * accLin.y + accLin.z * accLin.z);
+        const aLin = remapDeviceVectorToNaturalPortrait(accLin.x, accLin.y, accLin.z, screenDeg);
+        const m = Math.hypot(aLin[0], aLin[1], aLin[2]);
         still = still && m < 0.5;
       }
 
       if (accg && accg.x != null && accg.y != null && accg.z != null) {
-        const norm = Math.sqrt(accg.x * accg.x + accg.y * accg.y + accg.z * accg.z);
+        const gLoc = remapDeviceVectorToNaturalPortrait(accg.x, accg.y, accg.z, screenDeg);
+        const norm = Math.hypot(gLoc[0], gLoc[1], gLoc[2]);
         if (norm > 2) {
           hasHint = true;
-          const nx = accg.x / norm;
-          const ny = accg.y / norm;
-          const nz = accg.z / norm;
+          const nx = gLoc[0] / norm;
+          const ny = gLoc[1] / norm;
+          const nz = gLoc[2] / norm;
           const prev = prevGravUnitRef.current;
           if (prev) {
             const dot = Math.max(-1, Math.min(1, nx * prev.x + ny * prev.y + nz * prev.z));
@@ -257,7 +271,19 @@ export const useLeanAngle = (
         const rr = ev.rotationRate;
         if (!accg || accg.x == null || accg.y == null || accg.z == null) return;
 
-        updateMotionStationary(ev);
+        const screenDeg = getScreenOrientationAngleDeg();
+        const ob = orientationBucket(screenDeg);
+        if (ob !== lastOrientationBucketRef.current) {
+          lastOrientationBucketRef.current = ob;
+          calibratedRef.current = false;
+          gLpInit.current = false;
+          pocket.current.reset();
+          compAngleRadRef.current = 0;
+          displayLpRef.current = 0;
+          prevGravUnitRef.current = null;
+        }
+
+        updateMotionStationary(ev, screenDeg);
 
         const now =
           typeof ev.timeStamp === 'number' && ev.timeStamp > 0 ? ev.timeStamp : performance.now();
@@ -267,11 +293,25 @@ export const useLeanAngle = (
         }
         lastTs.current = now;
 
-        gRaw.current[0] = accg.x!;
-        gRaw.current[1] = accg.y!;
-        gRaw.current[2] = accg.z!;
+        const gLoc = remapDeviceVectorToNaturalPortrait(accg.x!, accg.y!, accg.z!, screenDeg);
+        gRaw.current[0] = gLoc[0];
+        gRaw.current[1] = gLoc[1];
+        gRaw.current[2] = gLoc[2];
 
-        pocket.current.pushSample(rr, accLin);
+        const rrAny = rr as { x?: number; y?: number; z?: number; alpha?: number; beta?: number; gamma?: number } | null;
+        const wxR = rrAny?.x != null ? rrAny.x : (rr?.beta ?? 0);
+        const wyR = rrAny?.y != null ? rrAny.y : (rr?.gamma ?? 0);
+        const wzR = rrAny?.z != null ? rrAny.z : (rr?.alpha ?? 0);
+        const wRemap = remapDeviceVectorToNaturalPortrait(wxR, wyR, wzR, screenDeg);
+        const rrForPocket = { x: wRemap[0], y: wRemap[1], z: wRemap[2] };
+        const accLinForPocket =
+          accLin && accLin.x != null && accLin.y != null && accLin.z != null
+            ? (() => {
+                const a = remapDeviceVectorToNaturalPortrait(accLin.x, accLin.y, accLin.z, screenDeg);
+                return { x: a[0], y: a[1], z: a[2] };
+              })()
+            : null;
+        pocket.current.pushSample(rrForPocket, accLinForPocket);
 
         const gyroNoiseThresholdDegPerSec = 28;
         const instability = pocket.current.score(gyroNoiseThresholdDegPerSec);
@@ -308,9 +348,9 @@ export const useLeanAngle = (
           applyBikeCalibrationFromGravity();
         }
 
-        const wx = rr?.beta ?? 0;
-        const wy = rr?.gamma ?? 0;
-        const wz = rr?.alpha ?? 0;
+        const wx = wRemap[0];
+        const wy = wRemap[1];
+        const wz = wRemap[2];
 
         const leanDegAccel =
           leanDegFromGravityInBikeFrame(gUnit.current, RAlign.current, gbScratch.current) * LEAN_SENSOR_SIGN;
@@ -338,10 +378,11 @@ export const useLeanAngle = (
 
         let lateralA = 0;
         if (accLin && accLin.x != null && accLin.y != null && accLin.z != null) {
+          const aL = remapDeviceVectorToNaturalPortrait(accLin.x, accLin.y, accLin.z, screenDeg);
           lateralA = lateralAccelMagnitude(
-            accLin.x,
-            accLin.y,
-            accLin.z,
+            aL[0],
+            aL[1],
+            aL[2],
             gUnit.current[0],
             gUnit.current[1],
             gUnit.current[2]
