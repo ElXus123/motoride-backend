@@ -257,6 +257,18 @@ const MotorcycleIcon = ({ angle }: { angle: number }) => (
   </div>
 );
 
+/** Seguimiento en ruta: más velocidad → cámara más alejada (lineal 5 km/h→18 … 120 km/h→12). */
+function followZoomFromSpeedKmh(speedKmh: number): number {
+  const lo = 5;
+  const hi = 120;
+  const zNear = 18;
+  const zFar = 12;
+  const s = Math.max(0, speedKmh);
+  const clamped = Math.max(lo, Math.min(hi, s));
+  const t = (clamped - lo) / (hi - lo);
+  return zNear + t * (zFar - zNear);
+}
+
 // Solo invalidar cuando cambia el modo “mapa rotado” o tema; no en cada grado de rumbo (eso recargaba teselas y dejaba cuadrados negros).
 const MapInvalidateHelper = ({ layoutKey }: { layoutKey: string }) => {
   const map = useMap();
@@ -336,11 +348,21 @@ const MapController = ({
   const map = useMap();
   const hasAutoZoomedRef = useRef(false);
   const lastFollowRef = useRef<{ lat: number; lng: number; zoom: number; t: number } | null>(null);
+  const smoothedRecordingZoomRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (isFollowing && location && typeof location.lat === 'number' && typeof location.lng === 'number') {
-      const speedZoomSteps = Math.floor(Math.max(speedKmh, 0) / 10);
-      const dynamicZoom = Math.max(15.4, 17.15 - speedZoomSteps * 0.22);
+      let dynamicZoom = followZoomFromSpeedKmh(speedKmh);
+      if (isRecording) {
+        if (smoothedRecordingZoomRef.current === null) {
+          smoothedRecordingZoomRef.current = followZoomFromSpeedKmh(speedKmh);
+        }
+        const alpha = 0.125;
+        smoothedRecordingZoomRef.current += alpha * (dynamicZoom - smoothedRecordingZoomRef.current);
+        dynamicZoom = Math.max(11.4, Math.min(18.6, smoothedRecordingZoomRef.current));
+      } else {
+        smoothedRecordingZoomRef.current = null;
+      }
       const followZoomInitial = hasActiveRoute ? 15.35 : Math.max(map.getZoom(), 17);
       const zoom = isRecording ? dynamicZoom : hasAutoZoomedRef.current ? map.getZoom() : followZoomInitial;
       const size = map.getSize();
@@ -2407,6 +2429,8 @@ export default function MapView({
   };
 
   const currentSpeedKmh = speed ? Math.round(speed * 3.6) : 0;
+  /** Sin redondear: zoom dinámico suave según velocidad real. */
+  const speedKmhForMapFollow = (speed ?? 0) * 3.6;
   const isMoving = currentSpeedKmh > 2;
 
   const DayWeatherIcon = useMemo(
@@ -3889,7 +3913,9 @@ export default function MapView({
         />
         <TileLayer
           url="https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png"
-          keepBuffer={260}
+          keepBuffer={
+            isRecording && currentSpeedKmh > 3 && localDistance >= 0.05 ? 420 : 300
+          }
           updateWhenIdle={false}
           updateWhenZooming={false}
           maxZoom={20}
@@ -3920,7 +3946,9 @@ export default function MapView({
               maxNativeZoom={rainRadar.maxNativeZoom}
               maxZoom={20}
               className="leaflet-radar-overlay"
-              keepBuffer={96}
+              keepBuffer={
+                isRecording && currentSpeedKmh > 3 && localDistance >= 0.05 ? 168 : 112
+              }
               noWrap={false}
               errorTileUrl={LEAFLET_TRANSPARENT_ERROR_TILE}
               eventHandlers={{
@@ -4010,7 +4038,7 @@ export default function MapView({
           isFollowing={isFollowing}
           showRanking={showRanking}
           isRecording={isRecording}
-          speedKmh={currentSpeedKmh}
+          speedKmh={speedKmhForMapFollow}
           hasActiveRoute={!!effectiveRouteForNav}
           isLandscapeUi={isLandscapeUi}
         />

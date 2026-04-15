@@ -1,13 +1,18 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { lowPassVec3, normalizeVec3, lowPassScalar } from '../lib/motorcycleLean/filters';
+import {
+  lowPassVec3,
+  normalizeVec3,
+  lowPassScalar,
+  complementaryAngleRad,
+} from '../lib/motorcycleLean/filters';
 import {
   buildBikeBasisAtCalibration,
   leanDegFromGravityInBikeFrame,
   rollRateFromGyro,
   rotationFromTo,
 } from '../lib/motorcycleLean/geometry';
-import { KalmanRoll1D } from '../lib/motorcycleLean/kalmanRoll1D';
 import {
+  DEFAULT_KINEMATIC_MIN_SPEED_MPS,
   kinematicBlendWeight,
   kinematicLeanDegFromSpeedAndYaw,
   yawRateAboutGravityDegPerSec,
@@ -63,7 +68,8 @@ export const useLeanAngle = (
   const gbScratch = useRef<[number, number, number]>([0, 0, 1]);
   const pocket = useRef(new PocketInstabilityTracker());
   const lastTs = useRef<number | null>(null);
-  const kf = useRef(new KalmanRoll1D());
+  /** Ángulo de roll fusionado (rad), filtro complementario giro + acelerómetro. */
+  const compAngleRadRef = useRef(0);
   const calibratedRef = useRef(false);
   const displayLpRef = useRef(0);
   const straightAccumSecRef = useRef(0);
@@ -165,7 +171,7 @@ export const useLeanAngle = (
 
   useEffect(() => {
     dynamicBiasRef.current = 0;
-    kf.current.reset(0);
+    compAngleRadRef.current = 0;
     calibratedRef.current = false;
     gLpInit.current = false;
     displayLpRef.current = 0;
@@ -178,7 +184,8 @@ export const useLeanAngle = (
     const R = RAlign.current;
     if (!rotationFromTo(g, EZ, R)) return;
     buildBikeBasisAtCalibration(g, forwardCal.current, lateralCal.current, upCal.current);
-    kf.current.reset(0);
+    const ld = leanDegFromGravityInBikeFrame(g, RAlign.current, gbScratch.current);
+    compAngleRadRef.current = ld * RAD;
     calibratedRef.current = true;
     straightAccumSecRef.current = 0;
   }, []);
@@ -314,10 +321,12 @@ export const useLeanAngle = (
         );
 
         const speed = speedRef.current ?? 0;
-        let kinDeg = kinematicLeanDegFromSpeedAndYaw(Math.abs(speed), yawAboutG);
+        const speedAbs = Math.abs(speed);
+        let kinDeg = kinematicLeanDegFromSpeedAndYaw(speedAbs, yawAboutG);
         if (Math.abs(leanDegAccel) > 4 && Math.abs(kinDeg) > 4 && Math.sign(leanDegAccel) !== Math.sign(kinDeg)) {
           kinDeg = -kinDeg;
         }
+        const thetaKinRad = kinDeg * RAD;
 
         let lateralA = 0;
         if (accLin && accLin.x != null && accLin.y != null && accLin.z != null) {
@@ -337,26 +346,33 @@ export const useLeanAngle = (
           lateralActiveAbove: 1.4,
         });
 
-        const wKin =
-          kinematicBlendWeight(Math.abs(speed), yawAboutG) * (curve.leanMeaningful ? 1 : 0.35);
+        const wKinBase = kinematicBlendWeight(speedAbs, yawAboutG) * (curve.leanMeaningful ? 1 : 0.35);
+        const useKinematic =
+          speedAbs >= DEFAULT_KINEMATIC_MIN_SPEED_MPS * 0.92 && wKinBase > 0.02;
+        const zMeasRad = useKinematic
+          ? thetaAccRad * (1 - wKinBase) + thetaKinRad * wKinBase
+          : thetaAccRad;
 
-        const processNoise =
-          pocketLevel === 'high' ? 8e-5 : pocketLevel === 'moderate' ? 5e-5 : 3e-5;
-        kf.current.predict(omegaRoll, dt, processNoise);
-
-        let rAccel = 0.035 + instability * 0.12;
-        if (gMag < 8.5 || gMag > 11.2) rAccel += 0.08;
-        if (!curve.leanMeaningful) rAccel += 0.05;
-        if (isPocketProfile) rAccel += 0.06;
-
-        kf.current.update(thetaAccRad, rAccel);
-
-        if (wKin > 0.04 && Math.abs(speed) >= 3) {
-          const rKin = 0.14 + (1 - wKin) * 0.22 + (isPocketProfile ? 0.06 : 0);
-          kf.current.update(kinDeg * RAD, rKin);
+        let compAlpha = 0.065;
+        if (speedAbs < DEFAULT_KINEMATIC_MIN_SPEED_MPS) {
+          compAlpha = isPocketProfile ? 0.11 : 0.14 + instability * 0.06;
+        } else {
+          compAlpha = isPocketProfile ? 0.042 : 0.055 + instability * 0.05;
+          compAlpha *= 0.88 + Math.min(0.12, wKinBase * 0.2);
         }
+        if (gMag < 8.5 || gMag > 11.2) compAlpha += 0.035;
+        if (!curve.leanMeaningful && speedAbs >= DEFAULT_KINEMATIC_MIN_SPEED_MPS) compAlpha += 0.02;
+        compAlpha = Math.max(0.018, Math.min(0.22, compAlpha));
 
-        let internalDeg = kf.current.getAngleRad() * DEG;
+        compAngleRadRef.current = complementaryAngleRad(
+          compAngleRadRef.current,
+          zMeasRad,
+          omegaRoll,
+          dt,
+          compAlpha
+        );
+
+        let internalDeg = compAngleRadRef.current * DEG;
         if (internalDeg > 60) internalDeg = 60;
         if (internalDeg < -60) internalDeg = -60;
 
@@ -404,13 +420,24 @@ export const useLeanAngle = (
         if (outDeg > 60) outDeg = 60;
         if (outDeg < -60) outDeg = -60;
 
-        const deadDeg = tableFlatRest ? 4.8 : stationaryButLeaning ? 1.0 : speedUnknown ? 2.2 : 1.0;
+        const lowSpeedLean = speedAbs < DEFAULT_KINEMATIC_MIN_SPEED_MPS;
+        const deadDeg = lowSpeedLean
+          ? isPocketProfile
+            ? 0.85
+            : 0.55
+          : tableFlatRest
+            ? 4.8
+            : stationaryButLeaning
+              ? 1.0
+              : speedUnknown
+                ? 2.2
+                : 1.0;
         if (Math.abs(outDeg) < deadDeg) outDeg = 0;
 
         setLeanAngle(outDeg);
 
         const roundedAngle = Math.round(outDeg);
-        const minMaxThreshold = tableFlatRest ? 10 : 0;
+        const minMaxThreshold = lowSpeedLean ? 0 : tableFlatRest ? 10 : 0;
         if (roundedAngle < 0 && Math.abs(roundedAngle) >= minMaxThreshold) {
           setMaxLeanLeft((prev) => Math.max(prev, Math.abs(roundedAngle)));
         } else if (roundedAngle > 0 && roundedAngle >= minMaxThreshold) {
@@ -452,7 +479,7 @@ export const useLeanAngle = (
       const samples = angleHistoryRef.current.slice(-15);
       const median = samples.length
         ? [...samples].sort((a, b) => a - b)[Math.floor(samples.length / 2)]
-        : kf.current.getAngleRad() * DEG;
+        : compAngleRadRef.current * DEG;
       const v = clampOffset(median);
       if (calibrationProfile === 'pocket') {
         setOffsetPocket(v);

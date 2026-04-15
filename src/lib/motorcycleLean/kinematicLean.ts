@@ -40,16 +40,20 @@ export function kinematicLeanDegFromSpeedAndYaw(
   return (Math.atan2(aLat, G) * 180) / Math.PI;
 }
 
+/** Umbral por defecto: 5 km/h — por debajo la cinemática v·ω no aporta (se usa solo gravedad). */
+export const DEFAULT_KINEMATIC_MIN_SPEED_MPS = 5 / 3.6;
+
 /** Peso 0–1 para mezclar cinemática: sube con |v| y |ω|, nulo si datos inválidos. */
 export function kinematicBlendWeight(
   speedMps: number,
   yawAboutGravityDegPerSec: number,
   opts?: { minSpeed?: number; minYaw?: number }
 ): number {
-  const minSpeed = opts?.minSpeed ?? 4;
+  const minSpeed = opts?.minSpeed ?? DEFAULT_KINEMATIC_MIN_SPEED_MPS;
   const minYaw = opts?.minYaw ?? 6;
   if (speedMps < minSpeed * 0.5) return 0;
-  const sp = Math.min(1, Math.max(0, (Math.abs(speedMps) - minSpeed * 0.5) / (18 - minSpeed * 0.5)));
+  const span = Math.max(6, 18 - minSpeed * 0.5);
+  const sp = Math.min(1, Math.max(0, (Math.abs(speedMps) - minSpeed * 0.5) / span));
   const yp = Math.min(1, Math.abs(yawAboutGravityDegPerSec) / minYaw);
-  return Math.min(0.62, sp * yp * 0.85);
+  return Math.min(0.85, sp * yp * 0.92);
 }
