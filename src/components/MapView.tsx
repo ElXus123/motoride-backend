@@ -60,7 +60,7 @@ import socket from '../lib/socket';
 import { useVoiceChat } from '../hooks/useVoiceChat';
 import PremiumBadge from './PremiumBadge';
 import InviteFriendsModal from './InviteFriendsModal';
-import { Upload, ArrowLeft, Copy, Check, Navigation, AlertTriangle, Play, Square, MapPin, Trophy, Bell, AlertCircle, Wrench, Fuel, X, Maximize, Minimize, Search, Share2, Menu, Target, LogOut, Users, UserPlus, Mic, MicOff, ShieldAlert, Activity, Layers, Lock, LockOpen, Smartphone, RotateCw, Crown, WifiOff, Monitor, Loader2, Mail, Ban, CloudRain, Pause, Coffee } from 'lucide-react';
+import { Upload, ArrowLeft, Copy, Check, Navigation, AlertTriangle, Play, Square, MapPin, Trophy, Bell, AlertCircle, Wrench, Fuel, X, Maximize, Minimize, Search, Share2, Menu, Target, LogOut, Users, UserPlus, Mic, MicOff, ShieldAlert, Activity, Layers, Lock, LockOpen, Smartphone, RotateCw, Crown, WifiOff, Monitor, Loader2, Mail, Ban, CloudRain, Pause, Coffee, ArrowUp } from 'lucide-react';
 import { getDirectionIcon } from './NavManeuverIcons';
 import { copyTextToClipboard, getSupportMailtoHref } from '../lib/clientInfo';
 import { buildScheduledInviteSharePayload } from '../lib/scheduledRouteShare';
@@ -3570,62 +3570,69 @@ export default function MapView({
              </div>
            )}
            <div className="flex flex-col items-end gap-1 pointer-events-auto">
-             <button
-               type="button"
-               onClick={() => {
-                 clearMicError();
-                 if (!voiceAllowed) {
-                   showMessage({
-                     variant: 'info',
-                     title: 'Chat de voz',
-                     message:
-                       'El chat de voz es Premium. Si el anfitrión de esta ruta tiene Premium, todo el grupo puede usarlo. Si no, puedes obtenerlo apoyando el proyecto (Ko-fi; activación manual). Menú principal → Apoyar proyecto.',
-                   });
-                   return;
-                 }
-                 void toggleVoice();
-               }}
-               className={`p-3 rounded-full shadow-xl transition-colors relative shrink-0 ${
-                 voiceReconnecting
-                   ? 'bg-amber-500 text-white ring-2 ring-amber-300/70'
-                   : isVoiceActive
-                     ? 'bg-green-500 text-white'
-                     : micError
-                       ? 'bg-red-900/80 text-red-200 ring-2 ring-red-500/50'
-                       : !voiceAllowed
-                         ? 'bg-zinc-800 text-amber-400 ring-2 ring-amber-500/35'
-                         : 'bg-zinc-800 text-zinc-400'
+             <div
+               className={`flex flex-col items-end gap-1.5 transition-all duration-300 ${
+                 voiceReconnecting ? 'rounded-2xl border border-amber-500/20 bg-zinc-950/85 backdrop-blur-md px-2 py-2 shadow-lg shadow-black/25 ring-1 ring-amber-400/15' : ''
                }`}
-               title={
-                 !voiceAllowed
-                   ? 'Voz Premium (o anfitrión con Premium)'
-                   : voiceReconnecting
-                     ? 'Reconectando chat de voz…'
-                     : isVoiceActive
-                       ? 'Desconectar voz'
-                       : 'Conectar voz (micrófono)'
-               }
              >
-               {voiceReconnecting ? (
-                 <Loader2 size={20} className="animate-spin" aria-hidden />
-               ) : isVoiceActive ? (
-                 <Mic size={20} />
-               ) : !voiceAllowed ? (
-                 <Crown size={20} />
-               ) : (
-                 <MicOff size={20} />
+               <button
+                 type="button"
+                 onClick={() => {
+                   clearMicError();
+                   if (!voiceAllowed) {
+                     showMessage({
+                       variant: 'info',
+                       title: 'Chat de voz',
+                       message:
+                         'El chat de voz es Premium. Si el anfitrión de esta ruta tiene Premium, todo el grupo puede usarlo. Si no, puedes obtenerlo apoyando el proyecto (Ko-fi; activación manual). Menú principal → Apoyar proyecto.',
+                     });
+                     return;
+                   }
+                   void toggleVoice();
+                 }}
+                 className={`p-3 rounded-full shadow-xl transition-all duration-300 ease-out relative shrink-0 ${
+                   voiceReconnecting
+                     ? 'bg-zinc-900 text-amber-400 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] ring-2 ring-amber-400/45'
+                     : isVoiceActive
+                       ? 'bg-emerald-500 text-white shadow-emerald-900/30 hover:bg-emerald-400'
+                       : micError
+                         ? 'bg-red-900/80 text-red-200 ring-2 ring-red-500/50'
+                         : !voiceAllowed
+                           ? 'bg-zinc-800 text-amber-400 ring-2 ring-amber-500/35'
+                           : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+                 }`}
+                 title={
+                   !voiceAllowed
+                     ? 'Voz Premium (o anfitrión con Premium)'
+                     : voiceReconnecting
+                       ? 'Reconectando chat de voz…'
+                       : isVoiceActive
+                         ? 'Desconectar voz'
+                         : 'Conectar voz (micrófono)'
+                 }
+               >
+                 {voiceReconnecting ? (
+                   <Loader2 size={20} strokeWidth={2.25} className="animate-spin text-amber-300" aria-hidden />
+                 ) : isVoiceActive ? (
+                   <Mic size={20} />
+                 ) : !voiceAllowed ? (
+                   <Crown size={20} />
+                 ) : (
+                   <MicOff size={20} />
+                 )}
+                 {isVoiceActive && !voiceReconnecting && peersCount > 0 && (
+                   <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold min-w-[1rem] h-4 px-0.5 flex items-center justify-center rounded-full ring-2 ring-zinc-950">
+                     {peersCount}
+                   </span>
+                 )}
+               </button>
+               {voiceReconnecting && (
+                 <div className="text-right pr-0.5 pb-0.5 max-w-[10rem]">
+                   <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-200/95">Reconectando</p>
+                   <p className="text-[9px] text-zinc-500 mt-0.5 leading-snug">Restaurando enlace de voz</p>
+                 </div>
                )}
-               {isVoiceActive && !voiceReconnecting && peersCount > 0 && (
-                 <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-4 h-4 flex items-center justify-center rounded-full">
-                   {peersCount}
-                 </span>
-               )}
-             </button>
-             {voiceReconnecting && (
-               <span className="text-[10px] font-bold text-amber-100/95 text-right max-w-[7rem] leading-tight drop-shadow-md">
-                 Reconectando
-               </span>
-             )}
+             </div>
            </div>
 
            <button 
@@ -4280,6 +4287,37 @@ export default function MapView({
           
           {/* Speed + tiempo en ubicación — ancho fijo para no empujar Pausa/Finalizar fuera del viewport */}
           <div className="flex flex-col items-center justify-center w-[5rem] sm:w-[6.25rem] shrink-0 py-2 sm:py-3 px-2 sm:px-4 bg-white/5 rounded-[1.5rem] sm:rounded-[2rem] border border-white/5 landscape:w-[5rem] landscape:px-2">
+            {showHudWeather && (
+              <div
+                className="flex items-center justify-center gap-1 mb-0.5 sm:mb-1 min-h-[18px] sm:min-h-[20px] w-full"
+                title="Viento (~10 m). La flecha indica hacia dónde sopla; velocidad en km/h (Open-Meteo)."
+              >
+                {mapWeather.loading && mapWeather.windSpeedKmh == null ? (
+                  <span
+                    className="inline-block h-3 w-3 border-2 border-cyan-400/25 border-t-cyan-300/80 rounded-full animate-spin"
+                    aria-hidden
+                  />
+                ) : mapWeather.windSpeedKmh != null && mapWeather.windBlowToDeg != null ? (
+                  <>
+                    <span className="inline-flex items-center justify-center w-4 h-4 sm:w-[18px] sm:h-[18px] shrink-0 text-cyan-300">
+                      <ArrowUp
+                        size={isLandscapeUi ? 13 : 15}
+                        strokeWidth={2.5}
+                        className="drop-shadow-sm"
+                        style={{ transform: `rotate(${mapWeather.windBlowToDeg}deg)` }}
+                        aria-hidden
+                      />
+                    </span>
+                    <span className="text-[9px] sm:text-[10px] font-black tabular-nums text-cyan-100/95 leading-none tracking-tight">
+                      {Math.round(mapWeather.windSpeedKmh)}
+                      <span className="text-[7px] sm:text-[8px] font-semibold text-zinc-500 ml-0.5">km/h</span>
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-[9px] text-zinc-600 tabular-nums">—</span>
+                )}
+              </div>
+            )}
             <div
               className="flex items-center justify-center gap-1 sm:gap-1.5 mb-0.5 sm:mb-1 min-h-[22px] sm:min-h-[26px]"
               title={

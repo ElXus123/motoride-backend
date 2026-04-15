@@ -3,7 +3,7 @@ import { Check } from 'lucide-react';
 import appLogo from '../../ICONO.png';
 
 /** Sube este valor cuando cambien las novedades para volver a mostrar el aviso una vez por dispositivo. */
-export const WHATS_NEW_VERSION = '2026.04.30';
+export const WHATS_NEW_VERSION = '2026.05.01';
 
 const STORAGE_KEY = 'motoride_whats_new_seen_version';
 
@@ -18,6 +18,16 @@ export type ChangelogEntry = {
 
 /** Orden visual: más recientes arriba; `updatedAt` descendente. */
 const CHANGELOG: ChangelogEntry[] = [
+  {
+    kind: 'novedad',
+    text: 'HUD del mapa: encima de la temperatura ves la velocidad del viento (km/h) y una flecha que indica hacia dónde sopla (Open-Meteo).',
+    updatedAt: '2026-05-01T12:00:00',
+  },
+  {
+    kind: 'arreglo',
+    text: 'Chat de voz: al volver la conexión el micrófono pasa otra vez a verde; el modo «Reconectando» está más pulido (texto y aspecto).',
+    updatedAt: '2026-05-01T11:30:00',
+  },
   {
     kind: 'novedad',
     text: 'Chat de voz: si pierdes cobertura o hay un corte breve, el botón del micrófono muestra un círculo de carga y debajo «Reconectando» hasta que la sesión vuelva a estabilizarse.',

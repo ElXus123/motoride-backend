@@ -1,5 +1,5 @@
 MotoRide — registro de contexto / cambios recientes
-Ultima actualizacion: 2026-04-15 (bloque 32: mapa suave, historial UI, voz reconectando)
+Ultima actualizacion: 2026-05-01 (bloque 33: viento en HUD, voz reconexión pulida)
 
 === Contacto y soporte ===
 - Correo publico de contacto: motorideapp1@gmail.com
@@ -345,3 +345,19 @@ Fecha: 2026-04-14
   - Si `voiceReconnecting`: botón ámbar, icono `Loader2` animado, texto «Reconectando» debajo; badge de número de peers oculto durante la reconexión.
 - `src/components/WhatsNewModal.tsx`
   - `WHATS_NEW_VERSION` `2026.04.30`: entradas para chat de voz (reconectando), historial en tarjetas con puntos en color, y geolocalización suave en mapa (lista completa en el modal).
+
+=== BLOQUE 33 — VOZ (RECONEXIÓN FIABLE) Y VIENTO EN EL HUD ===
+- `src/hooks/useVoiceChat.ts`
+  - Handler unificado `onSocketTransportRestored`: primero limpia `voiceTransportLost` si hay voz activa y sala unida; luego `rebuildVoiceRoom` solo con stream y permisos (evita quedar en ámbar al volver la red).
+  - Registrado en `socket.on('connect')` y `socket.io.on('reconnect')` (Manager); eliminado el antiguo `socket.on('reconnect')` del socket aislado.
+  - `window.addEventListener('online')` como refuerzo si el socket ya está `connected`.
+  - UI de malla WebRTC acortada (~900 ms); fail-safe ~4,5 s para limpiar `voiceMeshResetting` si el temporizador no dispara.
+- `src/components/MapView.tsx` (micrófono)
+  - Modo reconectando: tarjeta con borde/blur, botón oscuro con anillo ámbar, `Loader2`; texto «Reconectando» + «Restaurando enlace de voz»; voz activa estable en verde esmeralda (`emerald-500`).
+- `src/hooks/useOpenMeteoWeather.ts`
+  - Petición ampliada: `wind_speed_10m`, `wind_direction_10m`, `windspeed_unit=kmh`.
+  - `windBlowToDeg`: dirección hacia la que sopla el viento (opuesta a la procedencia de la API); `windSpeedKmh`.
+- `src/components/MapView.tsx` (HUD izquierdo)
+  - Encima de temperatura/icono: fila con flecha (`ArrowUp` rotada según `windBlowToDeg`) y velocidad en km/h; mismo criterio Premium que el HUD meteorológico (`showHudWeather`).
+- `src/components/WhatsNewModal.tsx`
+  - `WHATS_NEW_VERSION` `2026.05.01`: entradas para viento en mapa y refuerzo de reconexión de voz (ver changelog).
