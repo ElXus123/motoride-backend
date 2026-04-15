@@ -1,5 +1,5 @@
 MotoRide — registro de contexto / cambios recientes
-Ultima actualizacion: 2026-04-15 (HUD Pausa/Finalizar, resumen al salir invitado)
+Ultima actualizacion: 2026-04-15 (bloque 32: mapa suave, historial UI, voz reconectando)
 
 === Contacto y soporte ===
 - Correo publico de contacto: motorideapp1@gmail.com
@@ -326,3 +326,22 @@ Fecha: 2026-04-14
   - Se reutiliza `rideSessionKey` / `ridePointsCommittedSessionKeyRef` para no duplicar puntos si el host sigue rodando después.
   - La navegación de salida (`prepareHistoryLeave`, `onLeave`, `history.back`) se **aplaza** hasta cerrar el resumen (botones Guardar / No guardar en historial) vía `pendingLeaveAfterSummaryRef` y `completeParticipantLeaveIfNeeded`.
 - `src/components/WhatsNewModal.tsx`: versión de novedades actualizada; entradas ordenadas por orden de implementación en el producto (más antiguas arriba, más recientes abajo).
+
+=== BLOQUE 32 — MAPA (POSICION SUAVE), HISTORIAL (TARJETAS), VOZ (RECONEXION UI) ===
+- `src/components/MapView.tsx`
+  - Posición mostrada interpolada hacia el GPS / snap a ruta (`smoothMapLocation`, refs `smoothMapTargetRef` / `smoothMapRef`, constantes `SELF_MAP_SMOOTH_ALPHA`, `SELF_MAP_SNAP_M`) para que la flecha del usuario y el seguimiento del mapa no vayan a saltos.
+  - `MapController`: prop `smoothFollow` para relajar el anti-jitter (`tooSoon`) cuando se usa la posición suavizada y el centro no se queda atrás.
+  - Componente `SmoothedPeerMarker`: actualización imperativa `setLatLng` con `requestAnimationFrame` y lerp hacia la posición objetivo de otros moteros (`PEER_SMOOTH_ALPHA`, `PEER_SNAP_M`); evita re-renders por frame.
+- `src/lib/rideHistoryDisplay.ts` (nuevo)
+  - `formatRideCardTitle`, `formatRideCardSubtitle` (es-ES), `rideHistoryPointsEarned` para listados de historial.
+- `src/components/FriendsModal.tsx`
+  - Historial de rutas del amigo: tarjeta vertical alineada con diseño de referencia (título naranja con nombre de ruta + fecha, línea fecha/hora, fila DIST. / PTS con puntos en `text-orange-400`); cabecera del perfil amigo con puntos totales en naranja.
+- `src/components/Profile.tsx`
+  - Misma estructura de tarjeta en «Historial de rutas»; barra de nivel: puntos actuales del usuario en naranja.
+- `src/hooks/useVoiceChat.ts`
+  - Estados `voiceTransportLost` (socket desconectado con voz activa) y `voiceMeshResetting` (~1,4 s al llamar `rebuildVoiceRoom`: reconexión socket, `connect`, `visibilitychange`).
+  - Valor derivado `voiceReconnecting` expuesto al UI.
+- `src/components/MapView.tsx` (botón micrófono)
+  - Si `voiceReconnecting`: botón ámbar, icono `Loader2` animado, texto «Reconectando» debajo; badge de número de peers oculto durante la reconexión.
+- `src/components/WhatsNewModal.tsx`
+  - `WHATS_NEW_VERSION` `2026.04.30`: entradas para chat de voz (reconectando), historial en tarjetas con puntos en color, y geolocalización suave en mapa (lista completa en el modal).

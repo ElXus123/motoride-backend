@@ -1473,7 +1473,10 @@ export default function MapView({
     ? selfPremium || hostIsPremium
     : true;
 
-  const { isVoiceActive, toggleVoice, peersCount, micError, clearMicError } = useVoiceChat(groupId, voiceAllowed);
+  const { isVoiceActive, toggleVoice, peersCount, micError, clearMicError, voiceReconnecting } = useVoiceChat(
+    groupId,
+    voiceAllowed
+  );
 
   // Listen to group data
   useEffect(() => {
@@ -3566,45 +3569,64 @@ export default function MapView({
                </button>
              </div>
            )}
-           <button 
-             type="button"
-             onClick={() => {
-               clearMicError();
-               if (!voiceAllowed) {
-                 showMessage({
-                   variant: 'info',
-                   title: 'Chat de voz',
-                   message:
-                     'El chat de voz es Premium. Si el anfitrión de esta ruta tiene Premium, todo el grupo puede usarlo. Si no, puedes obtenerlo apoyando el proyecto (Ko-fi; activación manual). Menú principal → Apoyar proyecto.',
-                 });
-                 return;
+           <div className="flex flex-col items-end gap-1 pointer-events-auto">
+             <button
+               type="button"
+               onClick={() => {
+                 clearMicError();
+                 if (!voiceAllowed) {
+                   showMessage({
+                     variant: 'info',
+                     title: 'Chat de voz',
+                     message:
+                       'El chat de voz es Premium. Si el anfitrión de esta ruta tiene Premium, todo el grupo puede usarlo. Si no, puedes obtenerlo apoyando el proyecto (Ko-fi; activación manual). Menú principal → Apoyar proyecto.',
+                   });
+                   return;
+                 }
+                 void toggleVoice();
+               }}
+               className={`p-3 rounded-full shadow-xl transition-colors relative shrink-0 ${
+                 voiceReconnecting
+                   ? 'bg-amber-500 text-white ring-2 ring-amber-300/70'
+                   : isVoiceActive
+                     ? 'bg-green-500 text-white'
+                     : micError
+                       ? 'bg-red-900/80 text-red-200 ring-2 ring-red-500/50'
+                       : !voiceAllowed
+                         ? 'bg-zinc-800 text-amber-400 ring-2 ring-amber-500/35'
+                         : 'bg-zinc-800 text-zinc-400'
+               }`}
+               title={
+                 !voiceAllowed
+                   ? 'Voz Premium (o anfitrión con Premium)'
+                   : voiceReconnecting
+                     ? 'Reconectando chat de voz…'
+                     : isVoiceActive
+                       ? 'Desconectar voz'
+                       : 'Conectar voz (micrófono)'
                }
-               void toggleVoice();
-             }}
-             className={`p-3 rounded-full shadow-xl transition-colors relative shrink-0 ${
-               isVoiceActive
-                 ? 'bg-green-500 text-white'
-                 : micError
-                   ? 'bg-red-900/80 text-red-200 ring-2 ring-red-500/50'
-                   : !voiceAllowed
-                     ? 'bg-zinc-800 text-amber-400 ring-2 ring-amber-500/35'
-                     : 'bg-zinc-800 text-zinc-400'
-             }`}
-             title={
-               !voiceAllowed
-                 ? 'Voz Premium (o anfitrión con Premium)'
-                 : isVoiceActive
-                   ? 'Desconectar voz'
-                   : 'Conectar voz (micrófono)'
-             }
-           >
-             {isVoiceActive ? <Mic size={20} /> : !voiceAllowed ? <Crown size={20} /> : <MicOff size={20} />}
-             {isVoiceActive && peersCount > 0 && (
-               <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-4 h-4 flex items-center justify-center rounded-full">
-                 {peersCount}
+             >
+               {voiceReconnecting ? (
+                 <Loader2 size={20} className="animate-spin" aria-hidden />
+               ) : isVoiceActive ? (
+                 <Mic size={20} />
+               ) : !voiceAllowed ? (
+                 <Crown size={20} />
+               ) : (
+                 <MicOff size={20} />
+               )}
+               {isVoiceActive && !voiceReconnecting && peersCount > 0 && (
+                 <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-4 h-4 flex items-center justify-center rounded-full">
+                   {peersCount}
+                 </span>
+               )}
+             </button>
+             {voiceReconnecting && (
+               <span className="text-[10px] font-bold text-amber-100/95 text-right max-w-[7rem] leading-tight drop-shadow-md">
+                 Reconectando
                </span>
              )}
-           </button>
+           </div>
 
            <button 
              onClick={() => setIsFollowing(!isFollowing)}

@@ -4,6 +4,7 @@ import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { X, Search, UserPlus, UserMinus, User as UserIcon, Play, Check, Clock, Ban } from 'lucide-react';
 import PremiumBadge from './PremiumBadge';
+import { formatRideCardSubtitle, formatRideCardTitle, rideHistoryPointsEarned } from '../lib/rideHistoryDisplay';
 
 export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () => void, onRepeatRoute: (route: string) => void }) {
   const { user } = useAuth();
@@ -263,7 +264,10 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                     {selectedUser.displayName}
                     {selectedUser.isPremium === true ? <PremiumBadge /> : null}
                   </h3>
-                  <p className="text-zinc-400">Nivel {selectedUser.level || 1} • {selectedUser.points || 0} pts</p>
+                  <p className="text-zinc-400">
+                    Nivel {selectedUser.level || 1} •{' '}
+                    <span className="font-bold text-orange-400 tabular-nums">{selectedUser.points || 0}</span> pts
+                  </p>
                 </div>
               </div>
 
@@ -287,20 +291,40 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                 )}
                 <div className="space-y-3">
                   {selectedUserHistory.length > 0 ? (
-                    selectedUserHistory.map(ride => (
-                      <div key={ride.id} className="bg-zinc-950 border border-zinc-800 p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                        <div>
-                          <h5 className="font-bold text-orange-500">{ride.groupName || 'Ruta sin nombre'}</h5>
-                          <p className="text-xs text-zinc-500">
-                            {new Date(ride.endTime).toLocaleDateString()} • {ride.distance?.toFixed(1)} km
-                          </p>
+                    selectedUserHistory.map((ride) => (
+                      <div
+                        key={ride.id}
+                        className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 flex flex-col gap-2"
+                      >
+                        <h5 className="text-lg font-black text-orange-500 leading-snug tracking-tight">
+                          {formatRideCardTitle(ride.groupName, ride.endTime)}
+                        </h5>
+                        <p className="text-sm text-zinc-500">{formatRideCardSubtitle(ride.endTime)}</p>
+                        <div className="flex flex-wrap items-baseline gap-x-8 gap-y-1 mt-1">
+                          <span className="text-sm">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                              Dist.{' '}
+                            </span>
+                            <span className="font-semibold text-white tabular-nums">
+                              {ride.distance != null ? Number(ride.distance).toFixed(1) : '—'} km
+                            </span>
+                          </span>
+                          <span className="text-sm">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                              Pts{' '}
+                            </span>
+                            <span className="font-bold text-orange-400 tabular-nums">
+                              +{rideHistoryPointsEarned(ride)}
+                            </span>
+                          </span>
                         </div>
                         {ride.routeGeoJSON && (
-                          <button 
+                          <button
+                            type="button"
                             onClick={() => repeatRoute(ride.routeGeoJSON)}
-                            className="flex items-center gap-2 text-xs font-bold bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-xl transition-all"
+                            className="mt-2 flex items-center justify-center gap-2 text-xs font-bold bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2.5 rounded-xl transition-all w-full sm:w-auto sm:self-start"
                           >
-                            <Play size={14} /> Repetir
+                            <Play size={14} /> Repetir ruta
                           </button>
                         )}
                       </div>

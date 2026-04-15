@@ -52,6 +52,27 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
   const joinedVoiceRoomRef = useRef<string | null>(null);
   /** Evita re-montar listeners de socket al activar voz (desregistrar en ese momento perdía señales WebRTC). */
   const isVoiceActiveRef = useRef(false);
+  /** Socket desconectado mientras la voz sigue “activa” (intención de reconectar). */
+  const [voiceTransportLost, setVoiceTransportLost] = useState(false);
+  /** Malla WebRTC en reconstrucción tras reconexión o vuelta al primer plano. */
+  const [voiceMeshResetting, setVoiceMeshResetting] = useState(false);
+  const meshResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearMeshResetTimer = useCallback(() => {
+    if (meshResetTimerRef.current != null) {
+      clearTimeout(meshResetTimerRef.current);
+      meshResetTimerRef.current = null;
+    }
+  }, []);
+
+  const startMeshResetUi = useCallback(() => {
+    clearMeshResetTimer();
+    setVoiceMeshResetting(true);
+    meshResetTimerRef.current = setTimeout(() => {
+      meshResetTimerRef.current = null;
+      setVoiceMeshResetting(false);
+    }, 1400);
+  }, [clearMeshResetTimer]);
 
   const clearMicError = useCallback(() => setMicError(null), []);
 
@@ -105,13 +126,14 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
     (gid?: string | null) => {
       const targetGroup = gid || groupId;
       if (!targetGroup || !canUseVoiceRef.current || !masterStreamRef.current) return;
+      startMeshResetUi();
       // Tras reconexión del socket, recreamos malla WebRTC para evitar peers colgados.
       Object.keys(peersRef.current).forEach((peerId) => removePeer(peerId));
       socket.emit('join-voice', targetGroup);
       joinedVoiceRoomRef.current = targetGroup;
       setIsVoiceActive(true);
     },
-    [groupId]
+    [groupId, startMeshResetUi]
   );
 
   const addAudioStream = (peerId: string, stream: MediaStream) => {
@@ -164,6 +186,12 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
       setIsVoiceActive(false);
       setPeers({});
       joinedVoiceRoomRef.current = null;
+      setVoiceTransportLost(false);
+      setVoiceMeshResetting(false);
+      if (meshResetTimerRef.current != null) {
+        clearTimeout(meshResetTimerRef.current);
+        meshResetTimerRef.current = null;
+      }
       if (gid) {
         socket.emit('leave-voice', gid);
       }
@@ -275,16 +303,21 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
     socket.on('user-left-voice', handleUserLeft);
 
     const handleSocketReconnect = () => {
+      setVoiceTransportLost(false);
       rebuildVoiceRoom(groupId);
     };
     const handleSocketConnect = () => {
       if (joinedVoiceRoomRef.current === groupId && isVoiceActiveRef.current) {
+        setVoiceTransportLost(false);
         rebuildVoiceRoom(groupId);
       }
     };
     const handleSocketDisconnect = () => {
       // No desactivamos voz: mantenemos intención activa y reconstruimos al reconectar.
       Object.keys(peersRef.current).forEach((peerId) => removePeer(peerId));
+      if (isVoiceActiveRef.current && joinedVoiceRoomRef.current) {
+        setVoiceTransportLost(true);
+      }
     };
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && isVoiceActiveRef.current && joinedVoiceRoomRef.current === groupId) {
@@ -322,15 +355,21 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
     setIsVoiceActive(false);
     setPeers({});
     joinedVoiceRoomRef.current = null;
+    setVoiceTransportLost(false);
+    setVoiceMeshResetting(false);
+    clearMeshResetTimer();
     if (groupId) {
       socket.emit('leave-voice', groupId);
     }
-  }, [canUseVoice, groupId]);
+  }, [canUseVoice, groupId, clearMeshResetTimer]);
 
   const toggleVoice = () => {
     if (!canUseVoiceRef.current) return;
     if (isVoiceActive) {
       setMicError(null);
+      setVoiceTransportLost(false);
+      setVoiceMeshResetting(false);
+      clearMeshResetTimer();
       Object.keys(peersRef.current).forEach((peerId) => removePeer(peerId));
       if (masterStreamRef.current) {
         masterStreamRef.current.getTracks().forEach((track) => track.stop());
@@ -408,11 +447,14 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
       });
   };
 
+  const voiceReconnecting = isVoiceActive && (voiceTransportLost || voiceMeshResetting);
+
   return {
     isVoiceActive,
     toggleVoice,
     peersCount: Object.keys(peers).length,
     micError,
     clearMicError,
+    voiceReconnecting,
   };
 }

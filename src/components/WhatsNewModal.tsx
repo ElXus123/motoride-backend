@@ -3,7 +3,7 @@ import { Check } from 'lucide-react';
 import appLogo from '../../ICONO.png';
 
 /** Sube este valor cuando cambien las novedades para volver a mostrar el aviso una vez por dispositivo. */
-export const WHATS_NEW_VERSION = '2026.04.29';
+export const WHATS_NEW_VERSION = '2026.04.30';
 
 const STORAGE_KEY = 'motoride_whats_new_seen_version';
 
@@ -18,6 +18,16 @@ export type ChangelogEntry = {
 
 /** Orden visual: más recientes arriba; `updatedAt` descendente. */
 const CHANGELOG: ChangelogEntry[] = [
+  {
+    kind: 'novedad',
+    text: 'Chat de voz: si pierdes cobertura o hay un corte breve, el botón del micrófono muestra un círculo de carga y debajo «Reconectando» hasta que la sesión vuelva a estabilizarse.',
+    updatedAt: '2026-04-30T11:00:00',
+  },
+  {
+    kind: 'novedad',
+    text: 'Historial de rutas (tu perfil y el de tus amigos): tarjetas con título, fecha y hora, distancia y puntos; los puntos se destacan en color para leerlos mejor.',
+    updatedAt: '2026-04-30T10:30:00',
+  },
   {
     kind: 'novedad',
     text: 'Geolocalización en el mapa: hemos mejorado cómo se muestra la posición; tu flecha y los avatares de los demás van ahora más suaves, con menos saltos y sensación de seguimiento más fluido al navegar.',
