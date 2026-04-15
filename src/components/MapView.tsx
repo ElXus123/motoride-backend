@@ -58,7 +58,8 @@ import socket from '../lib/socket';
 import { useVoiceChat } from '../hooks/useVoiceChat';
 import PremiumBadge from './PremiumBadge';
 import InviteFriendsModal from './InviteFriendsModal';
-import { Upload, ArrowLeft, Copy, Check, Navigation, AlertTriangle, Play, Square, ArrowUp, MapPin, Trophy, Bell, AlertCircle, Wrench, Fuel, X, Maximize, Minimize, Search, Share2, Menu, Target, LogOut, Users, UserPlus, Mic, MicOff, ShieldAlert, Activity, Layers, Lock, LockOpen, Smartphone, RotateCw, Crown, WifiOff, Monitor, Loader2, Mail, Ban, CloudRain } from 'lucide-react';
+import { Upload, ArrowLeft, Copy, Check, Navigation, AlertTriangle, Play, Square, MapPin, Trophy, Bell, AlertCircle, Wrench, Fuel, X, Maximize, Minimize, Search, Share2, Menu, Target, LogOut, Users, UserPlus, Mic, MicOff, ShieldAlert, Activity, Layers, Lock, LockOpen, Smartphone, RotateCw, Crown, WifiOff, Monitor, Loader2, Mail, Ban, CloudRain } from 'lucide-react';
+import { getDirectionIcon } from './NavManeuverIcons';
 import { copyTextToClipboard, getSupportMailtoHref } from '../lib/clientInfo';
 import { formatNavDistanceMeters } from '../lib/navFormat';
 import { generateGroupCode } from '../lib/groupCode';
@@ -187,34 +188,6 @@ const CurrentUserMarker = ({
       </Popup>
     </Marker>
   );
-};
-
-const getDirectionIcon = (type?: string, modifier?: string) => {
-  if (type === 'arrive') return <MapPin size={28} />;
-  if (
-    type === 'roundabout' ||
-    type === 'rotary' ||
-    type === 'roundabout turn' ||
-    type === 'exit roundabout' ||
-    type === 'exit rotary'
-  ) {
-    return <RotateCw size={28} className="shrink-0" aria-hidden />;
-  }
-  if (type === 'off ramp' || type === 'on ramp') {
-    const rot = modifier?.includes('left') ? -50 : 50;
-    return <ArrowUp size={28} style={{ transform: `rotate(${rot}deg)`, transition: 'transform 0.3s ease-out' }} />;
-  }
-
-  let rotation = 0;
-  if (modifier?.includes('right')) {
-    rotation = modifier.includes('slight') ? 45 : (modifier.includes('sharp') ? 135 : 90);
-  } else if (modifier?.includes('left')) {
-    rotation = modifier.includes('slight') ? -45 : (modifier.includes('sharp') ? -135 : -90);
-  } else if (type === 'u-turn') {
-    rotation = 180;
-  }
-
-  return <ArrowUp size={28} style={{ transform: `rotate(${rotation}deg)`, transition: 'transform 0.3s ease-out' }} />;
 };
 
 const MotorcycleIcon = ({ angle }: { angle: number }) => (
@@ -3096,7 +3069,7 @@ export default function MapView({
                <div className={`flex items-center ${isCompactUI ? 'gap-3' : 'gap-5'}`}>
                  <div className={`${isCompactUI ? 'w-12 h-12' : 'w-16 h-16'} bg-blue-600 rounded-2xl flex items-center justify-center text-white shrink-0 shadow-lg rotate-3`}>
                    <div className="-rotate-3">
-                    {getDirectionIcon(navState.maneuverType, navState.maneuverModifier)}
+                    {getDirectionIcon(navState.maneuverType, navState.maneuverModifier, isCompactUI ? 32 : 40)}
                    </div>
                  </div>
                  <div className="flex-1 min-w-0">

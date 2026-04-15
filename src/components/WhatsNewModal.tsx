@@ -3,7 +3,7 @@ import { Check } from 'lucide-react';
 import appLogo from '../../ICONO.png';
 
 /** Sube este valor cuando cambien las novedades para volver a mostrar el aviso una vez por dispositivo. */
-export const WHATS_NEW_VERSION = '2026.04.15b';
+export const WHATS_NEW_VERSION = '2026.04.15c';
 
 const STORAGE_KEY = 'motoride_whats_new_seen_version';
 
@@ -11,6 +11,7 @@ const STORAGE_KEY = 'motoride_whats_new_seen_version';
 const HIGHLIGHTS: string[] = [
   'Inclinómetro: a muy baja velocidad se apoya más en la gravedad (moto parada o casi); al ir más rápido combina giro, gravedad y la física de la curva para que el ángulo sea más estable y fiel.',
   'Mapa al grabar: la cámara se aleja un poco cuando vas más rápido y se carga más mapa de reserva al girar la vista con el rumbo, para que no se vean huecos en los bordes.',
+  'Navegación por ruta: iconos de giro más claros (flecha en L gruesa, rotondas y salidas de autovía con dibujos propios).',
   'Resumen al terminar la ruta: pantalla de cierre más cuidada y una imagen para compartir con mejor diseño (WhatsApp, etc.).',
   'Archivos GPX: lectura más fiable (más tipos de track) y mensajes claros al subir o si el archivo no trae una ruta válida.',
   'Al planificar una ruta: si subes un archivo GPX, el buscador de destino se oculta y ves distancia y tiempo estimado; puedes volver al buscador con un solo toque. En salidas espontáneas el GPX no está en este cuadro (sigue disponible desde el mapa).',

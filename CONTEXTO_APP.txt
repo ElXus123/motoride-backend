@@ -1,5 +1,5 @@
 MotoRide — registro de contexto / cambios recientes
-Ultima actualizacion: 2026-04-15 (bloque 25 — planificador GPX vs busqueda, sin GPX en espontanea)
+Ultima actualizacion: 2026-04-15 (bloque 27 — iconos navegacion SVG)
 
 === Contacto y soporte ===
 - Correo publico de contacto: motorideapp1@gmail.com
@@ -271,3 +271,11 @@ Fecha: 2026-04-14
   - Constante `LEAN_SENSOR_SIGN = -1`: invierte medida de gravedad, roll rate del giro y término cinemático para que coincida con la UI (positivo = derecha, negativo = izquierda).
 - `src/lib/motorcycleLean/geometry.ts`
   - Comentario de convención de signo: el alineado final lo hace `useLeanAngle`.
+
+=== BLOQUE 27 — ICONOS DE GIRO EN NAVEGACION (GPS) ===
+- Nuevo: `src/components/NavManeuverIcons.tsx`
+  - Flechas de maniobra estilo plano / trazo grueso (giro en L con esquina redondeada, recto, leve, cerrado, cambio de sentido).
+  - Rotonda: arco circular + flecha; salida de rotonda: variante propia.
+  - Enlace / rampa (`on ramp` / `off ramp`): vía + rampa divergente; bifurcación e incorporación (`fork`, `merge`).
+- `src/components/MapView.tsx`
+  - Sustituye Lucide (`ArrowUp`/`RotateCw`) por estos SVG; tamaño ~32px compacto / 40px normal en el panel de instrucción.
