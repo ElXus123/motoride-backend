@@ -249,3 +249,11 @@ Fecha: 2026-04-14
   - `PickedDestination` con `osmType`/`osmId`; `fetchNominatimPlaceByOsmId` (lookup Nominatim) antes de OSRM para coords canónicas del lugar elegido.
   - Búsqueda Nominatim con `dedupe=1`.
 - Rama/merge: `cursor/summary-gpx-planner-6707` → `main`.
+
+=== AJUSTE POST-DEPLOY (GPX EN DASHBOARD) ===
+- Problema: en modo «Espontánea» la subida de GPX no mostraba UI (solo toast); el bloque de archivo estaba solo dentro de «Planificar».
+- `src/components/Dashboard.tsx`
+  - Bloque «Ruta desde archivo .gpx» visible en **cualquier** modo; distancia del track, botón «Ver trazado en el mapa» (previsualización).
+  - Al cargar GPX se calcula longitud aproximada del polyline; mensaje de éxito más claro.
+  - Cambiar a «Espontánea» ya no borra el GPX cargado.
+  - Si faltan provincia/municipio al crear grupo, fallback por **primer punto del GPX** (reverse geocode) además del GPS.
