@@ -33,13 +33,28 @@ export function orientationBucket(deg: number): 0 | 90 | 180 | 270 {
 
 export function getScreenOrientationAngleDeg(): number {
   try {
-    if (typeof screen !== 'undefined' && screen.orientation && typeof screen.orientation.angle === 'number') {
-      return screen.orientation.angle;
+    if (typeof screen !== 'undefined' && screen.orientation) {
+      const so = screen.orientation;
+      if (typeof so.angle === 'number' && Number.isFinite(so.angle) && so.angle !== 0) {
+        return so.angle;
+      }
+      const t = so.type;
+      if (t === 'landscape-primary' || t === 'landscape-secondary') {
+        return 90;
+      }
+      if (t === 'portrait-primary' || t === 'portrait-secondary') {
+        return 0;
+      }
     }
   } catch {
     /* ignore */
   }
   try {
+    if (typeof window !== 'undefined' && window.innerWidth > window.innerHeight + 24) {
+      const o = (window as Window & { orientation?: number }).orientation;
+      if (typeof o === 'number' && Number.isFinite(o) && o !== 0) return o;
+      return 90;
+    }
     const o = (typeof window !== 'undefined' ? (window as Window & { orientation?: number }).orientation : undefined) as
       | number
       | undefined;
@@ -48,4 +63,23 @@ export function getScreenOrientationAngleDeg(): number {
     /* ignore */
   }
   return 0;
+}
+
+/**
+ * `rotationRate`: en WebKit (iOS/Safari) son **Euler** β,γ,α (°/s), no un vector cartesiano x,y,z.
+ * Solo remapear esos tres; si el dispositivo expone solo x,y,z cartesianos, remapear ese vector.
+ */
+export function getRemappedRotationRateDeg(
+  rr: { x?: number; y?: number; z?: number; alpha?: number; beta?: number; gamma?: number } | null | undefined,
+  screenAngleDeg: number
+): [number, number, number] {
+  if (!rr) return [0, 0, 0];
+  const hasEuler =
+    typeof rr.beta === 'number' ||
+    typeof rr.gamma === 'number' ||
+    typeof rr.alpha === 'number';
+  if (hasEuler) {
+    return remapDeviceVectorToNaturalPortrait(rr.beta ?? 0, rr.gamma ?? 0, rr.alpha ?? 0, screenAngleDeg);
+  }
+  return remapDeviceVectorToNaturalPortrait(rr.x ?? 0, rr.y ?? 0, rr.z ?? 0, screenAngleDeg);
 }

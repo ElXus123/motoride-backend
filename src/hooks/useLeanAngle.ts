@@ -20,6 +20,7 @@ import {
 import { PocketInstabilityTracker } from '../lib/motorcycleLean/pocketDetection';
 import { evaluateCurvePlausibility, lateralAccelMagnitude } from '../lib/motorcycleLean/curveDetection';
 import {
+  getRemappedRotationRateDeg,
   getScreenOrientationAngleDeg,
   orientationBucket,
   remapDeviceVectorToNaturalPortrait,
@@ -214,18 +215,18 @@ export const useLeanAngle = (
       const accLin = event.acceleration;
       const accg = event.accelerationIncludingGravity;
 
-      const rrAny = rr as { x?: number; y?: number; z?: number; alpha?: number; beta?: number; gamma?: number } | null;
-      const wxR = rrAny?.x != null ? rrAny.x : (rr?.beta ?? 0);
-      const wyR = rrAny?.y != null ? rrAny.y : (rr?.gamma ?? 0);
-      const wzR = rrAny?.z != null ? rrAny.z : (rr?.alpha ?? 0);
-      const wRemap = remapDeviceVectorToNaturalPortrait(wxR, wyR, wzR, screenDeg);
+      const wRemapStationary = getRemappedRotationRateDeg(
+        rr as { x?: number; y?: number; z?: number; alpha?: number; beta?: number; gamma?: number } | null,
+        screenDeg
+      );
 
       let still = true;
       let hasHint = false;
 
-      if (rr && (rr.alpha != null || rr.beta != null || rr.gamma != null || rrAny?.x != null)) {
+      if (rr && (rr.alpha != null || rr.beta != null || rr.gamma != null || (rr as { x?: number }).x != null)) {
         hasHint = true;
-        const spin = Math.abs(wRemap[0]) + Math.abs(wRemap[1]) + Math.abs(wRemap[2]);
+        const spin =
+          Math.abs(wRemapStationary[0]) + Math.abs(wRemapStationary[1]) + Math.abs(wRemapStationary[2]);
         still = still && spin < 7;
       }
 
@@ -298,11 +299,10 @@ export const useLeanAngle = (
         gRaw.current[1] = gLoc[1];
         gRaw.current[2] = gLoc[2];
 
-        const rrAny = rr as { x?: number; y?: number; z?: number; alpha?: number; beta?: number; gamma?: number } | null;
-        const wxR = rrAny?.x != null ? rrAny.x : (rr?.beta ?? 0);
-        const wyR = rrAny?.y != null ? rrAny.y : (rr?.gamma ?? 0);
-        const wzR = rrAny?.z != null ? rrAny.z : (rr?.alpha ?? 0);
-        const wRemap = remapDeviceVectorToNaturalPortrait(wxR, wyR, wzR, screenDeg);
+        const wRemap = getRemappedRotationRateDeg(
+          rr as { x?: number; y?: number; z?: number; alpha?: number; beta?: number; gamma?: number } | null,
+          screenDeg
+        );
         const rrForPocket = { x: wRemap[0], y: wRemap[1], z: wRemap[2] };
         const accLinForPocket =
           accLin && accLin.x != null && accLin.y != null && accLin.z != null
@@ -328,9 +328,9 @@ export const useLeanAngle = (
         }
 
         if (!gLpInit.current) {
-          gLp.current[0] = accg.x!;
-          gLp.current[1] = accg.y!;
-          gLp.current[2] = accg.z!;
+          gLp.current[0] = gLoc[0];
+          gLp.current[1] = gLoc[1];
+          gLp.current[2] = gLoc[2];
           gLpInit.current = true;
         } else {
           lowPassVec3(gLp.current, gLp.current, gRaw.current, lpAlpha);
@@ -340,7 +340,7 @@ export const useLeanAngle = (
         gUnit.current[1] = gLp.current[1];
         gUnit.current[2] = gLp.current[2];
         const gOk = normalizeVec3(gUnit.current);
-        const gMag = Math.hypot(accg.x!, accg.y!, accg.z!);
+        const gMag = Math.hypot(gLoc[0], gLoc[1], gLoc[2]);
 
         if (!gOk) return;
 
