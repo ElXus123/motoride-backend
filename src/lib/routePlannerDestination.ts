@@ -28,6 +28,7 @@ export function buildNominatimSearchUrl(query: string, limit = 10): string {
     limit: String(limit),
     countrycodes: 'es',
     addressdetails: '1',
+    dedupe: '1',
   });
   return `${NOMINATIM_BASE}?${params.toString()}`;
 }
@@ -52,6 +53,9 @@ export type PickedDestination = {
   lat: number;
   lon: number;
   address?: Record<string, string>;
+  /** Si vienen de Nominatim, lookup fija coords exactas del lugar (evita desvíos al regenerar). */
+  osmType?: 'node' | 'way' | 'relation';
+  osmId?: number;
 };
 
 /** ¿Sigue siendo válido el destino elegido respecto al texto actual del input? */
@@ -87,6 +91,36 @@ export function tryParseCoordinatePair(input: string): { lat: number; lon: numbe
     return { lat: a, lon: b };
   }
   return null;
+}
+
+/**
+ * Resuelve un lugar por id OSM (Nominatim lookup): coordenadas y nombre canónicos.
+ */
+export async function fetchNominatimPlaceByOsmId(
+  osmType: 'node' | 'way' | 'relation',
+  osmId: number,
+  options?: { signal?: AbortSignal }
+): Promise<NominatimItem | null> {
+  if (!Number.isFinite(osmId)) return null;
+  const prefix = osmType === 'node' ? 'N' : osmType === 'way' ? 'W' : 'R';
+  const params = new URLSearchParams({
+    format: 'json',
+    addressdetails: '1',
+    osm_ids: `${prefix}${Math.round(osmId)}`,
+  });
+  const url = `https://nominatim.openstreetmap.org/lookup?${params.toString()}`;
+  try {
+    const data = await requestJson<NominatimItem[]>(url, {
+      timeoutMs: 10000,
+      retries: 0,
+      headers: getNominatimHeaders(),
+      signal: options?.signal,
+    });
+    if (!Array.isArray(data) || data.length === 0) return null;
+    return data[0] ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export async function fetchNominatimSuggestions(
@@ -131,6 +165,33 @@ export async function resolveDestinationForRouting(
   }
 
   if (picked && pickedStillMatchesInput(trimmed, picked)) {
+    const ot = picked.osmType;
+    const oid = picked.osmId;
+    if (
+      (ot === 'node' || ot === 'way' || ot === 'relation') &&
+      typeof oid === 'number' &&
+      Number.isFinite(oid)
+    ) {
+      try {
+        const place = await fetchNominatimPlaceByOsmId(ot, oid, options);
+        if (place) {
+          const lat = parseFloat(String(place.lat));
+          const lon = parseFloat(String(place.lon));
+          if (Number.isFinite(lat) && Number.isFinite(lon)) {
+            const displayName = (place.display_name || picked.label).trim();
+            return {
+              ok: true,
+              lat,
+              lon,
+              displayName,
+              primary: place,
+            };
+          }
+        }
+      } catch {
+        /* usar coords de la selección */
+      }
+    }
     return {
       ok: true,
       lat: picked.lat,
@@ -141,6 +202,8 @@ export async function resolveDestinationForRouting(
         lon: String(picked.lon),
         display_name: picked.label,
         address: picked.address,
+        osm_type: picked.osmType,
+        osm_id: picked.osmId,
       },
     };
   }

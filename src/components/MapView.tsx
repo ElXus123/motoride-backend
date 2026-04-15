@@ -1,4 +1,13 @@
-import { useEffect, useState, useRef, useMemo, useCallback, type CSSProperties, type MutableRefObject } from 'react';
+import {
+  useEffect,
+  useState,
+  useRef,
+  useMemo,
+  useCallback,
+  type CSSProperties,
+  type MutableRefObject,
+  type ChangeEvent,
+} from 'react';
 import { MapContainer, TileLayer, Marker, Popup, GeoJSON, useMap, useMapEvents, Pane } from 'react-leaflet';
 import L from 'leaflet';
 import {
@@ -54,6 +63,7 @@ import { copyTextToClipboard, getSupportMailtoHref } from '../lib/clientInfo';
 import { formatNavDistanceMeters } from '../lib/navFormat';
 import { generateGroupCode } from '../lib/groupCode';
 import { motion, AnimatePresence } from 'motion/react';
+import appIcon from '../../ICONO.png';
 
 /**
  * Modo bolsillo / MirrorLink: el móvil no va fijado al chasis → el IMU no mide la inclinación de la moto.
@@ -1789,68 +1799,168 @@ export default function MapView({
   const createSummaryImage = async () => {
     if (!summaryData) return null;
 
+    const loadLogo = (): Promise<HTMLImageElement | null> =>
+      new Promise((resolve) => {
+        try {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = () => resolve(img);
+          img.onerror = () => resolve(null);
+          img.src = appIcon;
+        } catch {
+          resolve(null);
+        }
+      });
+
     const canvas = document.createElement('canvas');
     const width = 1080;
-    const height = 1350;
+    const height = 1920;
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
 
-    // Background gradient
-    const bg = ctx.createLinearGradient(0, 0, 0, height);
-    bg.addColorStop(0, '#18181b');
-    bg.addColorStop(1, '#09090b');
+    const roundRectPath = (x: number, y: number, w: number, h: number, r: number) => {
+      const rad = Math.min(r, w / 2, h / 2);
+      ctx.beginPath();
+      ctx.moveTo(x + rad, y);
+      ctx.arcTo(x + w, y, x + w, y + h, rad);
+      ctx.arcTo(x + w, y + h, x, y + h, rad);
+      ctx.arcTo(x, y + h, x, y, rad);
+      ctx.arcTo(x, y, x + w, y, rad);
+      ctx.closePath();
+    };
+
+    const bg = ctx.createLinearGradient(0, 0, width, height);
+    bg.addColorStop(0, '#0c0a09');
+    bg.addColorStop(0.45, '#1c1917');
+    bg.addColorStop(1, '#0f172a');
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, width, height);
 
-    // Card
-    ctx.fillStyle = '#0f172a';
-    ctx.beginPath();
-    ctx.roundRect(70, 70, width - 140, height - 140, 40);
+    // Brillo suave superior
+    const glow = ctx.createRadialGradient(width * 0.5, 0, 0, width * 0.5, 0, width * 0.85);
+    glow.addColorStop(0, 'rgba(249, 115, 22, 0.18)');
+    glow.addColorStop(1, 'rgba(249, 115, 22, 0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, width, 520);
+
+    const pad = 72;
+    const cardX = pad;
+    const cardY = pad;
+    const cardW = width - pad * 2;
+    const cardH = height - pad * 2;
+
+    ctx.shadowColor = 'rgba(0,0,0,0.45)';
+    ctx.shadowBlur = 48;
+    ctx.shadowOffsetY = 18;
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+    roundRectPath(cardX, cardY, cardW, cardH, 44);
     ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
 
-    // Title
-    ctx.fillStyle = '#fb923c';
-    ctx.font = 'bold 58px Inter, Arial, sans-serif';
-    ctx.fillText('Ruta Finalizada', 140, 190);
-    ctx.fillStyle = '#e4e4e7';
-    ctx.font = '28px Inter, Arial, sans-serif';
-    ctx.fillText(group?.name || 'Ruta Motera', 140, 240);
+    ctx.strokeStyle = 'rgba(251, 146, 60, 0.35)';
+    ctx.lineWidth = 2;
+    roundRectPath(cardX, cardY, cardW, cardH, 44);
+    ctx.stroke();
 
-    const totalScore = summaryData.score || 0;
-    const baseScore = summaryData.baseScore || totalScore;
-    const bonusScore = summaryData.distanceBonus || 0;
-    const averageSpeed = summaryData.duration > 0 ? Math.round(summaryData.distance / (summaryData.duration / 3600000)) : 0;
-
-    const metrics = [
-      `Distancia: ${summaryData.distance} km`,
-      `Tiempo: ${Math.floor(summaryData.duration / 60000)}m ${Math.floor((summaryData.duration % 60000) / 1000)}s`,
-      `Velocidad media: ${averageSpeed} km/h`,
-      `Curvas: Izq ${summaryData.leftTurns} / Der ${summaryData.rightTurns}`,
-      `Inclinacion max: Izq ${summaryData.maxLeanLeft}° / Der ${summaryData.maxLeanRight}°`,
-      `Puntos base: +${baseScore}`,
-      `Bonus distancia: +${bonusScore}`,
-      `Puntos totales: +${totalScore}`
-    ];
-
-    ctx.fillStyle = '#f4f4f5';
-    ctx.font = 'bold 36px Inter, Arial, sans-serif';
-    ctx.fillText('Resumen detallado', 140, 330);
-
-    ctx.font = '30px Inter, Arial, sans-serif';
-    let y = 400;
-    for (const line of metrics) {
-      ctx.fillStyle = line.includes('totales') ? '#f97316' : line.includes('Bonus') ? '#34d399' : '#f4f4f5';
-      ctx.fillText(line, 140, y);
-      y += 95;
+    const logo = await loadLogo();
+    let headerY = cardY + 72;
+    if (logo && logo.width > 0) {
+      const lw = 120;
+      const lh = (logo.height / logo.width) * lw;
+      ctx.save();
+      roundRectPath(cardX + 72, headerY, lw, lh, 22);
+      ctx.clip();
+      ctx.drawImage(logo, cardX + 72, headerY, lw, lh);
+      ctx.restore();
     }
 
-    ctx.fillStyle = '#71717a';
-    ctx.font = '24px Inter, Arial, sans-serif';
-    ctx.fillText('MotoRide - Conduce con seguridad', 140, height - 120);
+    const titleX = logo && logo.width > 0 ? cardX + 220 : cardX + 72;
+    ctx.fillStyle = '#fafaf9';
+    ctx.font = 'bold 52px system-ui, Segoe UI, Roboto, sans-serif';
+    ctx.fillText('Ruta completada', titleX, headerY + 48);
+    ctx.fillStyle = '#a8a29e';
+    ctx.font = '28px system-ui, Segoe UI, Roboto, sans-serif';
+    const routeTitle = (group?.name || 'Ruta MotoRide').slice(0, 42);
+    ctx.fillText(routeTitle, titleX, headerY + 96);
 
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+    const totalScore = summaryData.score || 0;
+    const baseScore = summaryData.baseScore ?? totalScore;
+    const bonusScore = summaryData.distanceBonus || 0;
+    const averageSpeed =
+      summaryData.duration > 0 ? Math.round(summaryData.distance / (summaryData.duration / 3600000)) : 0;
+    const mins = Math.floor(summaryData.duration / 60000);
+    const secs = Math.floor((summaryData.duration % 60000) / 1000);
+
+    const drawStat = (
+      bx: number,
+      by: number,
+      bw: number,
+      bh: number,
+      label: string,
+      value: string,
+      accent: string
+    ) => {
+      ctx.fillStyle = 'rgba(24, 24, 27, 0.85)';
+      roundRectPath(bx, by, bw, bh, 20);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(63, 63, 70, 0.9)';
+      ctx.lineWidth = 1;
+      roundRectPath(bx, by, bw, bh, 20);
+      ctx.stroke();
+      ctx.fillStyle = '#71717a';
+      ctx.font = '600 20px system-ui, Segoe UI, Roboto, sans-serif';
+      ctx.fillText(label.toUpperCase(), bx + 28, by + 40);
+      ctx.fillStyle = accent;
+      ctx.font = 'bold 44px system-ui, Segoe UI, Roboto, sans-serif';
+      ctx.fillText(value, bx + 28, by + 98);
+    };
+
+    const gridTop = headerY + (logo && logo.width > 0 ? 160 : 120);
+    const colGap = 22;
+    const rowGap = 22;
+    const cellW = (cardW - 72 * 2 - colGap) / 2;
+    const cellH = 132;
+    let gx = cardX + 72;
+    let gy = gridTop;
+
+    drawStat(gx, gy, cellW, cellH, 'Distancia', `${summaryData.distance} km`, '#f4f4f5');
+    drawStat(gx + cellW + colGap, gy, cellW, cellH, 'Tiempo', `${mins}m ${secs}s`, '#f4f4f5');
+    gy += cellH + rowGap;
+    drawStat(gx, gy, cellW, cellH, 'Vel. media', `${averageSpeed} km/h`, '#f4f4f5');
+    drawStat(gx + cellW + colGap, gy, cellW, cellH, 'Curvas (I/D)', `${summaryData.leftTurns} / ${summaryData.rightTurns}`, '#f4f4f5');
+    gy += cellH + rowGap;
+    drawStat(gx, gy, cellW, cellH, 'Puntos base', `+${baseScore}`, '#e4e4e7');
+    drawStat(gx + cellW + colGap, gy, cellW, cellH, 'Bonus dist.', bonusScore > 0 ? `+${bonusScore}` : '—', '#34d399');
+    gy += cellH + rowGap;
+
+    const wideH = 168;
+    ctx.fillStyle = 'rgba(24, 24, 27, 0.85)';
+    roundRectPath(gx, gy, cellW * 2 + colGap, wideH, 20);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(63, 63, 70, 0.9)';
+    ctx.lineWidth = 1;
+    roundRectPath(gx, gy, cellW * 2 + colGap, wideH, 20);
+    ctx.stroke();
+    ctx.fillStyle = '#71717a';
+    ctx.font = '600 20px system-ui, Segoe UI, Roboto, sans-serif';
+    ctx.fillText('INCLINACIÓN MÁXIMA', gx + 28, gy + 42);
+    ctx.fillStyle = '#fafaf9';
+    ctx.font = 'bold 48px system-ui, Segoe UI, Roboto, sans-serif';
+    ctx.fillText(`Izq. ${summaryData.maxLeanLeft}°   ·   Der. ${summaryData.maxLeanRight}°`, gx + 28, gy + 108);
+
+    gy += wideH + 36;
+    ctx.fillStyle = '#f97316';
+    ctx.font = 'bold 56px system-ui, Segoe UI, Roboto, sans-serif';
+    ctx.fillText(`+${totalScore} puntos`, gx, gy + 8);
+
+    ctx.fillStyle = '#78716c';
+    ctx.font = '26px system-ui, Segoe UI, Roboto, sans-serif';
+    ctx.fillText('MotoRide · Conduce con seguridad', cardX + 72, cardY + cardH - 56);
+
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png', 0.95));
     return blob;
   };
 
@@ -1865,7 +1975,11 @@ export default function MapView({
       }
 
       const file = new File([blob], `resumen-ruta-${Date.now()}.png`, { type: 'image/png' });
-      const shareText = `Resumen de ruta: +${summaryData.score || 0} puntos en ${summaryData.distance} km.`;
+      const shareText = [
+        `🏍️ MotoRide — ${group?.name || 'Mi ruta'}`,
+        `+${summaryData.score || 0} pts · ${summaryData.distance} km`,
+        `Curvas ${summaryData.leftTurns}/${summaryData.rightTurns} · Incl. máx ${summaryData.maxLeanLeft}° / ${summaryData.maxLeanRight}°`,
+      ].join('\n');
 
       if (navigator.share && navigator.canShare?.({ files: [file] })) {
         await navigator.share({
@@ -2094,28 +2208,47 @@ export default function MapView({
     }
   }, [currentLocation, isRecording, isHost, autoStarted, touchLockKind]);
 
-  const handleFileUpload = async (e: any) => {
-    const file = e.target.files?.[0];
+  const handleFileUpload = async (e: ChangeEvent<HTMLInputElement>) => {
+    const input = e.currentTarget;
+    const file = input.files?.[0];
     if (!file) return;
     try {
       const text = await file.text();
       const geojson = parseGPX(text);
-      const routeCoords = (geojson as any)?.features?.find((f: any) => f?.geometry?.type === 'LineString')?.geometry?.coordinates;
-      if (geojson && routeCoords && routeCoords.length >= 2) {
+      const routeCoords = (geojson as GeoJSON.FeatureCollection | null)?.features?.find(
+        (f) => f?.geometry?.type === 'LineString'
+      )?.geometry as GeoJSON.LineString | undefined;
+      const coords = routeCoords?.coordinates;
+      if (geojson && coords && coords.length >= 2) {
         try {
           await updateDoc(doc(db, 'groups', groupId), {
-            routeGeoJSON: JSON.stringify(geojson)
+            routeGeoJSON: JSON.stringify(geojson),
           });
           setShowSearchModal(false);
+          showMessage({
+            variant: 'success',
+            title: 'Ruta cargada',
+            message: 'El archivo GPX se ha añadido al grupo. Verás el trazado en el mapa.',
+          });
         } catch (error) {
           handleFirestoreError(error, OperationType.UPDATE, `groups/${groupId}`);
         }
       } else {
-        showMessage({ variant: 'error', title: 'GPX', message: 'No se pudo analizar el archivo GPX o no contiene una ruta válida.' });
+        showMessage({
+          variant: 'error',
+          title: 'GPX',
+          message: 'No se pudo leer la ruta. Comprueba que el archivo tenga track o ruta (puntos GPS).',
+        });
       }
     } catch (err) {
-      console.error("Error reading file:", err);
+      console.error('Error reading file:', err);
       showMessage({ variant: 'error', title: 'Archivo', message: 'Error al leer el archivo.' });
+    } finally {
+      try {
+        input.value = '';
+      } catch {
+        /* ignore */
+      }
     }
   };
 
@@ -4029,58 +4162,59 @@ export default function MapView({
             <motion.div 
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="relative bg-zinc-900 border border-zinc-800 w-full max-w-md rounded-[2.5rem] overflow-hidden shadow-2xl p-6 text-center my-auto"
+              className="relative w-full max-w-md rounded-[2.5rem] p-[1px] my-auto bg-gradient-to-br from-orange-500/50 via-zinc-700/40 to-blue-600/30 shadow-2xl shadow-black/50"
             >
+            <div className="relative bg-zinc-950 rounded-[2.45rem] overflow-hidden p-6 sm:p-8 text-center ring-1 ring-white/5">
               <button
                 onClick={shareSummaryImage}
                 disabled={isSharingSummary}
-                className="absolute top-5 right-5 w-11 h-11 rounded-full bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-white flex items-center justify-center transition-colors"
+                className="absolute top-5 right-5 w-11 h-11 rounded-full bg-zinc-800/90 hover:bg-zinc-700 disabled:opacity-50 text-white flex items-center justify-center transition-colors z-10"
                 title={isSharingSummary ? 'Generando imagen...' : 'Compartir resumen'}
               >
                 <Share2 size={18} />
               </button>
-              <div className="w-16 h-16 bg-orange-500 rounded-3xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-orange-500/20">
-                <Trophy size={32} className="text-white" />
+              <div className="w-16 h-16 bg-gradient-to-br from-orange-400 to-amber-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-orange-500/25 ring-2 ring-orange-400/20">
+                <Trophy size={32} className="text-white drop-shadow-sm" />
               </div>
               
-              <h2 className="text-2xl font-black text-white mb-1">¡Ruta Finalizada!</h2>
-              <p className="text-zinc-400 font-medium mb-6 text-sm">Has completado tu recorrido con éxito.</p>
+              <h2 className="text-2xl font-black text-white mb-1 tracking-tight">¡Ruta finalizada!</h2>
+              <p className="text-zinc-400 font-medium mb-6 text-sm">Resumen de tu sesión en MotoRide</p>
               
               <div className="grid grid-cols-2 gap-3 mb-6">
-                <div className="bg-zinc-950 p-3 rounded-3xl border border-zinc-800">
+                <div className="bg-gradient-to-b from-zinc-900/90 to-zinc-950 p-3 rounded-2xl border border-zinc-800/80 text-left">
                   <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500 mb-0.5">Distancia</p>
-                  <p className="text-xl font-black text-white">{summaryData.distance} <span className="text-xs text-zinc-500">km</span></p>
+                  <p className="text-xl font-black text-white tabular-nums">{summaryData.distance} <span className="text-xs text-zinc-500">km</span></p>
                 </div>
-                <div className="bg-zinc-950 p-3 rounded-3xl border border-zinc-800">
+                <div className="bg-gradient-to-b from-zinc-900/90 to-zinc-950 p-3 rounded-2xl border border-zinc-800/80 text-left">
                   <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500 mb-0.5">Tiempo</p>
-                  <p className="text-xl font-black text-white">
+                  <p className="text-xl font-black text-white tabular-nums">
                     {Math.floor(summaryData.duration / 60000)}<span className="text-xs text-zinc-500">m</span> {Math.floor((summaryData.duration % 60000) / 1000)}<span className="text-xs text-zinc-500">s</span>
                   </p>
                 </div>
-                <div className="bg-zinc-950 p-3 rounded-3xl border border-zinc-800">
+                <div className="bg-gradient-to-b from-zinc-900/90 to-zinc-950 p-3 rounded-2xl border border-zinc-800/80 text-left">
                   <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500 mb-0.5">Vel. Media</p>
-                  <p className="text-xl font-black text-white">
+                  <p className="text-xl font-black text-white tabular-nums">
                     {summaryData.duration > 0 ? Math.round(summaryData.distance / (summaryData.duration / 3600000)) : 0} <span className="text-xs text-zinc-500">km/h</span>
                   </p>
                 </div>
-                <div className="bg-zinc-950 p-3 rounded-3xl border border-zinc-800">
+                <div className="bg-gradient-to-b from-zinc-900/90 to-zinc-950 p-3 rounded-2xl border border-zinc-800/80 text-left">
                   <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500 mb-0.5">Curvas Izq./Der.</p>
-                  <p className="text-lg font-black text-white">{summaryData.leftTurns} / {summaryData.rightTurns}</p>
+                  <p className="text-lg font-black text-white tabular-nums">{summaryData.leftTurns} / {summaryData.rightTurns}</p>
                 </div>
-                <div className="bg-zinc-950 p-3 rounded-3xl border border-zinc-800">
+                <div className="bg-gradient-to-b from-zinc-900/90 to-zinc-950 p-3 rounded-2xl border border-zinc-800/80 text-left">
                   <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500 mb-0.5">Puntos Base</p>
-                  <p className="text-xl font-black text-white">+{summaryData.baseScore ?? summaryData.score}</p>
+                  <p className="text-xl font-black text-white tabular-nums">+{summaryData.baseScore ?? summaryData.score}</p>
                 </div>
-                <div className="bg-zinc-950 p-3 rounded-3xl border border-zinc-800">
-                  <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500 mb-0.5">Puntos + Bonus</p>
-                  <p className="text-xl font-black text-orange-500">+{summaryData.score}</p>
+                <div className="bg-gradient-to-b from-zinc-900/90 to-zinc-950 p-3 rounded-2xl border border-zinc-800/80 text-left">
+                  <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500 mb-0.5">Total + bonus</p>
+                  <p className="text-xl font-black text-orange-400 tabular-nums">+{summaryData.score}</p>
                   {summaryData.distanceBonus > 0 && (
                     <p className="text-[10px] text-emerald-400 font-bold mt-1">Bonus distancia: +{summaryData.distanceBonus}</p>
                   )}
                 </div>
-                <div className="bg-zinc-950 p-3 rounded-3xl border border-zinc-800 col-span-2">
-                  <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500 mb-0.5">Inclinación Máx.</p>
-                  <p className="text-2xl font-black text-white">Izq. {summaryData.maxLeanLeft}° / Der. {summaryData.maxLeanRight}°</p>
+                <div className="bg-gradient-to-b from-zinc-900/90 to-zinc-950 p-3 rounded-2xl border border-zinc-800/80 col-span-2 text-left">
+                  <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500 mb-0.5">Inclinación máx.</p>
+                  <p className="text-2xl font-black text-white tabular-nums">Izq. {summaryData.maxLeanLeft}° / Der. {summaryData.maxLeanRight}°</p>
                 </div>
               </div>
 
@@ -4173,6 +4307,7 @@ export default function MapView({
                   No guardar en historial (los puntos sí cuentan para el nivel)
                 </button>
               </div>
+            </div>
             </motion.div>
           </motion.div>
         )}

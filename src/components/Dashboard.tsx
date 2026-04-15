@@ -551,19 +551,47 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   }, [searchProvince, searchMunicipality, user?.uid, userData?.friends]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const input = e.currentTarget;
+    const file = input.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (event) => {
-      const raw = event.target?.result as string;
-      const parsed = parseGPX(raw);
-      const routeCoords = (parsed as any)?.features?.find((f: any) => f?.geometry?.type === 'LineString')?.geometry?.coordinates;
-      if (!routeCoords || routeCoords.length < 2) {
-        showMessage({ variant: 'error', title: 'GPX', message: 'El archivo GPX no contiene una ruta válida.' });
-        return;
+      try {
+        const raw = event.target?.result as string;
+        const parsed = parseGPX(raw);
+        const routeCoords = (parsed as GeoJSON.FeatureCollection | null)?.features?.find(
+          (f) => f?.geometry?.type === 'LineString'
+        )?.geometry as GeoJSON.LineString | undefined;
+        const coords = routeCoords?.coordinates;
+        if (!parsed || !coords || coords.length < 2) {
+          showMessage({
+            variant: 'error',
+            title: 'GPX',
+            message: 'No se encontró un track o ruta con puntos. Prueba otro archivo o exporta GPX con trazado.',
+          });
+          return;
+        }
+        setGpxData(JSON.stringify(parsed));
+        setRouteGenerated(true);
+        showMessage({ variant: 'success', title: 'GPX', message: 'Ruta cargada. Puedes crear el grupo o generar otra ruta.' });
+      } catch (err) {
+        console.error(err);
+        showMessage({ variant: 'error', title: 'GPX', message: 'No se pudo leer el archivo.' });
+      } finally {
+        try {
+          input.value = '';
+        } catch {
+          /* ignore */
+        }
       }
-      setGpxData(JSON.stringify(parsed));
-      setRouteGenerated(true);
+    };
+    reader.onerror = () => {
+      showMessage({ variant: 'error', title: 'Archivo', message: 'Error al leer el archivo.' });
+      try {
+        input.value = '';
+      } catch {
+        /* ignore */
+      }
     };
     reader.readAsText(file);
   };
@@ -845,12 +873,17 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       setDestinationHighlightIdx(0);
       const lat = parseFloat(String(item.lat));
       const lon = parseFloat(String(item.lon));
+      const rawType = String(item.osm_type || '').toLowerCase();
+      const osmType =
+        rawType === 'node' || rawType === 'way' || rawType === 'relation' ? rawType : undefined;
+      const osmId = typeof item.osm_id === 'number' && Number.isFinite(item.osm_id) ? item.osm_id : undefined;
       if (name && Number.isFinite(lat) && Number.isFinite(lon)) {
         destinationPickedRef.current = {
           label: name,
           lat,
           lon,
           address: item.address,
+          ...(osmType && osmId != null ? { osmType, osmId } : {}),
         };
       } else {
         destinationPickedRef.current = null;
@@ -1719,6 +1752,9 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                         <Search size={16} />
                         <p className="text-xs font-bold uppercase tracking-wider">Planificador de Ruta</p>
                       </div>
+                      <p className="text-[11px] text-zinc-500 leading-snug -mt-1 mb-1">
+                        Para un destino fiable, elige un resultado de la lista (o coordenadas). Así usamos el punto exacto del mapa, no solo el texto.
+                      </p>
                       <div className="relative">
                         <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" size={16} />
                         <input 
