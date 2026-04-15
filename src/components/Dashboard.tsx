@@ -104,7 +104,9 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   const [showFriendsModal, setShowFriendsModal] = useState(false);
   const [showSupportModal, setShowSupportModal] = useState(false);
   const [donationEngagementStart, setDonationEngagementStart] = useState<number | null>(null);
-  const [scheduledInviteModal, setScheduledInviteModal] = useState<null | { groupId: string; groupName: string; memberUids: string[] }>(null);
+  const [scheduledInviteModal, setScheduledInviteModal] = useState<
+    null | { groupId: string; groupName: string; memberUids: string[]; scheduledTimestamp: number }
+  >(null);
   const [showPreviewModal, setShowPreviewModal] = useState<any>(null);
   const [showJoinCodeModal, setShowJoinCodeModal] = useState(false);
   const supportPopupRef = useRef<Window | null>(null);
@@ -887,15 +889,17 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     setLoading(false);
   };
 
-  const openScheduledInvite = (route: { code?: string; name?: string; members?: unknown }) => {
+  const openScheduledInvite = (route: { code?: string; name?: string; members?: unknown; scheduledTimestamp?: number }) => {
     const raw = String(route.code || '').trim().toUpperCase();
     if (raw.length !== 6) return;
+    const ts = Number(route.scheduledTimestamp);
     setScheduledInviteModal({
       groupId: raw,
       groupName: String(route.name || 'Ruta').trim().slice(0, 120) || 'Ruta',
       memberUids: Array.isArray(route.members)
         ? route.members.map((x: unknown) => String(x).trim()).filter(Boolean)
         : [],
+      scheduledTimestamp: Number.isFinite(ts) ? ts : 0,
     });
   };
 
@@ -1397,6 +1401,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
               {scheduledRoutes.length > 0 ? (
                 scheduledRoutes.map(route => {
                   const canEnterSession = canEnterScheduledRouteSession(route.scheduledTimestamp);
+                  const canInviteScheduled = canInviteToScheduledRoute(route, user?.uid);
                   return (
                     <div key={route.id} className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl flex flex-col gap-3 group">
                       <div className="flex items-center justify-between">
@@ -1462,47 +1467,50 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                         expandNonce={attendeesExpandNonceByRouteId[route.id] ?? 0}
                       />
                       
-                      <div className="flex gap-2">
+                      <div className="flex flex-wrap gap-2">
                         {route.routeGeoJSON && (
-                          <button 
+                          <button
+                            type="button"
                             onClick={() => setShowPreviewModal(route)}
-                            className="flex-1 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-white text-[10px] font-bold rounded-lg transition-all flex items-center justify-center gap-1"
+                            className="flex min-w-[calc(50%-0.25rem)] flex-1 items-center justify-center gap-1 rounded-lg bg-zinc-800 py-1.5 text-[10px] font-bold text-white transition-all hover:bg-zinc-700"
                           >
                             <MapIcon size={12} /> Vista Previa
                           </button>
                         )}
-                        {canEnterSession ? (
-                          <button 
+                        {canEnterSession && (
+                          <button
                             type="button"
                             onClick={() => void joinGroup(route.code)}
-                            className="flex-1 py-1.5 text-white text-[10px] font-bold rounded-lg transition-all flex items-center justify-center gap-1 bg-orange-500 hover:bg-orange-600"
+                            className="flex min-w-[calc(50%-0.25rem)] flex-1 items-center justify-center gap-1 rounded-lg bg-orange-500 py-1.5 text-[10px] font-bold text-white transition-all hover:bg-orange-600"
                           >
                             <ChevronRight size={12} />
                             Entrar a la ruta
                           </button>
-                        ) : route.createdBy === user?.uid ? (
-                          canInviteToScheduledRoute(route, user?.uid) ? (
-                            <button
-                              type="button"
-                              onClick={() => openScheduledInvite(route)}
-                              className="flex-1 py-1.5 rounded-lg border border-orange-500/35 bg-orange-500/10 text-orange-200 text-[10px] font-bold flex items-center justify-center gap-1 hover:bg-orange-500/20"
-                            >
-                              <UserPlus size={12} />
-                              Invitar amigos
-                            </button>
-                          ) : (
-                            <div className="flex-1 py-1.5 text-[10px] font-medium rounded-lg flex items-center justify-center gap-1 bg-zinc-800/80 text-zinc-500 border border-zinc-700/80 text-center px-1">
-                              Organizador — papelera arriba para borrar
-                            </div>
-                          )
-                        ) : (
-                          <button 
+                        )}
+                        {canInviteScheduled && (
+                          <button
+                            type="button"
+                            onClick={() => openScheduledInvite(route)}
+                            className="flex min-w-[calc(50%-0.25rem)] flex-1 items-center justify-center gap-1 rounded-lg border border-orange-500/35 bg-orange-500/10 py-1.5 text-[10px] font-bold text-orange-200 hover:bg-orange-500/20"
+                          >
+                            <UserPlus size={12} />
+                            Invitar
+                          </button>
+                        )}
+                        {!canEnterSession && route.createdBy !== user?.uid && (
+                          <button
+                            type="button"
                             onClick={() => toggleRSVP(route.code, true)}
-                            className="flex-1 py-1.5 text-red-500 bg-red-500/10 hover:bg-red-500/20 text-[10px] font-bold rounded-lg transition-all flex items-center justify-center gap-1"
+                            className="flex min-w-[calc(50%-0.25rem)] flex-1 items-center justify-center gap-1 rounded-lg bg-red-500/10 py-1.5 text-[10px] font-bold text-red-500 transition-all hover:bg-red-500/20"
                           >
                             <X size={12} />
                             Desapuntarse
                           </button>
+                        )}
+                        {!canEnterSession && route.createdBy === user?.uid && !canInviteScheduled && (
+                          <div className="flex min-w-full flex-1 items-center justify-center gap-1 rounded-lg border border-zinc-700/80 bg-zinc-800/80 px-1 py-1.5 text-center text-[10px] font-medium text-zinc-500">
+                            Organizador — papelera arriba para borrar
+                          </div>
                         )}
                       </div>
                       <button
@@ -1573,6 +1581,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           groupName={scheduledInviteModal.groupName}
           memberUids={scheduledInviteModal.memberUids}
           inviteKind="scheduled_ride"
+          scheduledTimestamp={scheduledInviteModal.scheduledTimestamp}
         />
       )}
 

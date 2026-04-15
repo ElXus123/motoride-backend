@@ -2278,6 +2278,9 @@ export default function MapView({
     setExitLeaving(true);
     setShowExitConfirm(false);
     hasExplicitlyLeftRef.current = true;
+    /** Evita que el resumen de participante quede detrás del modal de invitar (z-5000) y bloquee nuevos intentos de salida. */
+    setShowInviteFriends(false);
+    setInviteModalContext(null);
     try {
       await deleteGroupIfHost('leave-route');
 
@@ -2325,6 +2328,9 @@ export default function MapView({
       finalizeRouteLeaveNavigation();
     } catch (e) {
       console.error('confirmLeaveRoute:', e);
+      /** No dejar el flujo bloqueado si falla Firestore u otra operación antes del resumen. */
+      pendingLeaveAfterSummaryRef.current = false;
+      confirmLeaveInFlightRef.current = false;
     } finally {
       setExitLeaving(false);
       if (!pendingLeaveAfterSummaryRef.current) {
@@ -3313,7 +3319,11 @@ export default function MapView({
            >
             <button
               type="button"
-              onClick={() => setShowExitConfirm(true)}
+              onClick={() => {
+                setShowInviteFriends(false);
+                setInviteModalContext(null);
+                setShowExitConfirm(true);
+              }}
               className="p-2 bg-zinc-800 hover:bg-zinc-700 rounded-full transition-colors text-white shrink-0"
             >
                <ArrowLeft size={18}/>
@@ -4484,7 +4494,7 @@ export default function MapView({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 z-[3000] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md overflow-y-auto"
+            className="fixed inset-0 z-[6200] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md overflow-y-auto"
           >
             <motion.div 
               initial={{ scale: 0.9, y: 20 }}
