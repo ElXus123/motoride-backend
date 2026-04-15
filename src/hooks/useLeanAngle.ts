@@ -465,6 +465,11 @@ export const useLeanAngle = (
         const outLpAlpha = isPocketProfile ? 0.12 : pocketLevel === 'high' ? 0.22 : 0.35;
         displayLpRef.current = lowPassScalar(displayLpRef.current, outDeg, outLpAlpha);
         outDeg = displayLpRef.current;
+        // Tras remapear IMU a «retrato virtual», en apaisado (90°/270°) suele invertirse el eje lateral
+        // respecto a la convención UI (derecha/izquierda); un -1 corrige el signo en horizontal.
+        if (ob === 90 || ob === 270) {
+          outDeg = -outDeg;
+        }
 
         if (outDeg > 60) outDeg = 60;
         if (outDeg < -60) outDeg = -60;

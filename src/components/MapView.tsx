@@ -2448,7 +2448,7 @@ export default function MapView({
       }
 
       if (!destCoords) {
-        const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(typedDestination)}&limit=12&countrycodes=es&addressdetails=1`;
+        const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(typedDestination)}&limit=12&countrycodes=es&addressdetails=1&dedupe=1`;
         const geoData = await requestJson<any[]>(geocodeUrl, {
           timeoutMs: 10000,
           retries: 1,
@@ -2535,7 +2535,7 @@ export default function MapView({
     const timer = setTimeout(async () => {
       try {
         const q = searchDestination.trim();
-        const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=12&countrycodes=es&addressdetails=1`;
+        const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=12&countrycodes=es&addressdetails=1&dedupe=1`;
         const geoData = await requestJson<any[]>(geocodeUrl, {
           timeoutMs: 9000,
           retries: 1,
@@ -4133,6 +4133,19 @@ export default function MapView({
                 <span className="text-xs sm:text-sm font-black text-white tabular-nums">{score}</span>
               </div>
               
+              {isHost && !isRecording && (
+                <button
+                  type="button"
+                  onClick={() => void toggleRecording()}
+                  className="flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg sm:rounded-xl shadow-lg transition-all active:scale-95 border border-white/20 bg-gradient-to-r from-orange-500 to-amber-600 hover:brightness-105 w-full"
+                  title="Inicia la grabación de la ruta para el grupo (GPS, puntos y resumen)"
+                >
+                  <Play size={12} className="text-zinc-950 sm:w-[14px] sm:h-[14px]" fill="currentColor" />
+                  <span className="text-[9px] sm:text-xs font-black text-zinc-950 uppercase tracking-tight">
+                    Iniciar grabación
+                  </span>
+                </button>
+              )}
               {isHost && isRecording && (
                 <div className="flex flex-col gap-1 w-full">
                   <button
@@ -4151,7 +4164,8 @@ export default function MapView({
                     </span>
                   </button>
                   <button
-                    onClick={toggleRecording}
+                    type="button"
+                    onClick={() => void toggleRecording()}
                     className="flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 sm:py-1.5 bg-red-600 hover:bg-red-700 rounded-lg sm:rounded-xl shadow-lg shadow-red-600/20 transition-all active:scale-95 border border-white/20"
                     title="Finalizar Ruta"
                   >

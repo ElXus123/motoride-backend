@@ -1,36 +1,147 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Check } from 'lucide-react';
 import appLogo from '../../ICONO.png';
 
 /** Sube este valor cuando cambien las novedades para volver a mostrar el aviso una vez por dispositivo. */
-export const WHATS_NEW_VERSION = '2026.04.24';
+export const WHATS_NEW_VERSION = '2026.04.25';
 
 const STORAGE_KEY = 'motoride_whats_new_seen_version';
 
-/** Textos breves para cualquier usuario (sin tecnicismos). Orden: más antiguas arriba, más recientes abajo. */
-const HIGHLIGHTS: string[] = [
-  'Perfil con tu moto, historial de rutas y repetir una ruta; en el mapa, anillos de nivel alrededor de los avatares.',
-  'Rutas con amigos: invitaciones, visibilidad de rutas y lista de apuntados en rutas programadas.',
-  'Al compartir o copiar el enlace de una ruta programada, el mensaje sugerido incluye el día de la salida además del enlace.',
-  'Instalación en iPhone: en Safari usa Compartir → Añadir a pantalla de inicio. En Chrome, Compartir → Ver más → Añadir a pantalla de inicio.',
-  'Si vas a rodar y puede llover en tu ruta o cerca de ti (unos 10 km), verás un aviso unos segundos. Conduce con cuidado.',
-  'Al planificar una ruta: si subes un archivo GPX, el buscador de destino se oculta y ves distancia y tiempo estimado; puedes volver al buscador con un solo toque. En salidas espontáneas el GPX no está en este cuadro (sigue disponible desde el mapa).',
-  'Archivos GPX: lectura más fiable (más tipos de track) y mensajes claros al subir o si el archivo no trae una ruta válida.',
-  'Resumen al terminar la ruta: pantalla de cierre más cuidada y una imagen para compartir con mejor diseño (WhatsApp, etc.).',
-  'Inclinómetro: mejor lectura con el móvil en horizontal (se adapta a cómo gira la pantalla).',
-  'Navegación por ruta: iconos de giro más claros (flecha en L gruesa, rotondas y salidas de autovía con dibujos propios).',
-  'Mapa al grabar: la cámara se aleja un poco cuando vas más rápido y se carga más mapa de reserva al girar la vista con el rumbo, para que no se vean huecos en los bordes.',
-  'Inclinómetro: a muy baja velocidad se apoya más en la gravedad (moto parada o casi); al ir más rápido combina giro, gravedad y la física de la curva para que el ángulo sea más estable y fiel.',
-  'Dos ceros guardados: uno con el móvil en el soporte o manillar y otro en bolsillo o MirrorLink; al terminar la cuenta atrás del modo bolsillo se ajusta el cero con el teléfono ya guardado.',
-  'Si llevas el móvil suelto en el pantalón, la inclinación va más suavizada para que en la pantalla de la moto no salten tanto los números.',
-  'Ruta en marcha: el anfitrión puede pausar la grabación (almuerzo, café…) sin cerrar el grupo; el tiempo en pausa no cuenta en el resumen. Si cierras la web estando en pausa, al volver verás un aviso para continuar.',
-  'Gastos de comida o bebida (opcional): en el resumen puedes anotar el total en euros y ver cuánto toca por persona a escote; no sale en la imagen al compartir el resumen.',
-  'En ruta como anfitrión: el panel inferior ya no recorta los botones Pausa y Finalizar en pantallas estrechas, y están disponibles desde que empieza la grabación (sin esperar a recorrer un mínimo de metros).',
-  'Si sales de la ruta como invitado con la marcha en curso, verás el mismo resumen y se te sumarán los puntos con las mismas reglas que al terminar; volverás al menú al cerrar el resumen (guardando o no en el historial).',
+export type ChangelogKind = 'novedad' | 'arreglo';
+
+export type ChangelogEntry = {
+  kind: ChangelogKind;
+  text: string;
+  /** Fecha/hora de la modificación (ISO 8601 local conceptual; sirve para ordenar). */
+  updatedAt: string;
+};
+
+/** Orden visual: más recientes arriba; `updatedAt` descendente. */
+const CHANGELOG: ChangelogEntry[] = [
+  {
+    kind: 'novedad',
+    text: 'Menú en apaisado: en el panel principal, con el móvil en horizontal, aparece una columna lateral con Crear ruta, Unirse con código e accesos rápidos (invitaciones, amigos, apoyar) para aprovechar mejor el alto útil y leer las listas con más comodidad.',
+    updatedAt: '2026-04-25T14:00:00',
+  },
+  {
+    kind: 'novedad',
+    text: 'Listado de novedades con etiqueta «Novedad» o «Arreglo», fecha y hora de cada cambio, y orden del más nuevo al más antiguo.',
+    updatedAt: '2026-04-25T13:45:00',
+  },
+  {
+    kind: 'arreglo',
+    text: 'Inclinómetro en horizontal: al girar el móvil, la inclinación a derecha/izquierda coincide mejor con la realidad (signo en apaisado).',
+    updatedAt: '2026-04-24T19:30:00',
+  },
+  {
+    kind: 'arreglo',
+    text: 'Búsqueda «Huesca» y similares: se prioriza la ciudad frente a poblaciones homónimas (p. ej. Adahuesca) y se reduce ruido en Nominatim.',
+    updatedAt: '2026-04-24T19:00:00',
+  },
+  {
+    kind: 'novedad',
+    text: 'Anfitrión: botón «Iniciar grabación» en el HUD si aún no hay marcha; Pausa y Finalizar visibles desde el inicio de la grabación y sin recortes en pantallas estrechas.',
+    updatedAt: '2026-04-24T18:00:00',
+  },
+  {
+    kind: 'novedad',
+    text: 'Invitado: al salir de la ruta con la marcha en curso, mismo resumen y puntos que al terminar; vuelves al menú al cerrar el resumen.',
+    updatedAt: '2026-04-24T17:30:00',
+  },
+  {
+    kind: 'novedad',
+    text: 'Ruta en marcha: el anfitrión puede pausar la grabación sin cerrar el grupo; el tiempo en pausa no cuenta en el resumen. Si cierras la web en pausa, aviso al volver.',
+    updatedAt: '2026-04-20T11:00:00',
+  },
+  {
+    kind: 'novedad',
+    text: 'Gastos de comida o bebida (opcional) en el resumen con reparto a escote; no salen en la imagen al compartir.',
+    updatedAt: '2026-04-20T10:45:00',
+  },
+  {
+    kind: 'arreglo',
+    text: 'GPS en mapa: posición visible al abrir el grupo aunque aún no se haya iniciado la grabación.',
+    updatedAt: '2026-04-18T16:20:00',
+  },
+  {
+    kind: 'novedad',
+    text: 'Iconos de giro en navegación (flechas en L, rotondas con salida, enlaces y rampas).',
+    updatedAt: '2026-04-17T12:00:00',
+  },
+  {
+    kind: 'novedad',
+    text: 'Inclinómetro adaptado al móvil en horizontal (remap de sensores según orientación de pantalla).',
+    updatedAt: '2026-04-16T15:00:00',
+  },
+  {
+    kind: 'novedad',
+    text: 'Mapa al grabar: zoom según velocidad y más teselas de reserva al girar el mapa con el rumbo.',
+    updatedAt: '2026-04-16T14:30:00',
+  },
+  {
+    kind: 'novedad',
+    text: 'Resumen al terminar la ruta con imagen para compartir rediseñada; GPX con lectura más robusta.',
+    updatedAt: '2026-04-15T10:00:00',
+  },
+  {
+    kind: 'novedad',
+    text: 'Planificar con archivo GPX: el buscador se oculta, tiempo estimado; botón para volver al buscador. Espontánea sin GPX en el modal (sigue en el mapa).',
+    updatedAt: '2026-04-15T09:30:00',
+  },
+  {
+    kind: 'novedad',
+    text: 'Dos ceros de inclinación: manillar/soporte y bolsillo/MirrorLink; calibración al terminar la cuenta atrás en bolsillo.',
+    updatedAt: '2026-04-14T18:00:00',
+  },
+  {
+    kind: 'arreglo',
+    text: 'Inclinación en bolsillo más suavizada para que no «salten» tanto los números en pantalla.',
+    updatedAt: '2026-04-14T17:45:00',
+  },
+  {
+    kind: 'novedad',
+    text: 'Aviso si puede llover en tu ruta o cerca (~10 km).',
+    updatedAt: '2026-04-14T12:00:00',
+  },
+  {
+    kind: 'novedad',
+    text: 'Instalación en iPhone: Safari o Chrome (Compartir → Añadir a pantalla de inicio).',
+    updatedAt: '2026-04-14T11:00:00',
+  },
+  {
+    kind: 'novedad',
+    text: 'Rutas con amigos: invitaciones, visibilidad y lista de apuntados en programadas; enlace con día de salida.',
+    updatedAt: '2026-04-13T16:00:00',
+  },
+  {
+    kind: 'novedad',
+    text: 'Perfil con tu moto, historial y repetir ruta; anillos de nivel en avatares del mapa.',
+    updatedAt: '2026-04-12T10:00:00',
+  },
 ];
+
+function formatChangelogDate(iso: string): string {
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleString('es-ES', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return iso;
+  }
+}
 
 export default function WhatsNewModal() {
   const [open, setOpen] = useState(false);
+
+  const sortedEntries = useMemo(() => {
+    return [...CHANGELOG].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }, []);
 
   useEffect(() => {
     try {
@@ -61,7 +172,7 @@ export default function WhatsNewModal() {
       onClick={dismiss}
     >
       <div
-        className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 max-h-[min(88dvh,640px)] flex flex-col min-h-0"
+        className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 max-h-[min(88dvh,640px)] flex flex-col min-h-0 landscape:max-h-[min(92dvh,720px)] landscape:max-w-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="relative px-6 pt-8 pb-4 bg-gradient-to-b from-orange-500/12 to-transparent border-b border-zinc-800/80 shrink-0">
@@ -107,19 +218,35 @@ export default function WhatsNewModal() {
             Novedades
           </h2>
           <p className="text-center text-sm text-zinc-500 mt-2 leading-relaxed px-1">
-            Un resumen de lo que hemos mejorado. Puedes cerrar esto y seguir usando la app con normalidad.
+            Arriba lo más reciente; abajo entradas anteriores. Cada ítem indica si es novedad o arreglo y cuándo se registró.
           </p>
         </div>
 
         <div className="px-5 py-4 overflow-y-auto overscroll-contain flex-1 min-h-0 [transform:translateZ(0)]">
           <ul className="space-y-3 text-left">
-            {HIGHLIGHTS.map((text, i) => (
+            {sortedEntries.map((entry, i) => (
               <li
-                key={i}
-                className="flex gap-3 text-sm text-zinc-300 leading-relaxed border border-zinc-800/80 bg-zinc-950/50 rounded-2xl px-3.5 py-2.5"
+                key={`${entry.updatedAt}-${i}`}
+                className="flex flex-col gap-2 border border-zinc-800/80 bg-zinc-950/50 rounded-2xl px-3.5 py-2.5"
               >
-                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-orange-500/90" aria-hidden />
-                <span>{text}</span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span
+                    className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-lg ${
+                      entry.kind === 'novedad'
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                        : 'bg-amber-500/15 text-amber-200 border border-amber-500/35'
+                    }`}
+                  >
+                    {entry.kind === 'novedad' ? 'Novedad' : 'Arreglo'}
+                  </span>
+                  <time
+                    className="text-[10px] font-mono tabular-nums text-zinc-500"
+                    dateTime={entry.updatedAt}
+                  >
+                    {formatChangelogDate(entry.updatedAt)}
+                  </time>
+                </div>
+                <p className="text-sm text-zinc-300 leading-relaxed">{entry.text}</p>
               </li>
             ))}
           </ul>

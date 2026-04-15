@@ -1080,19 +1080,86 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   );
 
   return (
-    <div className="min-h-dvh bg-zinc-950 text-white overflow-x-hidden pb-[env(safe-area-inset-bottom,0px)]">
+    <div className="min-h-dvh bg-zinc-950 text-white overflow-x-hidden pb-[env(safe-area-inset-bottom,0px)] landscape:h-dvh landscape:flex landscape:flex-col landscape:overflow-hidden landscape:pb-0">
       {/* Header — una fila: avatar | nivel/nombre/XP | acciones (como HUD compacto) */}
-      <header className="sticky top-0 z-30 bg-zinc-950/80 backdrop-blur-md border-b border-zinc-900 pl-[max(0.75rem,env(safe-area-inset-left,0px))] pr-[max(0.75rem,env(safe-area-inset-right,0px))] sm:pl-[max(1.5rem,env(safe-area-inset-left,0px))] sm:pr-[max(1.5rem,env(safe-area-inset-right,0px))] pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-2.5 sm:pb-3">
-        <div className="max-w-5xl mx-auto flex flex-nowrap items-center gap-2 sm:gap-3 min-w-0">
+      <header className="sticky top-0 z-30 bg-zinc-950/80 backdrop-blur-md border-b border-zinc-900 pl-[max(0.75rem,env(safe-area-inset-left,0px))] pr-[max(0.75rem,env(safe-area-inset-right,0px))] sm:pl-[max(1.5rem,env(safe-area-inset-left,0px))] sm:pr-[max(1.5rem,env(safe-area-inset-right,0px))] pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-2.5 sm:pb-3 landscape:shrink-0 landscape:sticky landscape:z-30">
+        <div className="max-w-5xl mx-auto flex flex-nowrap items-center gap-2 sm:gap-3 min-w-0 landscape:max-w-none landscape:px-[max(1rem,env(safe-area-inset-left,0px))] landscape:pr-[max(1rem,env(safe-area-inset-right,0px))]">
           {renderHeaderAvatar()}
           <div className="flex-1 min-w-0">{renderHeaderProfileCard()}</div>
           <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">{renderHeaderActions()}</div>
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto space-y-8 py-6 pl-[max(1.5rem,env(safe-area-inset-left,0px))] pr-[max(1.5rem,env(safe-area-inset-right,0px))]">
-        {/* Quick Actions — estética alineada con cabecera zinc + acento naranja */}
-        <div className="grid grid-cols-1 gap-6">
+      <div className="flex flex-1 flex-col min-h-0 landscape:min-h-0 landscape:flex-row landscape:w-full landscape:max-w-none">
+        {/* Menú lateral en apaisado: más altura útil y lista de acciones legible */}
+        <aside
+          className="hidden landscape:flex landscape:flex-col landscape:w-[min(19rem,34vw)] landscape:shrink-0 landscape:border-r landscape:border-zinc-800/90 landscape:bg-zinc-900/50 landscape:py-4 landscape:px-3 landscape:gap-3 landscape:overflow-y-auto landscape:overscroll-contain"
+          aria-label="Menú principal"
+        >
+          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500 px-1">Menú</p>
+          <div className="flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setLoading(false);
+                setShowCreateModal(true);
+              }}
+              className="w-full rounded-2xl bg-gradient-to-r from-orange-500 via-orange-500 to-amber-500 px-4 py-3.5 text-sm font-black text-zinc-950 shadow-lg shadow-orange-500/25 transition-all hover:brightness-105 active:scale-[0.99] flex items-center justify-center gap-2"
+            >
+              <Plus size={20} strokeWidth={2.5} className="shrink-0" />
+              <span>Crear ruta</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowJoinCodeModal(true)}
+              className="w-full rounded-2xl border border-zinc-600/90 bg-zinc-800/90 px-4 py-3.5 text-sm font-bold text-zinc-100 shadow-inner transition-all hover:border-zinc-500 hover:bg-zinc-800 active:scale-[0.99]"
+            >
+              Unirse con código
+            </button>
+          </div>
+          <div className="h-px bg-zinc-800/80 my-1 shrink-0" aria-hidden />
+          <nav className="flex flex-col gap-1.5 text-sm">
+            <button
+              type="button"
+              onClick={() => setShowInvitesMailbox(true)}
+              className="flex items-center gap-2 rounded-xl px-3 py-2.5 text-left font-semibold text-zinc-200 bg-zinc-800/60 border border-zinc-700/80 hover:bg-zinc-800 hover:border-zinc-600 transition-colors"
+            >
+              <Inbox size={18} className="text-orange-400 shrink-0" />
+              <span className="flex-1">Invitaciones</span>
+              {(inviteInboxCount > 0 || user?.rideInvitePending?.groupId) && (
+                <span className="text-[10px] font-black rounded-full bg-orange-500 text-white px-2 py-0.5">
+                  {inviteInboxCount > 0 ? (inviteInboxCount > 9 ? '9+' : inviteInboxCount) : '1'}
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowFriendsModal(true)}
+              className="flex items-center gap-2 rounded-xl px-3 py-2.5 text-left font-semibold text-zinc-200 bg-zinc-800/60 border border-zinc-700/80 hover:bg-zinc-800 hover:border-zinc-600 transition-colors"
+            >
+              <Users size={18} className="text-zinc-300 shrink-0" />
+              <span>Amigos y comunidad</span>
+              {pendingFriendRequestCount > 0 && (
+                <span className="h-2 w-2 rounded-full bg-red-500 shrink-0" aria-hidden />
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowSupportModal(true)}
+              className="flex items-center gap-2 rounded-xl px-3 py-2.5 text-left font-semibold text-zinc-200 bg-zinc-800/60 border border-zinc-700/80 hover:bg-zinc-800 hover:border-zinc-600 transition-colors"
+            >
+              <HeartHandshake size={18} className="text-orange-400/90 shrink-0" />
+              <span>Apoyar MotoRide</span>
+            </button>
+          </nav>
+          <p className="text-[10px] text-zinc-600 leading-snug px-1 mt-auto pt-2 border-t border-zinc-800/60">
+            Desplaza el panel derecho para explorar rutas y listas.
+          </p>
+        </aside>
+
+        <main className="max-w-5xl mx-auto w-full min-h-0 flex-1 space-y-8 py-6 pl-[max(1.5rem,env(safe-area-inset-left,0px))] pr-[max(1.5rem,env(safe-area-inset-right,0px))] landscape:max-w-none landscape:flex-1 landscape:overflow-y-auto landscape:overscroll-contain landscape:py-4 landscape:pl-[max(0.75rem,env(safe-area-inset-left,0px))] landscape:pr-[max(1rem,env(safe-area-inset-right,0px))]">
+        {/* Quick Actions — retrato; en apaisado el menú lateral duplica estas acciones */}
+        <div className="grid grid-cols-1 gap-6 landscape:hidden">
           <div className="relative overflow-hidden rounded-[1.75rem] border border-orange-500/20 bg-gradient-to-br from-zinc-900 via-zinc-900 to-orange-950/35 p-6 sm:p-8 shadow-[0_0_0_1px_rgba(24,24,27,0.8),0_24px_48px_-16px_rgba(0,0,0,0.55)] ring-1 ring-orange-500/10">
             <div
               className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_90%_55%_at_50%_-15%,rgba(249,115,22,0.18),transparent_55%)]"
@@ -1522,6 +1589,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
             </div>
         </div>
       </main>
+      </div>
 
       {/* Friends Modal */}
       {showFriendsModal && <FriendsModal onClose={() => setShowFriendsModal(false)} onRepeatRoute={onRepeatRoute} />}
