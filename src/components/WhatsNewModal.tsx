@@ -3,7 +3,7 @@ import { Check } from 'lucide-react';
 import appLogo from '../../ICONO.png';
 
 /** Sube este valor cuando cambien las novedades para volver a mostrar el aviso una vez por dispositivo. */
-export const WHATS_NEW_VERSION = '2026.04.15e';
+export const WHATS_NEW_VERSION = '2026.04.23';
 
 const STORAGE_KEY = 'motoride_whats_new_seen_version';
 
@@ -23,6 +23,7 @@ const HIGHLIGHTS: string[] = [
   'Si vas a rodar y puede llover en tu ruta o cerca de ti (unos 10 km), verás un aviso unos segundos. Conduce con cuidado.',
   'Instalación en iPhone: en Safari usa Compartir → Añadir a pantalla de inicio. En Chrome, Compartir → Ver más → Añadir a pantalla de inicio.',
   'Rutas con amigos: invitaciones, visibilidad de rutas y lista de apuntados en rutas programadas.',
+  'Al compartir o copiar el enlace de una ruta programada, el mensaje sugerido incluye el día de la salida (por ejemplo: «Apúntate a la ruta … el 15 de abril de 2026 desde este enlace») además del URL.',
   'Perfil con tu moto, historial de rutas y repetir una ruta; en el mapa, anillos de nivel alrededor de los avatares.',
 ];
 

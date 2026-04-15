@@ -25,6 +25,7 @@ import { requestJson } from '../lib/network';
 import { LEAFLET_LIGHT_ERROR_TILE } from '../lib/leafletTiles';
 import { Users, Plus, LogOut, User as UserIcon, Activity, Trash2, Calendar, MapPin, Search, Clock, ChevronRight, Upload, X, Map as MapIcon, HeartHandshake, CircleDollarSign, Shield, CheckCircle2, AlertCircle, Mail, Share2, Copy, Check, Loader2, Globe, Lock, Inbox, UserPlus, ListOrdered, FileText } from 'lucide-react';
 import { copyTextToClipboard, getSupportMailtoHref } from '../lib/clientInfo';
+import { buildScheduledInviteSharePayload, formatScheduledRideDayOnlyEs } from '../lib/scheduledRouteShare';
 import { generateGroupCode } from '../lib/groupCode';
 import {
   canShowRouteInExplore,
@@ -121,6 +122,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     code: string;
     name: string;
     routeListing: RouteListing;
+    scheduledTimestamp: number;
   } | null>(null);
   const [scheduleInviteCopied, setScheduleInviteCopied] = useState<'code' | 'link' | null>(null);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
@@ -732,7 +734,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       if (routeType === 'instant') {
         onJoinGroup(code);
       } else {
-        setPostScheduleInvite({ code, name: finalRouteName, routeListing });
+        setPostScheduleInvite({ code, name: finalRouteName, routeListing, scheduledTimestamp });
         setScheduleInviteCopied(null);
       }
     } catch (error) {
@@ -2135,8 +2137,13 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
               <p className="text-sm text-zinc-400 mt-2">
                 Ruta programada: <span className="text-white font-semibold">{postScheduleInvite.name}</span>
               </p>
+              {formatScheduledRideDayOnlyEs(postScheduleInvite.scheduledTimestamp) ? (
+                <p className="text-xs text-orange-400/90 mt-1.5 font-semibold">
+                  Día de la salida: {formatScheduledRideDayOnlyEs(postScheduleInvite.scheduledTimestamp)}
+                </p>
+              ) : null}
               <p className="text-xs text-zinc-500 mt-1">
-                Comparte el <strong className="text-zinc-300">código</strong> o el <strong className="text-zinc-300">enlace</strong> para que se apunten desde la app.
+                Comparte el <strong className="text-zinc-300">código</strong> o el <strong className="text-zinc-300">enlace</strong> para que se apunten desde la app. «Copiar enlace» guarda también un mensaje con la fecha y el URL para WhatsApp u otras apps.
               </p>
               {postScheduleInvite.routeListing === 'friends_only' && (
                 <p className="text-xs text-blue-300/90 mt-2 flex items-start gap-2">
@@ -2177,12 +2184,17 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                   type="button"
                   onClick={async () => {
                     const url = `${window.location.origin}${window.location.pathname}?join=${postScheduleInvite.code}`;
-                    const ok = await copyTextToClipboard(url);
+                    const { clipboardText } = buildScheduledInviteSharePayload({
+                      routeName: postScheduleInvite.name,
+                      scheduledTimestamp: postScheduleInvite.scheduledTimestamp,
+                      url,
+                    });
+                    const ok = await copyTextToClipboard(clipboardText);
                     if (ok) {
                       setScheduleInviteCopied('link');
                       setTimeout(() => setScheduleInviteCopied(null), 2000);
                     } else {
-                      window.prompt('Copia el enlace:', url);
+                      window.prompt('Copia el mensaje y el enlace:', clipboardText);
                     }
                   }}
                   className="flex items-center justify-center gap-2 py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white font-bold text-sm"
@@ -2196,10 +2208,15 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                   type="button"
                   onClick={async () => {
                     const url = `${window.location.origin}${window.location.pathname}?join=${postScheduleInvite.code}`;
+                    const { title, text } = buildScheduledInviteSharePayload({
+                      routeName: postScheduleInvite.name,
+                      scheduledTimestamp: postScheduleInvite.scheduledTimestamp,
+                      url,
+                    });
                     try {
                       await navigator.share({
-                        title: `Ruta: ${postScheduleInvite.name}`,
-                        text: 'Apúntate a esta salida en MotoRide:',
+                        title,
+                        text,
                         url,
                       });
                     } catch (e) {

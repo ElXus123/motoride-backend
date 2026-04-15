@@ -61,6 +61,7 @@ import InviteFriendsModal from './InviteFriendsModal';
 import { Upload, ArrowLeft, Copy, Check, Navigation, AlertTriangle, Play, Square, MapPin, Trophy, Bell, AlertCircle, Wrench, Fuel, X, Maximize, Minimize, Search, Share2, Menu, Target, LogOut, Users, UserPlus, Mic, MicOff, ShieldAlert, Activity, Layers, Lock, LockOpen, Smartphone, RotateCw, Crown, WifiOff, Monitor, Loader2, Mail, Ban, CloudRain, Pause, Coffee } from 'lucide-react';
 import { getDirectionIcon } from './NavManeuverIcons';
 import { copyTextToClipboard, getSupportMailtoHref } from '../lib/clientInfo';
+import { buildScheduledInviteSharePayload } from '../lib/scheduledRouteShare';
 import { formatNavDistanceMeters } from '../lib/navFormat';
 import { generateGroupCode } from '../lib/groupCode';
 import { motion, AnimatePresence } from 'motion/react';
@@ -2491,9 +2492,32 @@ export default function MapView({
 
   const shareRoute = async () => {
     const url = `${window.location.origin}${window.location.pathname}?join=${groupId}`;
-    const copied = await copyTextToClipboard(url);
+    const routeName = String(group?.name || 'Ruta Motera').trim() || 'Ruta Motera';
+    const ts = typeof group?.scheduledTimestamp === 'number' ? group.scheduledTimestamp : NaN;
+    const isScheduled =
+      group?.isScheduled === true && Number.isFinite(ts) && ts > 0;
+
+    let clipboardText = url;
+    let shareTitle = `Únete a mi ruta: ${routeName}`;
+    let shareText = `¡Hola! Únete a mi ruta en tiempo real usando este enlace:`;
+
+    if (isScheduled) {
+      const p = buildScheduledInviteSharePayload({
+        routeName,
+        scheduledTimestamp: ts,
+        url,
+      });
+      clipboardText = p.clipboardText;
+      shareTitle = p.title;
+      shareText = p.text;
+    }
+
+    const copied = await copyTextToClipboard(clipboardText);
     if (!copied) {
-      window.prompt('Copia este enlace para invitar a tu ruta:', url);
+      window.prompt(
+        isScheduled ? 'Copia este mensaje y enlace para invitar:' : 'Copia este enlace para invitar a tu ruta:',
+        clipboardText
+      );
       return;
     }
     setShared(true);
@@ -2502,8 +2526,8 @@ export default function MapView({
     if (typeof navigator !== 'undefined' && navigator.share) {
       try {
         await navigator.share({
-          title: `Únete a mi ruta: ${group?.name || 'Ruta Motera'}`,
-          text: `¡Hola! Únete a mi ruta en tiempo real usando este enlace:`,
+          title: shareTitle,
+          text: shareText,
           url,
         });
       } catch (err: unknown) {
