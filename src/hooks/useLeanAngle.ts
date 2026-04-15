@@ -1,26 +1,72 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { lowPassVec3, normalizeVec3, lowPassScalar } from '../lib/motorcycleLean/filters';
+import {
+  buildBikeBasisAtCalibration,
+  leanDegFromGravityInBikeFrame,
+  rollRateFromGyro,
+  rotationFromTo,
+} from '../lib/motorcycleLean/geometry';
+import { KalmanRoll1D } from '../lib/motorcycleLean/kalmanRoll1D';
+import {
+  kinematicBlendWeight,
+  kinematicLeanDegFromSpeedAndYaw,
+  yawRateAboutGravityDegPerSec,
+} from '../lib/motorcycleLean/kinematicLean';
+import { PocketInstabilityTracker } from '../lib/motorcycleLean/pocketDetection';
+import { evaluateCurvePlausibility, lateralAccelMagnitude } from '../lib/motorcycleLean/curveDetection';
+
+/** Manillar/soporte: móvil fijo. Bolsillo/MirrorLink: móvil en el cuerpo; el cero debe ser independiente. */
+export type LeanCalibrationProfile = 'handlebar' | 'pocket';
+
+const STORAGE_HANDLEBAR = 'motoride_lean_calibration_offset_handlebar_v1';
+const STORAGE_POCKET = 'motoride_lean_calibration_offset_pocket_v1';
+const LEGACY_CALIBRATION_KEY = 'motoride_lean_calibration_offset_v1';
+
+const EZ: [number, number, number] = [0, 0, 1];
+const RAD = Math.PI / 180;
+const DEG = 180 / Math.PI;
+
+function clampOffset(v: number): number {
+  return Math.max(-30, Math.min(30, v));
+}
 
 /**
- * Inclinación desde IMU. Usa velocidad GPS y, sobre todo, datos de `devicemotion`
- * (giro + aceleración lineal + estabilidad de gravedad) para detectar móvil quieto en mesa
- * y no seguir el ruido de orientación/magnetómetro.
+ * Inclinación roll (°) por fusión Kalman: giroscopio predice, acelerómetro (marco moto) y
+ * término cinemático v·ω corrigen curva; orientación inicial agnóstica vía vector gravedad.
  */
-export const useLeanAngle = (speedMps?: number | null) => {
-  const CALIBRATION_STORAGE_KEY = 'motoride_lean_calibration_offset_v1';
+export const useLeanAngle = (
+  speedMps?: number | null,
+  calibrationProfile: LeanCalibrationProfile = 'handlebar'
+) => {
   const [leanAngle, setLeanAngle] = useState(0);
   const [maxLeanLeft, setMaxLeanLeft] = useState(0);
   const [maxLeanRight, setMaxLeanRight] = useState(0);
   const [permissionGranted, setPermissionGranted] = useState<boolean | null>(null);
-  const [calibrationOffset, setCalibrationOffset] = useState(0);
-  const smoothedAngleRef = useRef(0);
-  const angleHistoryRef = useRef<number[]>([]);
+  const [offsetHandlebar, setOffsetHandlebar] = useState(0);
+  const [offsetPocket, setOffsetPocket] = useState(0);
+
   const speedRef = useRef<number | null | undefined>(speedMps);
-  const rollMedianWindowRef = useRef<number[]>([]);
+  const angleHistoryRef = useRef<number[]>([]);
   const motionStationaryScoreRef = useRef(0);
   const motionStationaryRef = useRef(false);
   const prevGravUnitRef = useRef<{ x: number; y: number; z: number } | null>(null);
   const dynamicBiasRef = useRef(0);
-  const lastGravityRollRef = useRef<number | null>(null);
+
+  const gLp = useRef<[number, number, number]>([0, 0, 1]);
+  const gLpInit = useRef(false);
+  const gRaw = useRef<[number, number, number]>([0, 0, 1]);
+  const gUnit = useRef<[number, number, number]>([0, 0, 1]);
+  const RAlign = useRef<number[]>([1, 0, 0, 0, 1, 0, 0, 0, 1]);
+  const forwardCal = useRef<[number, number, number]>([1, 0, 0]);
+  const lateralCal = useRef<[number, number, number]>([0, 1, 0]);
+  const upCal = useRef<[number, number, number]>([0, 0, 1]);
+  const gbScratch = useRef<[number, number, number]>([0, 0, 1]);
+  const pocket = useRef(new PocketInstabilityTracker());
+  const lastTs = useRef<number | null>(null);
+  const kf = useRef(new KalmanRoll1D());
+  const calibratedRef = useRef(false);
+  const displayLpRef = useRef(0);
+  const straightAccumSecRef = useRef(0);
 
   useEffect(() => {
     speedRef.current = speedMps;
@@ -46,7 +92,7 @@ export const useLeanAngle = (speedMps?: number | null) => {
           try {
             await DM.requestPermission();
           } catch {
-            // WebKit: opcional si el permiso ya quedó cubierto por orientación.
+            /* WebKit */
           }
         }
         setPermissionGranted(true);
@@ -64,33 +110,84 @@ export const useLeanAngle = (speedMps?: number | null) => {
     }
   }, []);
 
-  const [rawAngle, setRawAngle] = useState(0);
-  const lastOrientationUpdateRef = useRef(0);
-
   useEffect(() => {
     try {
-      const saved = window.localStorage.getItem(CALIBRATION_STORAGE_KEY);
-      if (saved !== null) {
-        const parsed = Number(saved);
-        if (!Number.isNaN(parsed)) {
-          setCalibrationOffset(Math.max(-30, Math.min(30, parsed)));
+      let hb: number | null = null;
+      let pk: number | null = null;
+      const rawHb = window.localStorage.getItem(STORAGE_HANDLEBAR);
+      const rawPk = window.localStorage.getItem(STORAGE_POCKET);
+      if (rawHb !== null) {
+        const n = Number(rawHb);
+        if (!Number.isNaN(n)) hb = clampOffset(n);
+      }
+      if (rawPk !== null) {
+        const n = Number(rawPk);
+        if (!Number.isNaN(n)) pk = clampOffset(n);
+      }
+      if (hb === null || pk === null) {
+        const legacy = window.localStorage.getItem(LEGACY_CALIBRATION_KEY);
+        if (legacy !== null) {
+          const n = Number(legacy);
+          if (!Number.isNaN(n)) {
+            const c = clampOffset(n);
+            if (hb === null) hb = c;
+            if (pk === null) pk = c;
+          }
         }
       }
+      if (hb !== null) setOffsetHandlebar(hb);
+      if (pk !== null) setOffsetPocket(pk);
     } catch {
-      // Ignore storage issues (private mode, blocked storage, etc.).
+      /* private mode */
     }
   }, []);
 
   useEffect(() => {
     try {
-      window.localStorage.setItem(CALIBRATION_STORAGE_KEY, String(calibrationOffset));
+      window.localStorage.setItem(STORAGE_HANDLEBAR, String(offsetHandlebar));
     } catch {
-      // Ignore storage issues.
+      /* ignore */
     }
-  }, [calibrationOffset]);
+  }, [offsetHandlebar]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(STORAGE_POCKET, String(offsetPocket));
+    } catch {
+      /* ignore */
+    }
+  }, [offsetPocket]);
+
+  const calibrationOffset = useMemo(
+    () => (calibrationProfile === 'pocket' ? offsetPocket : offsetHandlebar),
+    [calibrationProfile, offsetHandlebar, offsetPocket]
+  );
+
+  useEffect(() => {
+    dynamicBiasRef.current = 0;
+    kf.current.reset(0);
+    calibratedRef.current = false;
+    gLpInit.current = false;
+    displayLpRef.current = 0;
+    straightAccumSecRef.current = 0;
+  }, [calibrationProfile]);
+
+  const applyBikeCalibrationFromGravity = useCallback(() => {
+    const g = gUnit.current.slice() as [number, number, number];
+    if (!normalizeVec3(g)) return;
+    const R = RAlign.current;
+    if (!rotationFromTo(g, EZ, R)) return;
+    buildBikeBasisAtCalibration(g, forwardCal.current, lateralCal.current, upCal.current);
+    kf.current.reset(0);
+    calibratedRef.current = true;
+    straightAccumSecRef.current = 0;
+  }, []);
 
   useEffect(() => {
     if (!permissionGranted) return;
+
+    const assumedHz = 30;
+    const dtDefault = 1 / assumedHz;
 
     const updateMotionStationary = (event: DeviceMotionEvent) => {
       const rr = event.rotationRate;
@@ -140,172 +237,209 @@ export const useLeanAngle = (speedMps?: number | null) => {
       motionStationaryRef.current = motionStationaryScoreRef.current >= 14;
     };
 
-    const processRollSample = (rollRaw: number, secondaryRoll?: number | null) => {
-      let roll = rollRaw;
-      if (secondaryRoll != null && Number.isFinite(secondaryRoll)) {
-        // Fusión suave con estimación por gravedad para reducir sesgos de un lado (izq/der).
-        const delta = secondaryRoll - roll;
-        const clampedDelta = Math.max(-18, Math.min(18, delta));
-        roll += clampedDelta * 0.28;
-      }
-      if (roll > 60) roll = 60;
-      if (roll < -60) roll = -60;
+    const onMotion = (ev: DeviceMotionEvent) => {
+      try {
+        const accg = ev.accelerationIncludingGravity;
+        const accLin = ev.acceleration;
+        const rr = ev.rotationRate;
+        if (!accg || accg.x == null || accg.y == null || accg.z == null) return;
 
-      setRawAngle(roll);
+        updateMotionStationary(ev);
 
-      const win = rollMedianWindowRef.current;
-      win.push(roll);
-      if (win.length > 5) win.shift();
-      const sorted = [...win].sort((a, b) => a - b);
-      const rollStable = sorted[Math.floor(sorted.length / 2)];
-
-      let jitteryOrientation = false;
-      if (win.length >= 5) {
-        const mean = win.reduce((a, b) => a + b, 0) / win.length;
-        let sq = 0;
-        for (const x of win) sq += (x - mean) * (x - mean);
-        const variance = sq / win.length;
-        jitteryOrientation = variance > 70 && Math.abs(mean) < 18;
-      }
-
-      const v = speedRef.current;
-      const gpsSaysStopped = typeof v === 'number' && Number.isFinite(v) && Math.abs(v) < 1.35;
-      const speedUnknown = v == null;
-      const imuSaysStill = motionStationaryRef.current;
-      /** En marcha el GPS suele marcar >2,5 m/s: no tratar el ruido de orientación como “mesa”. */
-      const gpsLikelyMoving = typeof v === 'number' && Number.isFinite(v) && Math.abs(v) >= 2.5;
-      const physicallyStill =
-        gpsSaysStopped || imuSaysStill || (!gpsLikelyMoving && jitteryOrientation);
-
-      /**
-       * Inclinación clara con GPS en cero (prueba en parado, manillar, etc.): no usar modo “mesa”
-       * que autocentraba a 0° con bias + zona muerta grande.
-       */
-      const stationaryButLeaning = gpsSaysStopped && Math.abs(rollStable) >= 7;
-      /** Solo entonces forzar lectura neutra / deriva: móvil realmente plano y quieto. */
-      const tableFlatRest = physicallyStill && !stationaryButLeaning;
-
-      const speedNow = typeof v === 'number' && Number.isFinite(v) ? Math.abs(v) : 0;
-      const alpha = tableFlatRest
-        ? 0.02
-        : stationaryButLeaning
-          ? 0.18
-          : speedUnknown
-            ? 0.12
-            : gpsLikelyMoving
-              ? 0.22
-              : 0.16;
-      smoothedAngleRef.current =
-        smoothedAngleRef.current + alpha * (rollStable - smoothedAngleRef.current);
-
-      if (tableFlatRest && Math.abs(smoothedAngleRef.current) < 14) {
-        smoothedAngleRef.current *= 0.88;
-      }
-
-      angleHistoryRef.current.push(smoothedAngleRef.current);
-      if (angleHistoryRef.current.length > 30) angleHistoryRef.current.shift();
-
-      const shouldAutoZero =
-        tableFlatRest &&
-        (typeof v !== 'number' || !Number.isFinite(v) || Math.abs(v) < 1.6) &&
-        Math.abs(smoothedAngleRef.current) < 18;
-      if (shouldAutoZero) {
-        // Compensación lenta de deriva para que en reposo quede realmente centrado (0°).
-        dynamicBiasRef.current = Math.max(
-          -12,
-          Math.min(12, dynamicBiasRef.current * 0.96 + smoothedAngleRef.current * 0.04)
-        );
-      } else {
-        // Relajación suave del sesgo al volver a rodar.
-        dynamicBiasRef.current *= 0.995;
-        if (Math.abs(dynamicBiasRef.current) < 0.05) dynamicBiasRef.current = 0;
-      }
-
-      let finalAngle = smoothedAngleRef.current - calibrationOffset - dynamicBiasRef.current;
-      if (!physicallyStill && !speedUnknown && gpsLikelyMoving) {
-        finalAngle *= speedNow >= 11.2 ? 1.1 : 1.06;
-      }
-      if (finalAngle > 60) finalAngle = 60;
-      if (finalAngle < -60) finalAngle = -60;
-      const deadDeg = tableFlatRest ? 4.8 : stationaryButLeaning ? 1.0 : speedUnknown ? 2.2 : 1.0;
-      if (Math.abs(finalAngle) < deadDeg) finalAngle = 0;
-
-      const displayAngle = finalAngle;
-      const roundedAngle = Math.round(finalAngle);
-      setLeanAngle(displayAngle);
-
-      const minMaxThreshold = tableFlatRest ? 10 : 0;
-      if (roundedAngle < 0 && Math.abs(roundedAngle) >= minMaxThreshold) {
-        setMaxLeanLeft((prev) => Math.max(prev, Math.abs(roundedAngle)));
-      } else if (roundedAngle > 0 && roundedAngle >= minMaxThreshold) {
-        setMaxLeanRight((prev) => Math.max(prev, roundedAngle));
-      }
-    };
-
-    const handleOrientation = (event: DeviceOrientationEvent) => {
-      lastOrientationUpdateRef.current = Date.now();
-      const isLandscape = window.innerWidth > window.innerHeight;
-      const orientationAngle =
-        typeof screen !== 'undefined' && screen.orientation && typeof screen.orientation.angle === 'number'
-          ? screen.orientation.angle
-          : typeof window !== 'undefined' && typeof window.orientation === 'number'
-            ? window.orientation
-            : 0;
-      const normalizedOrientation = ((orientationAngle % 360) + 360) % 360;
-
-      let roll = 0;
-      if (isLandscape) {
-        // En horizontal, gamma representa la inclinación izquierda/derecha de forma más estable entre dispositivos.
-        // Algunos móviles invierten el signo en landscape-secondary (270º).
-        const gamma = event.gamma;
-        if (gamma != null && Number.isFinite(gamma)) {
-          const sign = normalizedOrientation === 270 ? -1 : 1;
-          roll = gamma * sign;
-        } else {
-          const beta = event.beta ?? 0;
-          roll = normalizedOrientation === 270 ? -beta : beta;
+        const now =
+          typeof ev.timeStamp === 'number' && ev.timeStamp > 0 ? ev.timeStamp : performance.now();
+        let dt = dtDefault;
+        if (lastTs.current != null) {
+          dt = Math.min(0.12, Math.max(0.002, (now - lastTs.current) / 1000));
         }
-      } else {
-        roll = event.gamma || 0;
+        lastTs.current = now;
+
+        gRaw.current[0] = accg.x!;
+        gRaw.current[1] = accg.y!;
+        gRaw.current[2] = accg.z!;
+
+        pocket.current.pushSample(rr, accLin);
+
+        const gyroNoiseThresholdDegPerSec = 28;
+        const instability = pocket.current.score(gyroNoiseThresholdDegPerSec);
+        const pocketLevel = pocket.current.level(gyroNoiseThresholdDegPerSec);
+
+        const isPocketProfile = calibrationProfile === 'pocket';
+        let lpAlpha =
+          pocketLevel === 'high' ? 0.045 : pocketLevel === 'moderate' ? 0.075 : 0.11;
+        if (isPocketProfile) {
+          lpAlpha *= 0.55;
+        }
+        if (instability > 0.55) {
+          lpAlpha *= 0.72;
+        }
+
+        if (!gLpInit.current) {
+          gLp.current[0] = accg.x!;
+          gLp.current[1] = accg.y!;
+          gLp.current[2] = accg.z!;
+          gLpInit.current = true;
+        } else {
+          lowPassVec3(gLp.current, gLp.current, gRaw.current, lpAlpha);
+        }
+
+        gUnit.current[0] = gLp.current[0];
+        gUnit.current[1] = gLp.current[1];
+        gUnit.current[2] = gLp.current[2];
+        const gOk = normalizeVec3(gUnit.current);
+        const gMag = Math.hypot(accg.x!, accg.y!, accg.z!);
+
+        if (!gOk) return;
+
+        if (!calibratedRef.current) {
+          applyBikeCalibrationFromGravity();
+        }
+
+        const wx = rr?.beta ?? 0;
+        const wy = rr?.gamma ?? 0;
+        const wz = rr?.alpha ?? 0;
+
+        const leanDegAccel = leanDegFromGravityInBikeFrame(gUnit.current, RAlign.current, gbScratch.current);
+        const thetaAccRad = leanDegAccel * RAD;
+
+        const omegaRoll = rollRateFromGyro(wx, wy, wz, forwardCal.current);
+
+        const yawAboutG = yawRateAboutGravityDegPerSec(
+          wx,
+          wy,
+          wz,
+          gUnit.current[0],
+          gUnit.current[1],
+          gUnit.current[2]
+        );
+
+        const speed = speedRef.current ?? 0;
+        let kinDeg = kinematicLeanDegFromSpeedAndYaw(Math.abs(speed), yawAboutG);
+        if (Math.abs(leanDegAccel) > 4 && Math.abs(kinDeg) > 4 && Math.sign(leanDegAccel) !== Math.sign(kinDeg)) {
+          kinDeg = -kinDeg;
+        }
+
+        let lateralA = 0;
+        if (accLin && accLin.x != null && accLin.y != null && accLin.z != null) {
+          lateralA = lateralAccelMagnitude(
+            accLin.x,
+            accLin.y,
+            accLin.z,
+            gUnit.current[0],
+            gUnit.current[1],
+            gUnit.current[2]
+          );
+        }
+
+        const curve = evaluateCurvePlausibility(speed, lateralA, {
+          minSpeedMps: 2.5,
+          lateralQuietBelow: 0.35,
+          lateralActiveAbove: 1.4,
+        });
+
+        const wKin =
+          kinematicBlendWeight(Math.abs(speed), yawAboutG) * (curve.leanMeaningful ? 1 : 0.35);
+
+        const processNoise =
+          pocketLevel === 'high' ? 8e-5 : pocketLevel === 'moderate' ? 5e-5 : 3e-5;
+        kf.current.predict(omegaRoll, dt, processNoise);
+
+        let rAccel = 0.035 + instability * 0.12;
+        if (gMag < 8.5 || gMag > 11.2) rAccel += 0.08;
+        if (!curve.leanMeaningful) rAccel += 0.05;
+        if (isPocketProfile) rAccel += 0.06;
+
+        kf.current.update(thetaAccRad, rAccel);
+
+        if (wKin > 0.04 && Math.abs(speed) >= 3) {
+          const rKin = 0.14 + (1 - wKin) * 0.22 + (isPocketProfile ? 0.06 : 0);
+          kf.current.update(kinDeg * RAD, rKin);
+        }
+
+        let internalDeg = kf.current.getAngleRad() * DEG;
+        if (internalDeg > 60) internalDeg = 60;
+        if (internalDeg < -60) internalDeg = -60;
+
+        angleHistoryRef.current.push(internalDeg);
+        if (angleHistoryRef.current.length > 30) angleHistoryRef.current.shift();
+
+        const v = speedRef.current;
+        const gpsSaysStopped = typeof v === 'number' && Number.isFinite(v) && Math.abs(v) < 1.35;
+        const speedUnknown = v == null;
+        const imuSaysStill = motionStationaryRef.current;
+        const gpsLikelyMoving = typeof v === 'number' && Number.isFinite(v) && Math.abs(v) >= 2.5;
+        const physicallyStill = gpsSaysStopped || imuSaysStill;
+
+        const stationaryButLeaning = gpsSaysStopped && Math.abs(internalDeg) >= 7;
+        const tableFlatRest = physicallyStill && !stationaryButLeaning;
+
+        const shouldAutoZero =
+          calibrationProfile === 'handlebar' &&
+          tableFlatRest &&
+          (typeof v !== 'number' || !Number.isFinite(v) || Math.abs(v) < 1.6) &&
+          Math.abs(internalDeg) < 18;
+
+        if (calibrationProfile === 'pocket') {
+          dynamicBiasRef.current = 0;
+        } else if (shouldAutoZero) {
+          dynamicBiasRef.current = Math.max(
+            -12,
+            Math.min(12, dynamicBiasRef.current * 0.96 + internalDeg * 0.04)
+          );
+        } else {
+          dynamicBiasRef.current *= 0.995;
+          if (Math.abs(dynamicBiasRef.current) < 0.05) dynamicBiasRef.current = 0;
+        }
+
+        let outDeg = internalDeg - calibrationOffset - dynamicBiasRef.current;
+        const speedNow = typeof v === 'number' && Number.isFinite(v) ? Math.abs(v) : 0;
+        if (!physicallyStill && !speedUnknown && gpsLikelyMoving) {
+          outDeg *= speedNow >= 11.2 ? 1.08 : 1.04;
+        }
+
+        const outLpAlpha = isPocketProfile ? 0.12 : pocketLevel === 'high' ? 0.22 : 0.35;
+        displayLpRef.current = lowPassScalar(displayLpRef.current, outDeg, outLpAlpha);
+        outDeg = displayLpRef.current;
+
+        if (outDeg > 60) outDeg = 60;
+        if (outDeg < -60) outDeg = -60;
+
+        const deadDeg = tableFlatRest ? 4.8 : stationaryButLeaning ? 1.0 : speedUnknown ? 2.2 : 1.0;
+        if (Math.abs(outDeg) < deadDeg) outDeg = 0;
+
+        setLeanAngle(outDeg);
+
+        const roundedAngle = Math.round(outDeg);
+        const minMaxThreshold = tableFlatRest ? 10 : 0;
+        if (roundedAngle < 0 && Math.abs(roundedAngle) >= minMaxThreshold) {
+          setMaxLeanLeft((prev) => Math.max(prev, Math.abs(roundedAngle)));
+        } else if (roundedAngle > 0 && roundedAngle >= minMaxThreshold) {
+          setMaxLeanRight((prev) => Math.max(prev, roundedAngle));
+        }
+
+        if (
+          calibrationProfile === 'handlebar' &&
+          Math.abs(internalDeg) < 1.2 &&
+          pocketLevel !== 'high' &&
+          typeof speed === 'number' &&
+          speed > 4
+        ) {
+          straightAccumSecRef.current += dt;
+          if (straightAccumSecRef.current > 5) {
+            applyBikeCalibrationFromGravity();
+            straightAccumSecRef.current = 0;
+          }
+        } else {
+          straightAccumSecRef.current = 0;
+        }
+      } catch (err) {
+        console.error('useLeanAngle fusion step', err);
       }
-
-      processRollSample(roll, lastGravityRollRef.current);
     };
 
-    const handleMotion = (event: DeviceMotionEvent) => {
-      updateMotionStationary(event);
-      const isLandscape = window.innerWidth > window.innerHeight;
-      const acc = event.accelerationIncludingGravity;
-      if (!acc) return;
-      const x = acc.x ?? 0;
-      const y = acc.y ?? 0;
-      const z = acc.z ?? 0;
-      const norm = Math.sqrt(x * x + y * y + z * z);
-      if (!norm) return;
-      const orientationAngle =
-        typeof screen !== 'undefined' && screen.orientation && typeof screen.orientation.angle === 'number'
-          ? screen.orientation.angle
-          : typeof window !== 'undefined' && typeof window.orientation === 'number'
-            ? window.orientation
-            : 0;
-      const normalizedOrientation = ((orientationAngle % 360) + 360) % 360;
-      let gravityRoll = (Math.atan2(x, z) * 180) / Math.PI;
-      if (isLandscape && normalizedOrientation === 270) {
-        gravityRoll = -gravityRoll;
-      }
-      gravityRoll = Math.max(-60, Math.min(60, gravityRoll));
-      lastGravityRollRef.current = gravityRoll;
-      if (Date.now() - lastOrientationUpdateRef.current < 1500) return;
-      processRollSample(gravityRoll);
-    };
-
-    window.addEventListener('deviceorientation', handleOrientation);
-    window.addEventListener('devicemotion', handleMotion);
-    return () => {
-      window.removeEventListener('deviceorientation', handleOrientation);
-      window.removeEventListener('devicemotion', handleMotion);
-    };
-  }, [permissionGranted, calibrationOffset]);
+    window.addEventListener('devicemotion', onMotion, true);
+    return () => window.removeEventListener('devicemotion', onMotion, true);
+  }, [permissionGranted, calibrationOffset, calibrationProfile, applyBikeCalibrationFromGravity]);
 
   const resetMaxLean = () => {
     setMaxLeanLeft(0);
@@ -313,22 +447,25 @@ export const useLeanAngle = (speedMps?: number | null) => {
   };
 
   const calibrate = useCallback(() => {
-    dynamicBiasRef.current = 0;
-    const samples = angleHistoryRef.current.slice(-15);
-    if (!samples.length) {
-      setCalibrationOffset(smoothedAngleRef.current);
-      return;
+    try {
+      dynamicBiasRef.current = 0;
+      const samples = angleHistoryRef.current.slice(-15);
+      const median = samples.length
+        ? [...samples].sort((a, b) => a - b)[Math.floor(samples.length / 2)]
+        : kf.current.getAngleRad() * DEG;
+      const v = clampOffset(median);
+      if (calibrationProfile === 'pocket') {
+        setOffsetPocket(v);
+      } else {
+        setOffsetHandlebar(v);
+      }
+    } catch (e) {
+      console.error('useLeanAngle calibrate', e);
     }
-    const sorted = [...samples].sort((a, b) => a - b);
-    const median = sorted[Math.floor(sorted.length / 2)];
-    setCalibrationOffset(median);
-  }, []);
+  }, [calibrationProfile]);
 
   const applyCalibrationStep = useCallback((error: number, strength: number = 0.005) => {
-    setCalibrationOffset((prev) => {
-      const next = prev + error * strength;
-      return Math.max(-30, Math.min(30, next));
-    });
+    setOffsetHandlebar((prev) => clampOffset(prev + error * strength));
   }, []);
 
   return { leanAngle, maxLeanLeft, maxLeanRight, permissionGranted, requestPermission, resetMaxLean, calibrate, applyCalibrationStep };

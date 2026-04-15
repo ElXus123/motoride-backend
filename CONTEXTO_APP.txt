@@ -1,5 +1,5 @@
 MotoRide — registro de contexto / cambios recientes
-Ultima actualizacion: 2026-04-18 (bloque 21 — planificador de rutas / destinos Nominatim)
+Ultima actualizacion: 2026-04-22 (bloque 22 — inclinometro Kalman/cinematica, cero manillar vs bolsillo, novedades)
 
 === Contacto y soporte ===
 - Correo publico de contacto: motorideapp1@gmail.com
@@ -202,3 +202,23 @@ Fecha: 2026-04-14
   - `generateLocalRoute` usa solo `resolveDestinationForRouting` + GPS en paralelo; mensajes distinguiendo red vs destino no encontrado.
 - `src/components/WhatsNewModal.tsx`
   - Version actualizada; entrada en tablon sobre el planificador / busqueda de destinos (sin admin ni premium).
+
+=== RESUMEN DESDE EL ULTIMO LOG (POST BLOQUE 21) ===
+
+22) INCLINOMETRO (FUSION KALMAN, CINEMATICA, CERO DUAL) Y NOVEDADES
+- Nuevo: `src/lib/motorcycleLean/kinematicLean.ts`
+  - Guiñada efectiva ~ proyeccion de `rotationRate` (beta, gamma, alpha) sobre el vector de gravedad normalizado.
+  - Roll cinemático en curva plana: atan2(v·ω, g) para no fiarse solo de la gravedad aparente (aceleración lateral en curva).
+  - Peso de mezcla `kinematicBlendWeight` según |v| y |ω|.
+- Nuevo: `src/lib/motorcycleLean/kalmanRoll1D.ts`
+  - Filtro Kalman escalar en rad: predicción con ω_roll (eje de avance calibrado), correcciones secuenciales por medida acelerómetro (marco moto) y por medida cinemática.
+- `src/hooks/useLeanAngle.ts` (reescritura del pipeline)
+  - Solo `devicemotion` (sin mezcla primaria con `deviceorientation`): base moto agnóstica con `rotationFromTo` + `buildBikeBasisAtCalibration` + `leanDegFromGravityInBikeFrame` + `rollRateFromGyro`.
+  - R de medición y ruido de proceso adaptados a bolsillo (`PocketInstabilityTracker`) y a plausibilidad de curva (`evaluateCurvePlausibility` / aceleración lateral).
+  - Salida con low-pass extra en perfil bolsillo; offsets en `localStorage` separados manillar vs bolsillo (`STORAGE_HANDLEBAR` / `STORAGE_POCKET`) + migración desde clave legacy.
+- `src/components/MapView.tsx` (ya integrado en sesiones anteriores)
+  - `leanCalibrationProfile`: `pocket` mientras `touchLockKind !== null`; `handlebar` en GPS normal.
+  - Auto-calibración por rumbo en recta no aplica con `touchLockKind` activo.
+  - Tras bloqueo táctil (~850 ms): `calibrate()` para fijar cero IMU en bolsillo/MirrorLink.
+- `src/components/WhatsNewModal.tsx`
+  - `WHATS_NEW_VERSION` incrementada; lista `HIGHLIGHTS` actualizada con inclinometro y calibración dual (lenguaje claro para usuario).

@@ -20,7 +20,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useAppMessage } from '../contexts/AppMessageContext';
 import { useLocationTracking } from '../hooks/useLocationTracking';
 import { useOpenMeteoWeather } from '../hooks/useOpenMeteoWeather';
-import { useLeanAngle } from '../hooks/useLeanAngle';
+import { useLeanAngle, type LeanCalibrationProfile } from '../hooks/useLeanAngle';
 import { useNavigation } from '../hooks/useNavigation';
 import { useNavigationHeading } from '../hooks/useNavigationHeading';
 import { getLineCoordinates, snapPointToRouteDetailed } from '../lib/navigationPose';
@@ -1012,6 +1012,9 @@ export default function MapView({
   }, [heading, speed, courseOverGround]);
 
   const mapWeather = useOpenMeteoWeather(currentLocation?.lat, currentLocation?.lng);
+  /** Bolsillo/MirrorLink: cero IMU propio; GPS normal: cero manillar (orientación distinta). */
+  const leanCalibrationProfile: LeanCalibrationProfile =
+    touchLockKind !== null ? 'pocket' : 'handlebar';
   const {
     leanAngle: sensorLeanAngle,
     maxLeanLeft,
@@ -1021,7 +1024,7 @@ export default function MapView({
     resetMaxLean,
     calibrate,
     applyCalibrationStep,
-  } = useLeanAngle(speed);
+  } = useLeanAngle(speed, leanCalibrationProfile);
   const isScreenShareLikeMode = touchLockKind === 'mirrorlink' || forceLandscapeUi;
 
   const playTouchLockReadyFeedback = () => {
@@ -1049,6 +1052,19 @@ export default function MapView({
     playTouchLockReadyFeedback();
   }, [touchLockKind, pocketCountdown, isPocketLocked]);
 
+  /** Cero IMU para bolsillo/MirrorLink: el teléfono ya está guardado; perfil `pocket` y offset dedicado. */
+  useEffect(() => {
+    if (!touchLockKind || !isPocketLocked) return;
+    const id = window.setTimeout(() => {
+      try {
+        calibrate();
+      } catch (e) {
+        console.error('Pocket lean zero calibration', e);
+      }
+    }, 850);
+    return () => window.clearTimeout(id);
+  }, [touchLockKind, isPocketLocked, calibrate]);
+
   const needsOrientationUserGesture =
     typeof DeviceOrientationEvent !== 'undefined' &&
     typeof (DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<'granted' | 'denied'> })
@@ -1058,6 +1074,7 @@ export default function MapView({
 
   // Auto-calibración en recta: antes era casi imposible (>40 km/h y rumbo ±1,5°). Afinado para uso real.
   useEffect(() => {
+    if (touchLockKind !== null) return;
     if (!currentLocation || headingOrCourseForTelemetry === null) return;
 
     const now = Date.now();
@@ -1096,7 +1113,7 @@ export default function MapView({
 
     const strength = currentSpeedKmh > 45 ? 0.022 : currentSpeedKmh > 30 ? 0.016 : 0.012;
     applyCalibrationStep(avgAngle, strength);
-  }, [currentLocation, headingOrCourseForTelemetry, speed, sensorLeanAngle, applyCalibrationStep]);
+  }, [touchLockKind, currentLocation, headingOrCourseForTelemetry, speed, sensorLeanAngle, applyCalibrationStep]);
 
   // Auto-calibración también en modo GPS normal (sin bolsillo/mirrorlink): ayuda a centrar en uso real continuado.
   useEffect(() => {
