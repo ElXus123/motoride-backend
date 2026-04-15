@@ -1,5 +1,5 @@
 MotoRide — registro de contexto / cambios recientes
-Ultima actualizacion: 2026-04-15 (bloque 29 — pausa de ruta y gastos a escote)
+Ultima actualizacion: 2026-04-15 (HUD navegacion — iconos vectoriales y rotonda con salida)
 
 === Contacto y soporte ===
 - Correo publico de contacto: motorideapp1@gmail.com
@@ -302,3 +302,9 @@ Fecha: 2026-04-14
   - **Privacidad al compartir:** la imagen generada (`createSummaryImage`) no incluye gastos (solo métricas de conducción).
 - `firestore.rules`: validación de campos opcionales en grupos (`ridePaused`, `ridePauseStartedAt`, `pausedTimeMs`) y en `rideHistory` (gastos).
 - `src/components/WhatsNewModal.tsx`: versión de novedades actualizada; entrada breve sobre pausa y gastos.
+
+=== AJUSTE HUD GPS — ICONOS Y ROTONDAS ===
+- `src/components/NavManeuverIcons.tsx`: giros con trazo + punta (sin superposición fill/stroke que pixelaba); `shapeRendering="geometricPrecision"`.
+- Rotonda: círculo + arco de sentido + **número de salida** (OSRM `exit`); salida de rotonda con flecha clara.
+- `src/hooks/useNavigation.ts`: estado `roundaboutExit` desde el siguiente paso OSRM.
+- `src/components/MapView.tsx`: contenedor del icono con gradiente y sin rotación que escalonaba bordes.

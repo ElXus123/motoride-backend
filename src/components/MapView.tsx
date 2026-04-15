@@ -3180,10 +3180,15 @@ export default function MapView({
            {effectiveRouteForNav && (
              <div className={`bg-zinc-950/95 backdrop-blur-md border-l-8 border-blue-500 rounded-2xl shadow-2xl flex flex-col gap-2 pointer-events-auto mt-2 max-w-sm ring-1 ring-white/10 transition-all duration-300 ${isCompactUI ? 'p-3' : 'p-4'}`}>
                <div className={`flex items-center ${isCompactUI ? 'gap-3' : 'gap-5'}`}>
-                 <div className={`${isCompactUI ? 'w-12 h-12' : 'w-16 h-16'} bg-blue-600 rounded-2xl flex items-center justify-center text-white shrink-0 shadow-lg rotate-3`}>
-                   <div className="-rotate-3">
-                    {getDirectionIcon(navState.maneuverType, navState.maneuverModifier, isCompactUI ? 32 : 40)}
-                   </div>
+                 <div
+                   className={`${isCompactUI ? 'w-12 h-12' : 'w-16 h-16'} rounded-2xl flex items-center justify-center text-white shrink-0 shadow-lg shadow-blue-900/40 ring-2 ring-white/25 bg-gradient-to-br from-sky-500 to-blue-700`}
+                 >
+                   {getDirectionIcon(
+                     navState.maneuverType,
+                     navState.maneuverModifier,
+                     isCompactUI ? 34 : 42,
+                     navState.roundaboutExit ?? null
+                   )}
                  </div>
                  <div className="flex-1 min-w-0">
                    <p className={`${isCompactUI ? 'text-base' : 'text-xl'} text-white font-black leading-tight tracking-tight`}>{navState.instruction}</p>
