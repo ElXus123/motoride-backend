@@ -96,7 +96,10 @@ service cloud.firestore {
              isValidOptionalString('description', 500) &&
              (!('isRecording' in data) || data.isRecording is bool) &&
              isValidOptionalNumber('startTime') &&
-             isValidRouteListing(data);
+             isValidRouteListing(data) &&
+             isValidOptionalBool('ridePaused') &&
+             isValidOptionalNumber('ridePauseStartedAt') &&
+             (!('pausedTimeMs' in data) || (data.pausedTimeMs is number && data.pausedTimeMs >= 0 && data.pausedTimeMs <= 864000000));
     }
 
     function isValidLocation(data) {
@@ -127,7 +130,10 @@ service cloud.firestore {
              isValidOptionalNumber('score') &&
              isValidOptionalNumber('baseScore') &&
              isValidOptionalNumber('pointsEarned') &&
-             (!('path' in data) || data.path is list);
+             (!('path' in data) || data.path is list) &&
+             isValidOptionalNumber('foodExpenseEuros') &&
+             isValidOptionalNumber('splitPerPersonEuros') &&
+             isValidOptionalNumber('memberCountForSplit');
     }
 
     // --- Amistad (escrituras en el documento de otro usuario) ---

@@ -1,5 +1,5 @@
 MotoRide — registro de contexto / cambios recientes
-Ultima actualizacion: 2026-04-15 (bloque 28 — inclinometro apaisado)
+Ultima actualizacion: 2026-04-15 (bloque 29 — pausa de ruta y gastos a escote)
 
 === Contacto y soporte ===
 - Correo publico de contacto: motorideapp1@gmail.com
@@ -292,3 +292,13 @@ Fecha: 2026-04-14
 - `getScreenOrientationAngleDeg`: si `angle` es 0 pero `type` es landscape, o si el viewport es claramente apaisado (`innerWidth > innerHeight`), usar 90° para el remapeo (Safari a veces no actualiza `angle`).
 - `getRemappedRotationRateDeg`: WebKit usa **Euler** (beta, gamma, alpha) en `rotationRate`, no mezclar con x,y,z cartesianos; remapear solo (β,γ,α) o solo (x,y,z).
 - Inicialización del low-pass de gravedad: primera muestra en **marco remapeado** (`gLoc`), no en crudo del sensor (bug que rompía el filtro al girar).
+
+=== BLOQUE 29 — PAUSA DE RUTA Y GASTOS (COMIDA / BEBIDA) ===
+- `src/components/MapView.tsx`
+  - **Pausa sin cerrar grupo:** anfitrión: botones Pausa / Reanudar junto a Finalizar; estado en Firestore `ridePaused`, `ridePauseStartedAt`, acumulado `pausedTimeMs` al reanudar y al finalizar.
+  - **Tiempo de ruta:** al cerrar la grabación, la duración del resumen resta el tiempo en pausa (`pausedTimeMs` + tramo actual si sigue pausado).
+  - **Sesión cerrada en pausa:** `sessionStorage` marca pausa; al volver a abrir la app con la ruta aún pausada, modal «Ruta en pausa» → Continuar.
+  - **Gastos:** solo anfitrión; campo opcional en el resumen (€); reparto a escote según `members.length`; se guarda en `rideHistory` como `foodExpenseEuros`, `splitPerPersonEuros`, `memberCountForSplit` solo si hay importe > 0.
+  - **Privacidad al compartir:** la imagen generada (`createSummaryImage`) no incluye gastos (solo métricas de conducción).
+- `firestore.rules`: validación de campos opcionales en grupos (`ridePaused`, `ridePauseStartedAt`, `pausedTimeMs`) y en `rideHistory` (gastos).
+- `src/components/WhatsNewModal.tsx`: versión de novedades actualizada; entrada breve sobre pausa y gastos.
