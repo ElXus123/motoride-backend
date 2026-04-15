@@ -10,6 +10,8 @@ export type NominatimItem = {
   lat?: string;
   lon?: string;
   display_name?: string;
+  osm_type?: string;
+  osm_id?: number;
   type?: string;
   class?: string;
   importance?: number | string;
