@@ -589,6 +589,8 @@ export default function MapView({
   }, [score]);
 
   const confirmLeaveInFlightRef = useRef(false);
+  /** Participante: salida con resumen pendiente → `onLeave` solo al cerrar el modal. */
+  const pendingLeaveAfterSummaryRef = useRef(false);
 
   useEffect(() => {
     const onRouteBack = () => {
@@ -1511,27 +1513,6 @@ export default function MapView({
     }
   };
 
-  const confirmLeaveRoute = async () => {
-    if (confirmLeaveInFlightRef.current) return;
-    confirmLeaveInFlightRef.current = true;
-    setExitLeaving(true);
-    setShowExitConfirm(false);
-    hasExplicitlyLeftRef.current = true;
-    try {
-      await deleteGroupIfHost('leave-route');
-    } catch (e) {
-      console.error('confirmLeaveRoute:', e);
-    } finally {
-      prepareHistoryLeave?.();
-      onLeave();
-      if (window.history.state && (window.history.state as { motorideRoute?: boolean }).motorideRoute) {
-        window.history.back();
-      }
-      confirmLeaveInFlightRef.current = false;
-      setExitLeaving(false);
-    }
-  };
-
   // Wake Lock siempre en vista de mapa (GPS/ruta visible); iOS 16.4+ Safari / PWA; a menudo hace falta un gesto.
   useEffect(() => {
     let cancelled = false;
@@ -2216,6 +2197,133 @@ export default function MapView({
     commitRidePointsToProfile,
     foodExpenseInput,
   ]);
+
+  const finalizeRouteLeaveNavigation = useCallback(() => {
+    try {
+      prepareHistoryLeave?.();
+      onLeave();
+      if (window.history.state && (window.history.state as { motorideRoute?: boolean }).motorideRoute) {
+        window.history.back();
+      }
+    } catch (e) {
+      console.error('finalizeRouteLeaveNavigation:', e);
+    }
+  }, [prepareHistoryLeave, onLeave]);
+
+  /** Misma fórmula que al finalizar grabación (host): bonus distancia, multiplicadores activos. */
+  const computeCurrentSessionRideStats = useCallback(async () => {
+    const startTime = group?.startTime ?? recordingStartTimeRef.current;
+    if (!user?.uid || !startTime) return null;
+    const effectivePausedMs =
+      (Number(group?.pausedTimeMs) || 0) +
+      (ridePaused && typeof group?.ridePauseStartedAt === 'number'
+        ? Math.max(0, Date.now() - group.ridePauseStartedAt)
+        : 0);
+    const rideDuration = Math.max(0, Date.now() - startTime - effectivePausedMs);
+    const distanceBonus = Math.floor(localDistance / 100) * 20;
+    try {
+      const pointsConfig = await getActivePointsConfig();
+      const adjustedBaseScore = Math.round(score * pointsConfig.baseMultiplier);
+      const adjustedDistanceBonus = Math.round(distanceBonus * pointsConfig.distanceMultiplier);
+      const finalScore = Math.round((adjustedBaseScore + adjustedDistanceBonus) * pointsConfig.eventMultiplier);
+      const rideSessionKey = `${user.uid}:${groupId}:${startTime}`;
+      return {
+        distance: Number(localDistance.toFixed(2)),
+        score: finalScore,
+        baseScore: adjustedBaseScore,
+        distanceBonus: adjustedDistanceBonus,
+        leftTurns: leftTurnsRef.current,
+        rightTurns: rightTurnsRef.current,
+        maxLeanLeft,
+        maxLeanRight,
+        duration: rideDuration,
+        multipliers: pointsConfig,
+        rideSessionKey,
+      };
+    } catch (e) {
+      console.error('computeCurrentSessionRideStats:', e);
+      return null;
+    }
+  }, [
+    user?.uid,
+    groupId,
+    group?.startTime,
+    group?.pausedTimeMs,
+    group?.ridePauseStartedAt,
+    ridePaused,
+    localDistance,
+    score,
+    maxLeanLeft,
+    maxLeanRight,
+  ]);
+
+  const completeParticipantLeaveIfNeeded = useCallback(() => {
+    if (!pendingLeaveAfterSummaryRef.current) return;
+    pendingLeaveAfterSummaryRef.current = false;
+    confirmLeaveInFlightRef.current = false;
+    finalizeRouteLeaveNavigation();
+  }, [finalizeRouteLeaveNavigation]);
+
+  const confirmLeaveRoute = async () => {
+    if (confirmLeaveInFlightRef.current) return;
+    confirmLeaveInFlightRef.current = true;
+    setExitLeaving(true);
+    setShowExitConfirm(false);
+    hasExplicitlyLeftRef.current = true;
+    try {
+      await deleteGroupIfHost('leave-route');
+
+      const startTime = group?.startTime ?? recordingStartTimeRef.current;
+      if (!isHost && user && isRecording && startTime) {
+        const currentRideStats = await computeCurrentSessionRideStats();
+        if (currentRideStats) {
+          const pathSnapshot = [...recordedPath];
+          const ok = await commitRidePointsToProfile({
+            distance: currentRideStats.distance,
+            score: currentRideStats.score,
+            leftTurns: currentRideStats.leftTurns,
+            rightTurns: currentRideStats.rightTurns,
+            maxLeanLeft: currentRideStats.maxLeanLeft,
+            maxLeanRight: currentRideStats.maxLeanRight,
+          });
+
+          if (!ok) {
+            setSummaryData(currentRideStats);
+            persistRideDraft({
+              createdAt: Date.now(),
+              summaryData: currentRideStats,
+              path: pathSnapshot,
+              foodExpenseInput,
+            });
+            setShowSummary(true);
+            pendingLeaveAfterSummaryRef.current = true;
+            return;
+          }
+
+          ridePointsCommittedSessionKeyRef.current = currentRideStats.rideSessionKey;
+          setSummaryData(currentRideStats);
+          persistRideDraft({
+            createdAt: Date.now(),
+            summaryData: currentRideStats,
+            path: pathSnapshot,
+            foodExpenseInput,
+          });
+          setShowSummary(true);
+          pendingLeaveAfterSummaryRef.current = true;
+          return;
+        }
+      }
+
+      finalizeRouteLeaveNavigation();
+    } catch (e) {
+      console.error('confirmLeaveRoute:', e);
+    } finally {
+      setExitLeaving(false);
+      if (!pendingLeaveAfterSummaryRef.current) {
+        confirmLeaveInFlightRef.current = false;
+      }
+    }
+  };
 
   // Record path locally from the moment movement starts
   useEffect(() => {
@@ -3947,10 +4055,10 @@ export default function MapView({
 
       {/* HUD Overlay */}
       <div className={`absolute left-0 right-0 z-[1000] pointer-events-none flex justify-center px-2 sm:px-4 landscape:justify-start landscape:left-4 landscape:right-auto ${isLandscapeUi ? 'landscape:bottom-3' : 'bottom-5'}`}>
-        <div className="bg-zinc-950/90 backdrop-blur-3xl rounded-[2rem] sm:rounded-[2.5rem] p-1.5 border border-white/10 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.8)] flex items-center gap-0.5 sm:gap-1 pointer-events-auto max-w-full overflow-hidden landscape:scale-90 landscape:origin-bottom-left">
+        <div className="bg-zinc-950/90 backdrop-blur-3xl rounded-[2rem] sm:rounded-[2.5rem] p-1.5 border border-white/10 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.8)] flex items-center gap-0.5 sm:gap-1 pointer-events-auto max-w-[min(100%,calc(100vw-1rem))] min-w-0 overflow-visible landscape:scale-90 landscape:origin-bottom-left">
           
-          {/* Speed + tiempo en ubicación */}
-          <div className="flex flex-col items-center justify-center min-w-[80px] sm:min-w-[120px] py-2 sm:py-3 px-3 sm:px-6 bg-white/5 rounded-[1.5rem] sm:rounded-[2rem] border border-white/5 shrink-0 landscape:min-w-[80px] landscape:px-3">
+          {/* Speed + tiempo en ubicación — ancho fijo para no empujar Pausa/Finalizar fuera del viewport */}
+          <div className="flex flex-col items-center justify-center w-[5rem] sm:w-[6.25rem] shrink-0 py-2 sm:py-3 px-2 sm:px-4 bg-white/5 rounded-[1.5rem] sm:rounded-[2rem] border border-white/5 landscape:w-[5rem] landscape:px-2">
             <div
               className="flex items-center justify-center gap-1 sm:gap-1.5 mb-0.5 sm:mb-1 min-h-[22px] sm:min-h-[26px]"
               title={
@@ -3982,7 +4090,7 @@ export default function MapView({
                 </span>
               )}
             </div>
-            <span className="text-3xl sm:text-5xl font-black leading-none tracking-tighter text-white tabular-nums">{currentSpeedKmh}</span>
+            <span className="text-3xl sm:text-5xl font-black leading-none tracking-tighter text-white tabular-nums inline-block min-w-[3ch] text-center">{currentSpeedKmh}</span>
             <span className="text-[8px] sm:text-[9px] font-black uppercase tracking-[0.1em] sm:tracking-[0.2em] text-blue-400 mt-0.5 sm:mt-1">km/h</span>
           </div>
 
@@ -4019,13 +4127,13 @@ export default function MapView({
             <div className="w-px h-10 sm:h-12 bg-white/10 shrink-0" />
 
             {/* Score & Stop Recording */}
-            <div className="flex flex-col gap-1 sm:gap-1.5 min-w-[80px] sm:min-w-[100px]">
+            <div className="flex flex-col gap-1 sm:gap-1.5 min-w-[80px] sm:min-w-[100px] shrink-0">
               <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 sm:py-1.5 bg-yellow-500/10 rounded-lg sm:rounded-xl border border-yellow-500/20">
                 <Trophy size={12} className="text-yellow-500 sm:w-[14px] sm:h-[14px]" />
                 <span className="text-xs sm:text-sm font-black text-white tabular-nums">{score}</span>
               </div>
               
-              {isHost && isRecording && localDistance >= 0.05 && (
+              {isHost && isRecording && (
                 <div className="flex flex-col gap-1 w-full">
                   <button
                     type="button"
@@ -4469,6 +4577,7 @@ export default function MapView({
                       setFoodExpenseInput('');
                       setShowSummary(false);
                       showMessage({ variant: 'success', title: 'Historial', message: 'Ruta guardada en tu historial.' });
+                      completeParticipantLeaveIfNeeded();
                     } catch (e) {
                       console.error(e);
                       showMessage({ variant: 'error', title: 'Historial', message: 'Error al guardar en el historial.' });
@@ -4505,6 +4614,7 @@ export default function MapView({
                     clearRideDraft();
                     setFoodExpenseInput('');
                     setShowSummary(false);
+                    completeParticipantLeaveIfNeeded();
                   }}
                   className="w-full bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-4 rounded-2xl transition-all"
                 >

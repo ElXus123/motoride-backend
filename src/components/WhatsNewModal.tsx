@@ -3,28 +3,30 @@ import { Check } from 'lucide-react';
 import appLogo from '../../ICONO.png';
 
 /** Sube este valor cuando cambien las novedades para volver a mostrar el aviso una vez por dispositivo. */
-export const WHATS_NEW_VERSION = '2026.04.23';
+export const WHATS_NEW_VERSION = '2026.04.24';
 
 const STORAGE_KEY = 'motoride_whats_new_seen_version';
 
-/** Textos breves para cualquier usuario (sin tecnicismos). */
+/** Textos breves para cualquier usuario (sin tecnicismos). Orden: más antiguas arriba, más recientes abajo. */
 const HIGHLIGHTS: string[] = [
-  'Inclinómetro: a muy baja velocidad se apoya más en la gravedad (moto parada o casi); al ir más rápido combina giro, gravedad y la física de la curva para que el ángulo sea más estable y fiel.',
-  'Mapa al grabar: la cámara se aleja un poco cuando vas más rápido y se carga más mapa de reserva al girar la vista con el rumbo, para que no se vean huecos en los bordes.',
-  'Navegación por ruta: iconos de giro más claros (flecha en L gruesa, rotondas y salidas de autovía con dibujos propios).',
-  'Inclinómetro: mejor lectura con el móvil en horizontal (se adapta a cómo gira la pantalla).',
-  'Resumen al terminar la ruta: pantalla de cierre más cuidada y una imagen para compartir con mejor diseño (WhatsApp, etc.).',
-  'Archivos GPX: lectura más fiable (más tipos de track) y mensajes claros al subir o si el archivo no trae una ruta válida.',
+  'Perfil con tu moto, historial de rutas y repetir una ruta; en el mapa, anillos de nivel alrededor de los avatares.',
+  'Rutas con amigos: invitaciones, visibilidad de rutas y lista de apuntados en rutas programadas.',
+  'Al compartir o copiar el enlace de una ruta programada, el mensaje sugerido incluye el día de la salida además del enlace.',
+  'Instalación en iPhone: en Safari usa Compartir → Añadir a pantalla de inicio. En Chrome, Compartir → Ver más → Añadir a pantalla de inicio.',
+  'Si vas a rodar y puede llover en tu ruta o cerca de ti (unos 10 km), verás un aviso unos segundos. Conduce con cuidado.',
   'Al planificar una ruta: si subes un archivo GPX, el buscador de destino se oculta y ves distancia y tiempo estimado; puedes volver al buscador con un solo toque. En salidas espontáneas el GPX no está en este cuadro (sigue disponible desde el mapa).',
-  'Ruta en marcha: el anfitrión puede pausar la grabación (almuerzo, café…) sin cerrar el grupo; el tiempo en pausa no cuenta en el resumen. Si cierras la web estando en pausa, al volver verás un aviso para continuar.',
-  'Gastos de comida o bebida (opcional): en el resumen puedes anotar el total en euros y ver cuánto toca por persona a escote; no sale en la imagen al compartir el resumen.',
+  'Archivos GPX: lectura más fiable (más tipos de track) y mensajes claros al subir o si el archivo no trae una ruta válida.',
+  'Resumen al terminar la ruta: pantalla de cierre más cuidada y una imagen para compartir con mejor diseño (WhatsApp, etc.).',
+  'Inclinómetro: mejor lectura con el móvil en horizontal (se adapta a cómo gira la pantalla).',
+  'Navegación por ruta: iconos de giro más claros (flecha en L gruesa, rotondas y salidas de autovía con dibujos propios).',
+  'Mapa al grabar: la cámara se aleja un poco cuando vas más rápido y se carga más mapa de reserva al girar la vista con el rumbo, para que no se vean huecos en los bordes.',
+  'Inclinómetro: a muy baja velocidad se apoya más en la gravedad (moto parada o casi); al ir más rápido combina giro, gravedad y la física de la curva para que el ángulo sea más estable y fiel.',
   'Dos ceros guardados: uno con el móvil en el soporte o manillar y otro en bolsillo o MirrorLink; al terminar la cuenta atrás del modo bolsillo se ajusta el cero con el teléfono ya guardado.',
   'Si llevas el móvil suelto en el pantalón, la inclinación va más suavizada para que en la pantalla de la moto no salten tanto los números.',
-  'Si vas a rodar y puede llover en tu ruta o cerca de ti (unos 10 km), verás un aviso unos segundos. Conduce con cuidado.',
-  'Instalación en iPhone: en Safari usa Compartir → Añadir a pantalla de inicio. En Chrome, Compartir → Ver más → Añadir a pantalla de inicio.',
-  'Rutas con amigos: invitaciones, visibilidad de rutas y lista de apuntados en rutas programadas.',
-  'Al compartir o copiar el enlace de una ruta programada, el mensaje sugerido incluye el día de la salida (por ejemplo: «Apúntate a la ruta … el 15 de abril de 2026 desde este enlace») además del URL.',
-  'Perfil con tu moto, historial de rutas y repetir una ruta; en el mapa, anillos de nivel alrededor de los avatares.',
+  'Ruta en marcha: el anfitrión puede pausar la grabación (almuerzo, café…) sin cerrar el grupo; el tiempo en pausa no cuenta en el resumen. Si cierras la web estando en pausa, al volver verás un aviso para continuar.',
+  'Gastos de comida o bebida (opcional): en el resumen puedes anotar el total en euros y ver cuánto toca por persona a escote; no sale en la imagen al compartir el resumen.',
+  'En ruta como anfitrión: el panel inferior ya no recorta los botones Pausa y Finalizar en pantallas estrechas, y están disponibles desde que empieza la grabación (sin esperar a recorrer un mínimo de metros).',
+  'Si sales de la ruta como invitado con la marcha en curso, verás el mismo resumen y se te sumarán los puntos con las mismas reglas que al terminar; volverás al menú al cerrar el resumen (guardando o no en el historial).',
 ];
 
 export default function WhatsNewModal() {
