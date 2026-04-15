@@ -1,5 +1,5 @@
 MotoRide — registro de contexto / cambios recientes
-Ultima actualizacion: 2026-04-15 (HUD navegacion — iconos vectoriales y rotonda con salida)
+Ultima actualizacion: 2026-04-15 (GPS mapa — activo en sesion, no solo al grabar)
 
 === Contacto y soporte ===
 - Correo publico de contacto: motorideapp1@gmail.com
@@ -308,3 +308,7 @@ Fecha: 2026-04-14
 - Rotonda: círculo + arco de sentido + **número de salida** (OSRM `exit`); salida de rotonda con flecha clara.
 - `src/hooks/useNavigation.ts`: estado `roundaboutExit` desde el siguiente paso OSRM.
 - `src/components/MapView.tsx`: contenedor del icono con gradiente y sin rotación que escalonaba bordes.
+
+=== CORRECCION — UBICACION NO VISIBLE FUERA DE GRABACION ===
+- Problema: `useLocationTracking` solo estaba activo con `isRecording && !ridePaused`, así que al abrir el mapa sin haber iniciado ruta (o en pausa) no había fix GPS y el marcador no aparecía.
+- Cambio: tracking activo con grupo válido (`groupId` y no `REPEATED`). Inclinómetro y métricas de ruta siguen ligados a `rideActive`.
