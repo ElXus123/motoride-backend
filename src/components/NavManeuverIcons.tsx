@@ -1,6 +1,6 @@
 /**
- * Iconos de maniobra para navegación OSRM: estilo plano, relleno / trazo grueso,
- * giro en L con esquina redondeada; variantes para rotonda y enlaces.
+ * Iconos de maniobra OSRM: trazo vectorial limpio (sin superposición fill+stroke
+ * que genera bordes dentados). Rotondas: anillo visible + número de salida.
  */
 
 import type { ReactNode } from 'react';
@@ -8,25 +8,38 @@ import type { ReactNode } from 'react';
 type Props = {
   maneuverType?: string;
   maneuverModifier?: string;
+  /** OSRM `maneuver.exit` (1-based), solo rotondas. */
+  roundaboutExit?: number | null;
   size?: number;
   className?: string;
 };
 
 const VB = '0 0 64 64';
 
-/** Giro 90° a la izquierda: trazo grueso en L + punta. */
+/** Flecha en punta triangular (relleno sólido). */
+function ArrowHead({ x, y, rotDeg }: { x: number; y: number; rotDeg: number }) {
+  return (
+    <path
+      fill="currentColor"
+      transform={`translate(${x} ${y}) rotate(${rotDeg})`}
+      d="M 0 -7 L 7 7 L -7 7 Z"
+    />
+  );
+}
+
+/** Giro ~90° a la izquierda: solo trazo + cabeza. */
 function LeftTurn90Flat() {
   return (
     <>
       <path
         fill="none"
         stroke="currentColor"
-        strokeWidth="9"
+        strokeWidth="7.5"
         strokeLinecap="round"
         strokeLinejoin="round"
-        d="M 44 56 V 30 Q 44 16 30 16 H 18"
+        d="M 38 54 V 30 Q 38 17 26 17 H 16"
       />
-      <path fill="currentColor" d="M 18 8 L 6 18 L 18 24 V 16 H 28 Q 36 16 36 24 V 56 H 44 V 30 Q 44 10 26 10 H 18 V 8 Z" />
+      <ArrowHead x={16} y={17} rotDeg={-90} />
     </>
   );
 }
@@ -37,32 +50,61 @@ function RightTurn90Flat() {
       <path
         fill="none"
         stroke="currentColor"
-        strokeWidth="9"
+        strokeWidth="7.5"
         strokeLinecap="round"
         strokeLinejoin="round"
-        d="M 44 56 V 30 Q 44 16 30 16 H 18"
+        d="M 38 54 V 30 Q 38 17 26 17 H 16"
       />
-      <path fill="currentColor" d="M 18 8 L 6 18 L 18 24 V 16 H 28 Q 36 16 36 24 V 56 H 44 V 30 Q 44 10 26 10 H 18 V 8 Z" />
+      <ArrowHead x={16} y={17} rotDeg={-90} />
     </g>
   );
 }
 
 function StraightArrow() {
-  return <path fill="currentColor" d="M 32 6 L 18 26 H 26 V 56 H 38 V 26 H 46 Z" />;
+  return (
+    <>
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="7.5"
+        strokeLinecap="round"
+        d="M 32 50 V 14"
+      />
+      <ArrowHead x={32} y={14} rotDeg={0} />
+    </>
+  );
 }
 
 function SlightLeft() {
   return (
-    <g transform="translate(32 32) rotate(-36) translate(-32 -32)">
-      <path fill="currentColor" d="M 32 8 L 18 52 H 28 L 32 34 L 36 52 H 46 Z" />
+    <g transform="translate(32 32) rotate(-32) translate(-32 -32)">
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="7.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M 32 50 L 32 22 Q 32 14 24 14 H 14"
+      />
+      <ArrowHead x={14} y={14} rotDeg={-90} />
     </g>
   );
 }
 
 function SlightRight() {
   return (
-    <g transform="translate(32 32) rotate(36) translate(-32 -32)">
-      <path fill="currentColor" d="M 32 8 L 18 52 H 28 L 32 34 L 36 52 H 46 Z" />
+    <g transform="translate(64 0) scale(-1 1)">
+      <g transform="translate(32 32) rotate(-32) translate(-32 -32)">
+        <path
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="7.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M 32 50 L 32 22 Q 32 14 24 14 H 14"
+        />
+        <ArrowHead x={14} y={14} rotDeg={-90} />
+      </g>
     </g>
   );
 }
@@ -73,12 +115,12 @@ function SharpLeft() {
       <path
         fill="none"
         stroke="currentColor"
-        strokeWidth="9"
+        strokeWidth="7.5"
         strokeLinecap="round"
         strokeLinejoin="round"
-        d="M 48 56 V 32 Q 48 10 26 10 H 12"
+        d="M 42 54 V 34 Q 42 12 22 12 H 12"
       />
-      <path fill="currentColor" d="M 12 4 L 4 14 L 12 18 V 10 H 24 Q 42 10 42 28 V 56 H 48 V 32 Q 48 6 22 6 H 12 V 4 Z" />
+      <ArrowHead x={12} y={12} rotDeg={-90} />
     </>
   );
 }
@@ -89,42 +131,77 @@ function SharpRight() {
       <path
         fill="none"
         stroke="currentColor"
-        strokeWidth="9"
+        strokeWidth="7.5"
         strokeLinecap="round"
         strokeLinejoin="round"
-        d="M 48 56 V 32 Q 48 10 26 10 H 12"
+        d="M 42 54 V 34 Q 42 12 22 12 H 12"
       />
-      <path fill="currentColor" d="M 12 4 L 4 14 L 12 18 V 10 H 24 Q 42 10 42 28 V 56 H 48 V 32 Q 48 6 22 6 H 12 V 4 Z" />
+      <ArrowHead x={12} y={12} rotDeg={-90} />
     </g>
   );
 }
 
 function UTurn() {
   return (
-    <path
-      fill="currentColor"
-      d="M 44 56 V 40 Q 44 12 22 12 Q 8 12 8 26 V 34 H 4 L 14 8 L 24 34 H 20 V 28 Q 20 18 28 18 H 36 Q 40 18 40 26 V 56 Z"
-    />
-  );
-}
-
-/** Entrar / seguir rotonda: círculo grueso incompleto + flecha tangencial. */
-function RoundaboutIcon() {
-  return (
     <>
       <path
         fill="none"
         stroke="currentColor"
-        strokeWidth="7"
+        strokeWidth="7.5"
         strokeLinecap="round"
-        d="M 48 24 A 20 20 0 1 1 24 48"
+        strokeLinejoin="round"
+        d="M 44 52 V 38 Q 44 10 22 10 Q 10 10 10 22 V 30"
       />
-      <path fill="currentColor" d="M 10 28 L 4 20 L 4 36 Z" />
+      <ArrowHead x={10} y={30} rotDeg={180} />
     </>
   );
 }
 
-/** Salir de rotonda: arco + flecha saliendo. */
+/**
+ * Rotonda: círculo grueso + arco de sentido + número de salida centrado.
+ */
+function RoundaboutIcon({ exit }: { exit: number | null }) {
+  const label =
+    exit != null && exit > 0 && exit <= 99 ? String(exit) : '?';
+  const fs = label.length > 1 ? 22 : 28;
+  return (
+    <>
+      <circle
+        cx="32"
+        cy="32"
+        r="21"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="6.5"
+        strokeLinecap="round"
+      />
+      {/* Indicación de sentido horario (entrada típica por abajo) */}
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="4"
+        strokeLinecap="round"
+        d="M 32 54 A 22 22 0 0 1 10 32"
+        opacity="0.88"
+      />
+      <text
+        x="32"
+        y="32"
+        textAnchor="middle"
+        dominantBaseline="central"
+        fill="currentColor"
+        fontSize={fs}
+        fontWeight="800"
+        fontFamily="system-ui, -apple-system, Segoe UI, sans-serif"
+        style={{ userSelect: 'none' }}
+      >
+        {label}
+      </text>
+    </>
+  );
+}
+
+/** Salir de rotonda: arco de circulación + flecha que sale. */
 function ExitRoundaboutIcon() {
   return (
     <>
@@ -133,33 +210,70 @@ function ExitRoundaboutIcon() {
         stroke="currentColor"
         strokeWidth="6"
         strokeLinecap="round"
-        d="M 42 38 A 16 16 0 1 1 28 18"
+        d="M 42 38 A 17 17 0 1 1 30 16"
       />
-      <path fill="currentColor" d="M 6 22 L 2 16 L 2 28 Z" />
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="6.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M 10 28 L 4 22"
+      />
+      <ArrowHead x={4} y={22} rotDeg={-125} />
     </>
   );
 }
 
-/** Salida / entrada autovía: vía principal + rampa divergente. */
 function HighwayRamp({ side }: { side: 'left' | 'right' }) {
   const ramp = (
     <>
-      <path fill="currentColor" d="M 26 8 H 18 V 56 H 26 V 8 Z" />
       <path
-        fill="currentColor"
-        d="M 34 56 L 34 34 L 52 18 L 52 56 H 58 V 14 L 36 32 L 36 56 Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="7"
+        strokeLinecap="round"
+        d="M 24 52 V 16"
       />
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M 32 52 L 32 36 L 50 18"
+      />
+      <ArrowHead x={50} y={18} rotDeg={45} />
     </>
   );
   if (side === 'right') return <>{ramp}</>;
-  return <g transform="translate(64 0) scale(-1 1)">{ramp}</g>;
+  return (
+    <g transform="translate(64 0) scale(-1 1)">
+      {ramp}
+    </g>
+  );
 }
 
 function ForkIcon() {
   return (
     <>
-      <path fill="currentColor" d="M 28 8 H 20 V 56 H 28 V 8 Z" />
-      <path fill="currentColor" d="M 36 8 H 44 V 30 L 54 18 V 8 H 46 V 26 L 38 34 V 8 Z" />
+      <path fill="none" stroke="currentColor" strokeWidth="7" strokeLinecap="round" d="M 32 52 V 20" />
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="7"
+        strokeLinecap="round"
+        d="M 32 20 L 20 12"
+      />
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="7"
+        strokeLinecap="round"
+        d="M 32 20 L 44 12"
+      />
+      <ArrowHead x={20} y={12} rotDeg={-130} />
+      <ArrowHead x={44} y={12} rotDeg={130} />
     </>
   );
 }
@@ -167,8 +281,16 @@ function ForkIcon() {
 function MergeIcon() {
   return (
     <>
-      <path fill="currentColor" d="M 24 8 H 16 V 56 H 24 V 8 Z" />
-      <path fill="currentColor" d="M 40 56 V 38 L 54 24 L 40 10 V 8 H 32 V 12 L 44 24 L 32 36 V 56 Z" />
+      <path fill="none" stroke="currentColor" strokeWidth="7" strokeLinecap="round" d="M 22 52 V 28" />
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M 42 52 L 42 38 L 28 24"
+      />
+      <ArrowHead x={22} y={28} rotDeg={180} />
     </>
   );
 }
@@ -184,7 +306,9 @@ function ArrivePin({ size, className }: { size: number; className?: string }) {
   );
 }
 
-function modifierBucket(m: string): 'left' | 'slight_left' | 'sharp_left' | 'right' | 'slight_right' | 'sharp_right' | 'straight' | 'uturn' | 'none' {
+function modifierBucket(
+  m: string
+): 'left' | 'slight_left' | 'sharp_left' | 'right' | 'slight_right' | 'sharp_right' | 'straight' | 'uturn' | 'none' {
   if (m.includes('uturn') || m.includes('u-turn')) return 'uturn';
   if (m.includes('sharp') && m.includes('left')) return 'sharp_left';
   if (m.includes('sharp') && m.includes('right')) return 'sharp_right';
@@ -196,13 +320,26 @@ function modifierBucket(m: string): 'left' | 'slight_left' | 'sharp_left' | 'rig
   return 'none';
 }
 
-export function ManeuverTurnIcon({ maneuverType, maneuverModifier, size = 28, className }: Props) {
+export function ManeuverTurnIcon({
+  maneuverType,
+  maneuverModifier,
+  roundaboutExit,
+  size = 28,
+  className,
+}: Props) {
   const t = (maneuverType || '').toLowerCase().trim();
   const modRaw = (maneuverModifier || '').toLowerCase().trim();
   const bucket = modifierBucket(modRaw);
 
   const wrap = (children: ReactNode) => (
-    <svg width={size} height={size} viewBox={VB} className={`shrink-0 ${className || ''}`} aria-hidden>
+    <svg
+      width={size}
+      height={size}
+      viewBox={VB}
+      className={`shrink-0 overflow-visible ${className || ''}`}
+      shapeRendering="geometricPrecision"
+      aria-hidden
+    >
       {children}
     </svg>
   );
@@ -212,7 +349,9 @@ export function ManeuverTurnIcon({ maneuverType, maneuverModifier, size = 28, cl
   }
 
   if (t === 'roundabout' || t === 'rotary' || t === 'roundabout turn') {
-    return wrap(<RoundaboutIcon />);
+    const ex =
+      typeof roundaboutExit === 'number' && roundaboutExit > 0 ? Math.min(99, Math.round(roundaboutExit)) : null;
+    return wrap(<RoundaboutIcon exit={ex} />);
   }
 
   if (t === 'exit roundabout' || t === 'exit rotary') {
@@ -271,6 +410,18 @@ export function ManeuverTurnIcon({ maneuverType, maneuverModifier, size = 28, cl
   return wrap(<StraightArrow />);
 }
 
-export function getDirectionIcon(type?: string, modifier?: string, size = 28) {
-  return <ManeuverTurnIcon maneuverType={type} maneuverModifier={modifier} size={size} />;
+export function getDirectionIcon(
+  type?: string,
+  modifier?: string,
+  size = 28,
+  roundaboutExit?: number | null
+) {
+  return (
+    <ManeuverTurnIcon
+      maneuverType={type}
+      maneuverModifier={modifier}
+      size={size}
+      roundaboutExit={roundaboutExit}
+    />
+  );
 }

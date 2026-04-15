@@ -14,6 +14,8 @@ export interface NavState {
   routeGeometry?: any;
   maneuverType?: string;
   maneuverModifier?: string;
+  /** OSRM: número de salida en rotonda (1-based), para el icono. */
+  roundaboutExit?: number | null;
 }
 
 /** Normaliza texto tipo cartel OSRM "A-1; Madrid" → más legible */
@@ -225,6 +227,7 @@ export const useNavigation = (currentLocation: { lat: number; lng: number } | nu
     instructionDetail: null,
     maneuverLocation: null,
     routeGeometry: null,
+    roundaboutExit: null,
   });
 
   const lastFetchLoc = useRef<{ lat: number; lng: number } | null>(null);
@@ -240,11 +243,23 @@ export const useNavigation = (currentLocation: { lat: number; lng: number } | nu
 
   useEffect(() => {
     if (!routeGeoJSON) {
-      setNavState((prev) => ({ ...prev, instruction: 'Sin ruta cargada', instructionDetail: null, routeGeometry: null }));
+      setNavState((prev) => ({
+        ...prev,
+        instruction: 'Sin ruta cargada',
+        instructionDetail: null,
+        routeGeometry: null,
+        roundaboutExit: null,
+      }));
       return;
     }
     if (!currentLocation) {
-      setNavState((prev) => ({ ...prev, instruction: 'Buscando GPS...', instructionDetail: null, routeGeometry: null }));
+      setNavState((prev) => ({
+        ...prev,
+        instruction: 'Buscando GPS...',
+        instructionDetail: null,
+        routeGeometry: null,
+        roundaboutExit: null,
+      }));
       return;
     }
 
@@ -331,6 +346,7 @@ export const useNavigation = (currentLocation: { lat: number; lng: number } | nu
               const { instruction, detail } = buildStepInstruction(nextStep, isOnRoute);
 
               const maneuverLoc = { lat: maneuver.location[1], lng: maneuver.location[0] };
+              const rbExit = getRoundaboutExitNumber(maneuver as Record<string, unknown>);
 
               setNavState({
                 distanceToNext: Math.round(getDistance(currentLocation.lat, currentLocation.lng, maneuverLoc.lat, maneuverLoc.lng)),
@@ -342,6 +358,12 @@ export const useNavigation = (currentLocation: { lat: number; lng: number } | nu
                 routeGeometry: geometry,
                 maneuverType: maneuver.type,
                 maneuverModifier: maneuver.modifier || '',
+                roundaboutExit:
+                  maneuver.type === 'roundabout' ||
+                  maneuver.type === 'rotary' ||
+                  maneuver.type === 'roundabout turn'
+                    ? rbExit
+                    : null,
               });
             }
           })
@@ -357,6 +379,7 @@ export const useNavigation = (currentLocation: { lat: number; lng: number } | nu
               routeGeometry: null,
               maneuverType: undefined,
               maneuverModifier: undefined,
+              roundaboutExit: null,
             }));
           });
       } else {
