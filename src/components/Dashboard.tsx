@@ -18,6 +18,8 @@ import { db, logOut, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppMessage } from '../contexts/AppMessageContext';
 import { parseGPX, parseRouteData } from '../lib/gpx';
+import { getLineCoordinates } from '../lib/navigationPose';
+import { getDistance } from '../lib/geoUtils';
 import { calculateLevel, formatDurationHoursMinutes } from '../lib/utils';
 import { requestJson } from '../lib/network';
 import { LEAFLET_LIGHT_ERROR_TILE } from '../lib/leafletTiles';
@@ -572,8 +574,25 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           return;
         }
         setGpxData(JSON.stringify(parsed));
+        const line = getLineCoordinates(parsed);
+        let distKm = 0;
+        if (line.length >= 2) {
+          for (let i = 1; i < line.length; i++) {
+            const a = line[i - 1];
+            const b = line[i];
+            if (a?.length >= 2 && b?.length >= 2) {
+              distKm += getDistance(a[1], a[0], b[1], b[0]) / 1000;
+            }
+          }
+        }
+        setRouteStats({ distance: Math.round(distKm * 10) / 10, duration: 0 });
         setRouteGenerated(true);
-        showMessage({ variant: 'success', title: 'GPX', message: 'Ruta cargada. Puedes crear el grupo o generar otra ruta.' });
+        showMessage({
+          variant: 'success',
+          title: 'GPX',
+          message:
+            'Trazado cargado. Verás la ruta aquí abajo; usa «Previsualizar» para verla en el mapa y luego «Iniciar» o «Programar».',
+        });
       } catch (err) {
         console.error(err);
         showMessage({ variant: 'error', title: 'GPX', message: 'No se pudo leer el archivo.' });
@@ -638,6 +657,24 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           setProvince(rev.province);
           setMunicipality(rev.municipality);
         }
+      }
+    }
+    if ((!provFinal || !munFinal) && gpxData) {
+      try {
+        const geo = parseRouteData(gpxData);
+        const coords = getLineCoordinates(geo);
+        const c0 = coords[0];
+        if (c0 && c0.length >= 2) {
+          const rev = await resolveProvinceMunicipalityFromCoords(c0[1], c0[0]);
+          if (rev) {
+            provFinal = rev.province;
+            munFinal = rev.municipality;
+            setProvince(rev.province);
+            setMunicipality(rev.municipality);
+          }
+        }
+      } catch {
+        /* ignore */
       }
     }
 
@@ -1706,7 +1743,6 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                   <button 
                     onClick={() => { 
                       setIsEsporadica(true); 
-                      setGpxData(null); 
                       setRouteType('instant');
                     }}
                     className={`p-4 rounded-2xl border-2 transition-all text-left ${isEsporadica ? 'border-orange-500 bg-orange-500/5' : 'border-zinc-800 bg-zinc-950 text-zinc-500'}`}
@@ -1723,6 +1759,61 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                     <p className="font-bold text-sm">Planificar</p>
                     <p className="text-[10px] opacity-60">Ruta con destino</p>
                   </button>
+                </div>
+
+                {/* GPX: visible en cualquier modo (antes solo en «Planificar» y quedaba oculto en «Espontánea»). */}
+                <div className="p-5 bg-zinc-950 border border-amber-500/25 rounded-2xl space-y-3">
+                  <div className="flex items-center gap-2 text-amber-500/90">
+                    <Upload size={16} className="shrink-0" />
+                    <p className="text-xs font-bold uppercase tracking-wider">Ruta desde archivo .gpx</p>
+                  </div>
+                  <p className="text-[11px] text-zinc-500 leading-snug">
+                    Opcional: sube un track para ver el trazado y guardarlo al crear la ruta.
+                  </p>
+                  <label className="flex flex-col items-center justify-center w-full min-h-[120px] border-2 border-dashed border-zinc-800 rounded-2xl cursor-pointer hover:bg-zinc-800/30 transition-all">
+                    <div className="flex flex-col items-center justify-center py-5">
+                      <Upload className="w-8 h-8 mb-2 text-zinc-500" />
+                      <p className="text-sm text-zinc-400">
+                        {gpxData ? 'Archivo cargado — toca para cambiar' : 'Toca para subir .gpx'}
+                      </p>
+                    </div>
+                    <input type="file" className="hidden" accept=".gpx,application/gpx+xml" onChange={handleFileUpload} />
+                  </label>
+                  {gpxData && routeStats && (
+                    <div className="space-y-3 animate-in fade-in slide-in-from-top-2">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="bg-zinc-900 p-3 rounded-xl border border-zinc-800">
+                          <p className="text-[10px] text-zinc-500 uppercase font-bold">Distancia (GPX)</p>
+                          <p className="text-lg font-black text-white">{routeStats.distance.toFixed(1)} km</p>
+                        </div>
+                        <div className="bg-zinc-900 p-3 rounded-xl border border-zinc-800">
+                          <p className="text-[10px] text-zinc-500 uppercase font-bold">Duración</p>
+                          <p className="text-lg font-black text-white">
+                            {routeStats.duration > 0 ? formatDurationHoursMinutes(routeStats.duration) : '—'}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setShowPreviewModal({
+                            name: 'Previsualización GPX',
+                            routeGeoJSON: gpxData,
+                            municipality: municipality || '—',
+                            province: province || '—',
+                            description,
+                            scheduledTimestamp:
+                              routeType === 'scheduled' && scheduledDate && scheduledTime
+                                ? new Date(`${scheduledDate}T${scheduledTime}`).getTime()
+                                : Date.now(),
+                          })
+                        }
+                        className="w-full py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2"
+                      >
+                        <Search size={14} /> Ver trazado en el mapa
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {!isEsporadica && (
@@ -1849,24 +1940,6 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                       )}
                     </div>
 
-                    <div className="relative">
-                      <div className="absolute inset-0 flex items-center">
-                        <div className="w-full border-t border-zinc-800"></div>
-                      </div>
-                      <div className="relative flex justify-center text-xs uppercase">
-                        <span className="bg-zinc-900 px-2 text-zinc-500">O sube tu archivo</span>
-                      </div>
-                    </div>
-
-                    <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-zinc-800 rounded-2xl cursor-pointer hover:bg-zinc-800/30 transition-all">
-                      <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                        <Upload className="w-8 h-8 mb-2 text-zinc-500" />
-                        <p className="text-sm text-zinc-400">
-                          {gpxData ? 'Ruta lista' : 'Subir archivo .gpx'}
-                        </p>
-                      </div>
-                      <input type="file" className="hidden" accept=".gpx" onChange={handleFileUpload} />
-                    </label>
                   </div>
                 )}
               </div>
