@@ -23,7 +23,7 @@ import { getDistance } from '../lib/geoUtils';
 import { calculateLevel, formatDurationHoursMinutes } from '../lib/utils';
 import { requestJson } from '../lib/network';
 import { LEAFLET_LIGHT_ERROR_TILE } from '../lib/leafletTiles';
-import { Users, Plus, LogOut, User as UserIcon, Activity, Trash2, Calendar, MapPin, Search, Clock, ChevronRight, Upload, X, Map as MapIcon, HeartHandshake, CircleDollarSign, Shield, CheckCircle2, AlertCircle, Mail, Share2, Copy, Check, Loader2, Globe, Lock, Inbox, UserPlus, ListOrdered } from 'lucide-react';
+import { Users, Plus, LogOut, User as UserIcon, Activity, Trash2, Calendar, MapPin, Search, Clock, ChevronRight, Upload, X, Map as MapIcon, HeartHandshake, CircleDollarSign, Shield, CheckCircle2, AlertCircle, Mail, Share2, Copy, Check, Loader2, Globe, Lock, Inbox, UserPlus, ListOrdered, FileText } from 'lucide-react';
 import { copyTextToClipboard, getSupportMailtoHref } from '../lib/clientInfo';
 import { generateGroupCode } from '../lib/groupCode';
 import {
@@ -154,6 +154,8 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   const [municipality, setMunicipality] = useState('');
   const [description, setDescription] = useState('');
   const [gpxData, setGpxData] = useState<string | null>(null);
+  /** true solo si el trazado viene de un .gpx subido (oculta el buscador; la ruta OSRM no activa esto). */
+  const [gpxFromFile, setGpxFromFile] = useState(false);
   /** Solo para rutas programadas (`isScheduled`): quién ve la ruta en "Explorar". */
   const [routeListing, setRouteListing] = useState<RouteListing>('public');
   const [destination, setDestination] = useState('');
@@ -224,6 +226,30 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
 
   const [routeStats, setRouteStats] = useState<{ distance: number, duration: number } | null>(null);
   const [routeGenerated, setRouteGenerated] = useState(false);
+
+  /** Velocidad media turística (km/h) para estimar tiempo en rutas GPX sin tiempos en el archivo. */
+  const GPX_ESTIMATED_SPEED_KMH = 45;
+
+  const clearPlannerSearchState = useCallback(() => {
+    setDestination('');
+    setDestinationPreview(null);
+    setDestinationSuggestions([]);
+    setDestinationHighlightIdx(0);
+    destinationPickedRef.current = null;
+  }, []);
+
+  const clearGpxRouteState = useCallback(() => {
+    setGpxData(null);
+    setGpxFromFile(false);
+    setRouteStats(null);
+    setRouteGenerated(false);
+  }, []);
+
+  const estimateMinutesFromGpxDistanceKm = useCallback((distKm: number) => {
+    const d = Math.max(0, distKm);
+    if (d <= 0) return 0;
+    return Math.max(1, Math.round((d / GPX_ESTIMATED_SPEED_KMH) * 60));
+  }, []);
 
   // Constants for provinces
   const PROVINCES = [
@@ -325,7 +351,9 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     setShowCreateModal(false);
     setLoading(false);
     setRouteListing('public');
-  }, []);
+    clearGpxRouteState();
+    clearPlannerSearchState();
+  }, [clearGpxRouteState, clearPlannerSearchState]);
 
   useEffect(() => {
     if (showSupportModal) {
@@ -574,6 +602,8 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           return;
         }
         setGpxData(JSON.stringify(parsed));
+        setGpxFromFile(true);
+        clearPlannerSearchState();
         const line = getLineCoordinates(parsed);
         let distKm = 0;
         if (line.length >= 2) {
@@ -585,13 +615,14 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
             }
           }
         }
-        setRouteStats({ distance: Math.round(distKm * 10) / 10, duration: 0 });
+        const roundedDist = Math.round(distKm * 10) / 10;
+        const estMin = estimateMinutesFromGpxDistanceKm(roundedDist);
+        setRouteStats({ distance: roundedDist, duration: estMin });
         setRouteGenerated(true);
         showMessage({
           variant: 'success',
           title: 'GPX',
-          message:
-            'Trazado cargado. Verás la ruta aquí abajo; usa «Previsualizar» para verla en el mapa y luego «Iniciar» o «Programar».',
+          message: 'Trazado cargado. Tiempo estimado a ~45 km/h de media; puedes ver el mapa y crear la ruta.',
         });
       } catch (err) {
         console.error(err);
@@ -713,6 +744,14 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
 
   const generateLocalRoute = async () => {
     if (!destination.trim() || !user) return;
+    if (gpxFromFile) {
+      showMessage({
+        variant: 'info',
+        title: 'Archivo GPX',
+        message: 'Quita el archivo GPX con «Usar búsqueda» o cambia de archivo si quieres generar la ruta por destino.',
+      });
+      return;
+    }
     setLoading(true);
     try {
       if (!navigator.geolocation) {
@@ -776,6 +815,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       const data = await requestJson<any>(url, { timeoutMs: 15000, retries: 0, backoffMs: 500 });
       if (data.code === 'Ok') {
         const route = data.routes[0];
+        setGpxFromFile(false);
         setGpxData(JSON.stringify(route.geometry));
         setRouteStats({
           distance: route.distance / 1000,
@@ -1744,6 +1784,8 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                     onClick={() => { 
                       setIsEsporadica(true); 
                       setRouteType('instant');
+                      clearGpxRouteState();
+                      clearPlannerSearchState();
                     }}
                     className={`p-4 rounded-2xl border-2 transition-all text-left ${isEsporadica ? 'border-orange-500 bg-orange-500/5' : 'border-zinc-800 bg-zinc-950 text-zinc-500'}`}
                   >
@@ -1752,68 +1794,15 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                     <p className="text-[10px] opacity-60">Sin trazado fijo</p>
                   </button>
                   <button 
-                    onClick={() => setIsEsporadica(false)}
+                    onClick={() => {
+                      setIsEsporadica(false);
+                    }}
                     className={`p-4 rounded-2xl border-2 transition-all text-left ${!isEsporadica ? 'border-blue-500 bg-blue-500/5' : 'border-zinc-800 bg-zinc-950 text-zinc-500'}`}
                   >
                     <MapIcon size={20} className={!isEsporadica ? 'text-blue-500 mb-2' : 'mb-2'} />
                     <p className="font-bold text-sm">Planificar</p>
                     <p className="text-[10px] opacity-60">Ruta con destino</p>
                   </button>
-                </div>
-
-                {/* GPX: visible en cualquier modo (antes solo en «Planificar» y quedaba oculto en «Espontánea»). */}
-                <div className="p-5 bg-zinc-950 border border-amber-500/25 rounded-2xl space-y-3">
-                  <div className="flex items-center gap-2 text-amber-500/90">
-                    <Upload size={16} className="shrink-0" />
-                    <p className="text-xs font-bold uppercase tracking-wider">Ruta desde archivo .gpx</p>
-                  </div>
-                  <p className="text-[11px] text-zinc-500 leading-snug">
-                    Opcional: sube un track para ver el trazado y guardarlo al crear la ruta.
-                  </p>
-                  <label className="flex flex-col items-center justify-center w-full min-h-[120px] border-2 border-dashed border-zinc-800 rounded-2xl cursor-pointer hover:bg-zinc-800/30 transition-all">
-                    <div className="flex flex-col items-center justify-center py-5">
-                      <Upload className="w-8 h-8 mb-2 text-zinc-500" />
-                      <p className="text-sm text-zinc-400">
-                        {gpxData ? 'Archivo cargado — toca para cambiar' : 'Toca para subir .gpx'}
-                      </p>
-                    </div>
-                    <input type="file" className="hidden" accept=".gpx,application/gpx+xml" onChange={handleFileUpload} />
-                  </label>
-                  {gpxData && routeStats && (
-                    <div className="space-y-3 animate-in fade-in slide-in-from-top-2">
-                      <div className="grid grid-cols-2 gap-2">
-                        <div className="bg-zinc-900 p-3 rounded-xl border border-zinc-800">
-                          <p className="text-[10px] text-zinc-500 uppercase font-bold">Distancia (GPX)</p>
-                          <p className="text-lg font-black text-white">{routeStats.distance.toFixed(1)} km</p>
-                        </div>
-                        <div className="bg-zinc-900 p-3 rounded-xl border border-zinc-800">
-                          <p className="text-[10px] text-zinc-500 uppercase font-bold">Duración</p>
-                          <p className="text-lg font-black text-white">
-                            {routeStats.duration > 0 ? formatDurationHoursMinutes(routeStats.duration) : '—'}
-                          </p>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setShowPreviewModal({
-                            name: 'Previsualización GPX',
-                            routeGeoJSON: gpxData,
-                            municipality: municipality || '—',
-                            province: province || '—',
-                            description,
-                            scheduledTimestamp:
-                              routeType === 'scheduled' && scheduledDate && scheduledTime
-                                ? new Date(`${scheduledDate}T${scheduledTime}`).getTime()
-                                : Date.now(),
-                          })
-                        }
-                        className="w-full py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2"
-                      >
-                        <Search size={14} /> Ver trazado en el mapa
-                      </button>
-                    </div>
-                  )}
                 </div>
 
                 {!isEsporadica && (
@@ -1838,108 +1827,190 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
 
                 {!isEsporadica && (
                   <div className="mt-4 space-y-4 animate-in fade-in slide-in-from-top-2">
-                    <div className="p-5 bg-zinc-950 border border-blue-500/30 rounded-2xl space-y-4 shadow-lg shadow-blue-500/5">
-                      <div className="flex items-center gap-2 text-blue-400 mb-2">
-                        <Search size={16} />
-                        <p className="text-xs font-bold uppercase tracking-wider">Planificador de Ruta</p>
+                    {/* Archivo GPX: solo en Planificar; en Espontánea se usa la lupa del mapa */}
+                    <div className="p-5 bg-zinc-950 border border-amber-500/30 rounded-2xl space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 text-amber-500/95 min-w-0">
+                          <FileText size={18} className="shrink-0" />
+                          <p className="text-xs font-bold uppercase tracking-wider truncate">Archivo .gpx (opcional)</p>
+                        </div>
                       </div>
-                      <p className="text-[11px] text-zinc-500 leading-snug -mt-1 mb-1">
-                        Para un destino fiable, elige un resultado de la lista (o coordenadas). Así usamos el punto exacto del mapa, no solo el texto.
+                      <p className="text-[11px] text-zinc-500 leading-snug">
+                        Si subes un track, se oculta el buscador y usamos solo ese trazado. El tiempo es estimado (~{GPX_ESTIMATED_SPEED_KMH} km/h de media en carretera).
                       </p>
-                      <div className="relative">
-                        <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" size={16} />
-                        <input 
-                          placeholder="¿A dónde quieres ir? (Ej: Salou, Tarragona)" 
-                          value={destination}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            setDestination(v);
-                            const p = destinationPickedRef.current;
-                            if (p && !destinationLabelsMatch(v, p.label)) {
-                              destinationPickedRef.current = null;
-                            }
-                          }}
-                          onKeyDown={(e) => {
-                            if (destinationSuggestions.length === 0) return;
-                            if (e.key === 'ArrowDown') {
-                              e.preventDefault();
-                              setDestinationHighlightIdx((i) =>
-                                Math.min(i + 1, destinationSuggestions.length - 1)
-                              );
-                            } else if (e.key === 'ArrowUp') {
-                              e.preventDefault();
-                              setDestinationHighlightIdx((i) => Math.max(i - 1, 0));
-                            } else if (e.key === 'Enter') {
-                              e.preventDefault();
-                              const item = destinationSuggestions[destinationHighlightIdx];
-                              if (item) applyDestinationSuggestion(item);
-                            }
-                          }}
-                          autoComplete="off"
-                          className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-3 text-sm outline-none focus:border-blue-500 transition-all"
-                        />
-                        {destinationPreview &&
-                          destinationSuggestions.length === 0 &&
-                          (destinationPreview === 'No encontrado' ||
-                            destinationPreview === 'Error al buscar' ||
-                            destinationPreview === 'Demasiadas peticiones, espera un poco...') && (
-                            <p className="text-[10px] text-amber-500/90 mt-1.5 ml-1 leading-snug">
-                              {destinationPreview}
-                            </p>
+                      <label className="flex flex-col items-center justify-center w-full min-h-[100px] border-2 border-dashed border-zinc-800 rounded-2xl cursor-pointer hover:bg-zinc-900/50 transition-all">
+                        <div className="flex flex-col items-center justify-center py-4 px-2">
+                          <Upload className="w-7 h-7 mb-2 text-zinc-500" />
+                          <p className="text-sm text-zinc-400 text-center">
+                            {gpxFromFile ? 'Archivo cargado — toca para cambiar' : 'Toca para elegir .gpx'}
+                          </p>
+                        </div>
+                        <input type="file" className="hidden" accept=".gpx,application/gpx+xml" onChange={handleFileUpload} />
+                      </label>
+                    </div>
+
+                    {gpxFromFile && gpxData && routeStats ? (
+                      <div className="p-5 bg-zinc-950 border border-emerald-500/35 rounded-2xl space-y-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-xs font-bold uppercase tracking-wider text-emerald-400/90">Ruta desde GPX</p>
+                            <p className="text-[11px] text-zinc-500 mt-1">Listo para guardar. Puedes ver el mapa abajo.</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              clearGpxRouteState();
+                              clearPlannerSearchState();
+                            }}
+                            className="shrink-0 text-xs font-bold text-zinc-400 hover:text-white px-3 py-1.5 rounded-lg bg-zinc-800/80 border border-zinc-700"
+                          >
+                            Usar búsqueda
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="bg-zinc-900/90 p-3 rounded-xl border border-zinc-800">
+                            <p className="text-[10px] text-zinc-500 uppercase font-bold">Distancia</p>
+                            <p className="text-lg font-black text-white tabular-nums">{routeStats.distance.toFixed(1)} km</p>
+                          </div>
+                          <div className="bg-zinc-900/90 p-3 rounded-xl border border-zinc-800">
+                            <p className="text-[10px] text-zinc-500 uppercase font-bold">Tiempo est.</p>
+                            <p className="text-lg font-black text-white">{formatDurationHoursMinutes(routeStats.duration)}</p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setShowPreviewModal({
+                              name: 'Tu ruta GPX',
+                              routeGeoJSON: gpxData,
+                              municipality: municipality || '—',
+                              province: province || '—',
+                              description,
+                              scheduledTimestamp:
+                                routeType === 'scheduled' && scheduledDate && scheduledTime
+                                  ? new Date(`${scheduledDate}T${scheduledTime}`).getTime()
+                                  : Date.now(),
+                            })
+                          }
+                          className="w-full py-3 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2"
+                        >
+                          <MapIcon size={18} /> Ver en el mapa
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="p-5 bg-zinc-950 border border-blue-500/30 rounded-2xl space-y-4 shadow-lg shadow-blue-500/5">
+                        <div className="flex items-center gap-2 text-blue-400">
+                          <Search size={16} />
+                          <p className="text-xs font-bold uppercase tracking-wider">Buscar destino</p>
+                        </div>
+                        <p className="text-[11px] text-zinc-500 leading-snug">
+                          Elige un resultado de la lista o escribe coordenadas. Luego pulsa Generar para calcular la ruta por carretera.
+                        </p>
+                        <div className="relative">
+                          <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" size={16} />
+                          <input
+                            placeholder="¿A dónde quieres ir? (Ej: Salou, Tarragona)"
+                            value={destination}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setDestination(v);
+                              const p = destinationPickedRef.current;
+                              if (p && !destinationLabelsMatch(v, p.label)) {
+                                destinationPickedRef.current = null;
+                              }
+                            }}
+                            onKeyDown={(e) => {
+                              if (destinationSuggestions.length === 0) return;
+                              if (e.key === 'ArrowDown') {
+                                e.preventDefault();
+                                setDestinationHighlightIdx((i) =>
+                                  Math.min(i + 1, destinationSuggestions.length - 1)
+                                );
+                              } else if (e.key === 'ArrowUp') {
+                                e.preventDefault();
+                                setDestinationHighlightIdx((i) => Math.max(i - 1, 0));
+                              } else if (e.key === 'Enter') {
+                                e.preventDefault();
+                                const item = destinationSuggestions[destinationHighlightIdx];
+                                if (item) applyDestinationSuggestion(item);
+                              }
+                            }}
+                            autoComplete="off"
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-3 text-sm outline-none focus:border-blue-500 transition-all"
+                          />
+                          {destinationPreview &&
+                            destinationSuggestions.length === 0 &&
+                            (destinationPreview === 'No encontrado' ||
+                              destinationPreview === 'Error al buscar' ||
+                              destinationPreview === 'Demasiadas peticiones, espera un poco...') && (
+                              <p className="text-[10px] text-amber-500/90 mt-1.5 ml-1 leading-snug">
+                                {destinationPreview}
+                              </p>
+                            )}
+                          {destinationSuggestions.length > 0 && (
+                            <div className="mt-2 max-h-40 overflow-y-auto overscroll-contain rounded-xl border border-zinc-800 bg-zinc-950/90 [transform:translateZ(0)] shadow-inner">
+                              {destinationSuggestions.map((item, idx) => (
+                                <button
+                                  key={`sug-${idx}-${String(item.lat)}-${String(item.lon)}-${(item.display_name || '').slice(0, 24)}`}
+                                  type="button"
+                                  onMouseDown={(ev) => ev.preventDefault()}
+                                  onClick={() => applyDestinationSuggestion(item)}
+                                  className={`w-full text-left px-3 py-2.5 text-xs transition-colors border-b border-zinc-800/80 last:border-b-0 ${
+                                    idx === destinationHighlightIdx
+                                      ? 'bg-blue-500/20 text-white ring-inset ring-1 ring-blue-500/40'
+                                      : 'text-zinc-300 hover:bg-zinc-800'
+                                  }`}
+                                >
+                                  {item.display_name}
+                                </button>
+                              ))}
+                            </div>
                           )}
-                        {destinationSuggestions.length > 0 && (
-                          <div className="mt-2 max-h-40 overflow-y-auto overscroll-contain rounded-xl border border-zinc-800 bg-zinc-950/90 [transform:translateZ(0)] shadow-inner">
-                            {destinationSuggestions.map((item, idx) => (
-                              <button
-                                key={`sug-${idx}-${String(item.lat)}-${String(item.lon)}-${(item.display_name || '').slice(0, 24)}`}
-                                type="button"
-                                onMouseDown={(ev) => ev.preventDefault()}
-                                onClick={() => applyDestinationSuggestion(item)}
-                                className={`w-full text-left px-3 py-2.5 text-xs transition-colors border-b border-zinc-800/80 last:border-b-0 ${
-                                  idx === destinationHighlightIdx
-                                    ? 'bg-blue-500/20 text-white ring-inset ring-1 ring-blue-500/40'
-                                    : 'text-zinc-300 hover:bg-zinc-800'
-                                }`}
-                              >
-                                {item.display_name}
-                              </button>
-                            ))}
+                        </div>
+                        <button
+                          onClick={() => void generateLocalRoute()}
+                          disabled={!destination.trim() || loading}
+                          className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-sm font-bold transition-all shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2"
+                        >
+                          {loading ? <Clock className="animate-spin" size={18} /> : <MapIcon size={18} />}
+                          {routeGenerated && !gpxFromFile ? 'Listo' : 'Generar ruta'}
+                        </button>
+
+                        {routeGenerated && routeStats && !gpxFromFile && (
+                          <div className="flex flex-col gap-3 animate-in fade-in slide-in-from-top-2 pt-1 border-t border-zinc-800/80">
+                            <div className="grid grid-cols-2 gap-2">
+                              <div className="bg-zinc-900 p-3 rounded-xl border border-zinc-800">
+                                <p className="text-[10px] text-zinc-500 uppercase font-bold">Distancia</p>
+                                <p className="text-lg font-black text-white">{routeStats.distance.toFixed(1)} km</p>
+                              </div>
+                              <div className="bg-zinc-900 p-3 rounded-xl border border-zinc-800">
+                                <p className="text-[10px] text-zinc-500 uppercase font-bold">Duración</p>
+                                <p className="text-lg font-black text-white">{formatDurationHoursMinutes(routeStats.duration)}</p>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setShowPreviewModal({
+                                  name: 'Previsualización',
+                                  routeGeoJSON: gpxData,
+                                  municipality,
+                                  province,
+                                  description,
+                                  scheduledTimestamp:
+                                    routeType === 'scheduled' && scheduledDate && scheduledTime
+                                      ? new Date(`${scheduledDate}T${scheduledTime}`).getTime()
+                                      : Date.now(),
+                                })
+                              }
+                              className="w-full py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2"
+                            >
+                              <Search size={14} /> Ver en el mapa
+                            </button>
                           </div>
                         )}
                       </div>
-                      <div className="grid grid-cols-3 gap-2">
-                      </div>
-                      <button 
-                        onClick={generateLocalRoute}
-                        disabled={!destination.trim() || loading}
-                        className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-sm font-bold transition-all shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2"
-                      >
-                        {loading ? <Clock className="animate-spin" size={18} /> : <MapIcon size={18} />}
-                        {routeGenerated ? 'Listo' : 'Generar Ruta'}
-                      </button>
-
-                      {routeGenerated && routeStats && (
-                        <div className="flex flex-col gap-3 animate-in fade-in slide-in-from-top-2">
-                          <div className="grid grid-cols-2 gap-2">
-                            <div className="bg-zinc-900 p-3 rounded-xl border border-zinc-800">
-                              <p className="text-[10px] text-zinc-500 uppercase font-bold">Distancia</p>
-                              <p className="text-lg font-black text-white">{routeStats.distance.toFixed(1)} km</p>
-                            </div>
-                            <div className="bg-zinc-900 p-3 rounded-xl border border-zinc-800">
-                              <p className="text-[10px] text-zinc-500 uppercase font-bold">Duración</p>
-                              <p className="text-lg font-black text-white">{formatDurationHoursMinutes(routeStats.duration)}</p>
-                            </div>
-                          </div>
-                          <button 
-                            onClick={() => setShowPreviewModal({ name: 'Previsualización', routeGeoJSON: gpxData, municipality, province, description })}
-                            className="w-full py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2"
-                          >
-                            <Search size={14} /> Previsualizar Ruta
-                          </button>
-                        </div>
-                      )}
-                    </div>
-
+                    )}
                   </div>
                 )}
               </div>
