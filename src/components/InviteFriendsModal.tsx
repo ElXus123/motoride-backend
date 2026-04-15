@@ -74,6 +74,11 @@ export default function InviteFriendsModal({
     if (!open) setScheduleShareCopied(null);
   }, [open]);
 
+  /** Otra ruta / otro código: no mezclar estado "enviado" entre grupos. */
+  useEffect(() => {
+    setSentIds({});
+  }, [groupId]);
+
   const invite = async (friendUid: string) => {
     if (!user) return;
     const targetUid = String(friendUid || '').trim();
@@ -265,15 +270,15 @@ export default function InviteFriendsModal({
                             {f.isPremium === true ? <PremiumBadge compact /> : null}
                           </p>
                           <p className="text-[11px] text-zinc-500">
-                            {inRoute ? 'Ya está en esta ruta' : sent ? 'Invitación enviada' : 'En tu lista de amigos'}
+                            {inRoute
+                              ? 'Ya está en esta ruta'
+                              : sent
+                                ? 'Aún no está en el grupo — puedes reenviar la invitación'
+                                : 'En tu lista de amigos'}
                           </p>
                         </div>
                         {inRoute ? (
                           <span className="text-[10px] font-bold text-emerald-400 shrink-0 px-2">En ruta</span>
-                        ) : sent ? (
-                          <span className="flex items-center gap-1 text-emerald-400 text-xs font-bold shrink-0">
-                            <Check size={16} /> Listo
-                          </span>
                         ) : (
                           <button
                             type="button"
@@ -282,7 +287,7 @@ export default function InviteFriendsModal({
                             className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl bg-orange-500 hover:bg-orange-400 text-white text-xs font-black disabled:opacity-50"
                           >
                             {sendingId === fid ? <Loader2 size={14} className="animate-spin" /> : <UserPlus size={14} />}
-                            Invitar
+                            {sent ? 'Reenviar' : 'Invitar'}
                           </button>
                         )}
                       </li>

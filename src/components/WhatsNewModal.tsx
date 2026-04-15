@@ -3,7 +3,7 @@ import { Check } from 'lucide-react';
 import appLogo from '../../ICONO.png';
 
 /** Sube este valor cuando cambien las novedades para volver a mostrar el aviso una vez por dispositivo. */
-export const WHATS_NEW_VERSION = '2026.04.27';
+export const WHATS_NEW_VERSION = '2026.04.28';
 
 const STORAGE_KEY = 'motoride_whats_new_seen_version';
 
@@ -18,6 +18,31 @@ export type ChangelogEntry = {
 
 /** Orden visual: más recientes arriba; `updatedAt` descendente. */
 const CHANGELOG: ChangelogEntry[] = [
+  {
+    kind: 'novedad',
+    text: 'Enlace con ?join= a una ruta programada: la app pregunta si quieres apuntarte; al confirmar quedas en la lista sin entrar al mapa GPS (el mapa en vivo sigue siendo desde 1 h antes, como siempre).',
+    updatedAt: '2026-04-28T12:00:00',
+  },
+  {
+    kind: 'novedad',
+    text: 'Invitar desde el mapa: si tu amigo aún no se ha unido al grupo, puedes pulsar «Reenviar» para volver a mandarle la invitación a la bandeja.',
+    updatedAt: '2026-04-28T11:50:00',
+  },
+  {
+    kind: 'arreglo',
+    text: 'Invitados en una ruta en vivo: corregidas las reglas del servidor para poder abandonar el grupo con «Salir»; si algo falla, verás un mensaje en lugar de quedar bloqueado.',
+    updatedAt: '2026-04-28T11:40:00',
+  },
+  {
+    kind: 'arreglo',
+    text: 'Al salir de la ruta con el modal de invitar abierto o con resumen de participante: el resumen queda por encima y se cierra el invitar para que «Salir» y «Continuar» respondan bien.',
+    updatedAt: '2026-04-28T11:35:00',
+  },
+  {
+    kind: 'novedad',
+    text: 'Rutas programadas: si vas apuntado (no solo el organizador), también puedes invitar amigos y copiar código o enlace desde «Mis próximas rutas».',
+    updatedAt: '2026-04-28T11:30:00',
+  },
   {
     kind: 'novedad',
     text: 'Resumen al terminar la ruta: un solo botón «Continuar». El historial solo guarda rutas de más de 5 km; los puntos y la distancia total en tu perfil se suman siempre.',
