@@ -67,6 +67,9 @@ import { generateGroupCode } from '../lib/groupCode';
 import { motion, AnimatePresence } from 'motion/react';
 import appIcon from '../../ICONO.png';
 
+/** Rutas con distancia ≤ esta cifra (km) no crean entrada en `rideHistory`; puntos y km al perfil sí. */
+const MIN_KM_TO_SAVE_RIDE_HISTORY = 5;
+
 /**
  * Modo bolsillo / MirrorLink: el móvil no va fijado al chasis → el IMU no mide la inclinación de la moto.
  * En **bolsillo** damos aún más peso al GPS que en MirrorLink (menos lecturas “locas” del sensor).
@@ -91,6 +94,9 @@ function blendLeanPocketMirror(
 
 /** Por debajo de esto el modelo v·ω/g pierde sentido; alineado con bolsillo (blend desde 3 m/s). */
 const MIN_SPEED_MPS_GPS_LEAN = 3.2;
+
+/** Metros recorridos sin grabación (solo anfitrión) antes de iniciar la grabación sola. */
+const AUTO_RECORD_IDLE_METERS = 20;
 
 /** Importe en € desde texto del usuario (coma o punto). */
 function parseEuroAmount(raw: string): number | null {
@@ -545,8 +551,10 @@ export default function MapView({
   const [distance, setDistance] = useState(0); // in km
   const [localDistance, setLocalDistance] = useState(0); // for auto-start and save check
   const lastLocRef = useRef<{lat: number, lng: number} | null>(null);
-  const [autoStarted, setAutoStarted] = useState(false);
-  
+  const idleMotionBeforeRecordMRef = useRef(0);
+  const idlePrevLocForAutoRecordRef = useRef<{ lat: number; lng: number } | null>(null);
+  const idleAutoRecordFiringRef = useRef(false);
+
   // New state for ranking and alerts
   const [score, setScore] = useState(0);
   const [inCurve, setInCurve] = useState(false);
@@ -2365,17 +2373,12 @@ export default function MapView({
             setScore((s) => s + (Math.floor(newDist) - Math.floor(prev)));
           }
 
-          // Auto-start recording for group if host and distance >= 100m (0.1km)
-          if (isHost && newDist >= 0.1 && !isRecording && !autoStarted) {
-            setAutoStarted(true);
-            toggleRecording();
-          }
           return newDist;
         });
       }
       lastLocRef.current = currentLocation;
     }
-  }, [currentLocation, rideActive, isRecording, isHost, autoStarted, touchLockKind]);
+  }, [currentLocation, rideActive, isRecording, isHost, touchLockKind]);
 
   const handleFileUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     const input = e.currentTarget;
@@ -2726,6 +2729,47 @@ export default function MapView({
       }
     }
   };
+
+  const toggleRecordingRef = useRef(toggleRecording);
+  toggleRecordingRef.current = toggleRecording;
+
+  /** Anfitrión: si aún no grabas y te mueves ~20 m, inicia la grabación (misma lógica que el botón). */
+  useEffect(() => {
+    if (isRecording) {
+      idleMotionBeforeRecordMRef.current = 0;
+      idlePrevLocForAutoRecordRef.current = null;
+      idleAutoRecordFiringRef.current = false;
+      return;
+    }
+    if (!isHost || groupId === 'REPEATED' || !currentLocation) return;
+
+    const prev = idlePrevLocForAutoRecordRef.current;
+    idlePrevLocForAutoRecordRef.current = {
+      lat: currentLocation.lat,
+      lng: currentLocation.lng,
+    };
+    if (!prev) return;
+
+    const segmentM = getDistance(
+      prev.lat,
+      prev.lng,
+      currentLocation.lat,
+      currentLocation.lng
+    );
+    if (Number.isFinite(segmentM) && segmentM > 0) {
+      idleMotionBeforeRecordMRef.current += segmentM;
+    }
+
+    if (
+      idleMotionBeforeRecordMRef.current >= AUTO_RECORD_IDLE_METERS &&
+      !idleAutoRecordFiringRef.current
+    ) {
+      idleAutoRecordFiringRef.current = true;
+      void Promise.resolve(toggleRecordingRef.current()).finally(() => {
+        idleAutoRecordFiringRef.current = false;
+      });
+    }
+  }, [currentLocation, isRecording, isHost, groupId]);
 
   const toggleRidePause = async () => {
     if (!isHost || !isRecording) return;
@@ -3463,7 +3507,7 @@ export default function MapView({
               </button>
               
               {showSettings && (
-                <div className="absolute top-0 right-14 bg-zinc-950/95 backdrop-blur-xl border border-zinc-800 rounded-3xl p-2 shadow-2xl flex flex-col gap-1 min-w-[220px] max-w-[min(90vw,300px)] z-[2001] animate-in fade-in slide-in-from-right-4 duration-200 max-h-[calc(100vh-140px)] overflow-y-auto custom-scrollbar">
+                <div className="absolute top-0 right-14 bg-zinc-950/95 backdrop-blur-xl border border-zinc-800 rounded-3xl p-2 sm:p-2.5 shadow-2xl flex flex-col gap-1 min-w-[220px] max-w-[min(90vw,300px)] landscape:min-w-[260px] landscape:max-w-[min(92vw,400px)] landscape:gap-1.5 z-[2001] animate-in fade-in slide-in-from-right-4 duration-200 max-h-[min(calc(100dvh-5rem),calc(100svh-5rem),85vh)] landscape:max-h-[min(88dvh,calc(100dvh-2.5rem))] overflow-y-auto overscroll-contain custom-scrollbar">
                   <div className="px-4 py-2 border-b border-zinc-800 mb-1">
                     <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Opciones de Mapa</p>
                   </div>
@@ -4533,35 +4577,50 @@ export default function MapView({
                 </div>
               )}
 
-              <div className="space-y-3">
-                <button 
-                  onClick={async () => {
-                    if (!summaryData || !user?.uid) return;
-                    try {
-                      if (
-                        summaryData.rideSessionKey &&
-                        ridePointsCommittedSessionKeyRef.current !== summaryData.rideSessionKey
-                      ) {
-                        const ok = await commitRidePointsToProfile({
-                          distance: summaryData.distance,
-                          score: summaryData.score,
-                          leftTurns: summaryData.leftTurns,
-                          rightTurns: summaryData.rightTurns,
-                          maxLeanLeft: summaryData.maxLeanLeft,
-                          maxLeanRight: summaryData.maxLeanRight,
+              <p className="mb-4 text-[11px] leading-relaxed text-zinc-500">
+                Historial solo para rutas mayores a {MIN_KM_TO_SAVE_RIDE_HISTORY} km. Puntos y distancia total en tu perfil
+                siempre.
+              </p>
+
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!summaryData || !user?.uid) return;
+                  try {
+                    if (
+                      summaryData.rideSessionKey &&
+                      ridePointsCommittedSessionKeyRef.current !== summaryData.rideSessionKey
+                    ) {
+                      const ok = await commitRidePointsToProfile({
+                        distance: summaryData.distance,
+                        score: summaryData.score,
+                        leftTurns: summaryData.leftTurns,
+                        rightTurns: summaryData.rightTurns,
+                        maxLeanLeft: summaryData.maxLeanLeft,
+                        maxLeanRight: summaryData.maxLeanRight,
+                      });
+                      if (!ok) {
+                        showMessage({
+                          variant: 'error',
+                          title: 'Puntos',
+                          message:
+                            'No se pudieron sumar los puntos al perfil. Revisa la conexión e inténtalo de nuevo.',
                         });
-                        if (!ok) {
-                          showMessage({
-                            variant: 'error',
-                            title: 'Puntos',
-                            message: 'No se pudieron sumar los puntos al perfil. Revisa la conexión e inténtalo de nuevo.',
-                          });
-                          return;
-                        }
-                        ridePointsCommittedSessionKeyRef.current = summaryData.rideSessionKey;
+                        return;
                       }
+                      ridePointsCommittedSessionKeyRef.current = summaryData.rideSessionKey;
+                    }
+
+                    const rideDistanceKm =
+                      typeof summaryData.distance === 'number' && Number.isFinite(summaryData.distance)
+                        ? summaryData.distance
+                        : 0;
+                    const shouldPersistHistory = rideDistanceKm > MIN_KM_TO_SAVE_RIDE_HISTORY;
+
+                    if (shouldPersistHistory) {
                       const draft = readRideDraft();
-                      const pathForHistory = Array.isArray(draft?.path) && draft.path.length > 0 ? draft.path : recordedPath;
+                      const pathForHistory =
+                        Array.isArray(draft?.path) && draft.path.length > 0 ? draft.path : recordedPath;
                       await addDoc(collection(db, 'rideHistory'), {
                         uid: user.uid,
                         groupId,
@@ -4587,54 +4646,36 @@ export default function MapView({
                             }
                           : {}),
                       });
-                      clearRideDraft();
-                      setFoodExpenseInput('');
-                      setShowSummary(false);
-                      showMessage({ variant: 'success', title: 'Historial', message: 'Ruta guardada en tu historial.' });
-                      completeParticipantLeaveIfNeeded();
-                    } catch (e) {
-                      console.error(e);
-                      showMessage({ variant: 'error', title: 'Historial', message: 'Error al guardar en el historial.' });
+                      showMessage({
+                        variant: 'success',
+                        title: 'Historial',
+                        message: 'Ruta guardada en tu historial.',
+                      });
+                    } else {
+                      showMessage({
+                        variant: 'success',
+                        title: 'Sesión registrada',
+                        message: `Puntos y distancia sumados en tu perfil. Rutas de ${MIN_KM_TO_SAVE_RIDE_HISTORY} km o menos no se guardan en el historial.`,
+                      });
                     }
-                  }}
-                  className="w-full bg-orange-500 hover:bg-orange-600 text-white font-black py-4 rounded-2xl transition-all shadow-lg shadow-orange-500/20"
-                >
-                  Guardar en Historial
-                </button>
-                <button 
-                  onClick={async () => {
-                    if (summaryData?.rideSessionKey && user?.uid) {
-                      if (ridePointsCommittedSessionKeyRef.current !== summaryData.rideSessionKey) {
-                        const ok = await commitRidePointsToProfile({
-                          distance: summaryData.distance,
-                          score: summaryData.score,
-                          leftTurns: summaryData.leftTurns,
-                          rightTurns: summaryData.rightTurns,
-                          maxLeanLeft: summaryData.maxLeanLeft,
-                          maxLeanRight: summaryData.maxLeanRight,
-                        });
-                        if (ok) {
-                          ridePointsCommittedSessionKeyRef.current = summaryData.rideSessionKey;
-                        } else {
-                          showMessage({
-                            variant: 'error',
-                            title: 'Puntos',
-                            message:
-                              'Los puntos de esta ruta no se han podido sumar al perfil (conexión o servidor). Los intentaremos de nuevo si reaparece el resumen al volver a entrar.',
-                          });
-                        }
-                      }
-                    }
+
                     clearRideDraft();
                     setFoodExpenseInput('');
                     setShowSummary(false);
                     completeParticipantLeaveIfNeeded();
-                  }}
-                  className="w-full bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-4 rounded-2xl transition-all"
-                >
-                  No guardar en historial (los puntos sí cuentan para el nivel)
-                </button>
-              </div>
+                  } catch (e) {
+                    console.error(e);
+                    showMessage({
+                      variant: 'error',
+                      title: 'Resumen',
+                      message: 'No se pudo completar la acción. Inténtalo de nuevo.',
+                    });
+                  }
+                }}
+                className="w-full rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 py-4 font-black text-white shadow-[0_12px_40px_-8px_rgba(234,88,12,0.45)] transition-all hover:brightness-105 active:scale-[0.99]"
+              >
+                Continuar
+              </button>
             </div>
             </motion.div>
           </motion.div>

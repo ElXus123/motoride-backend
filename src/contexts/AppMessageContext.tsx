@@ -25,13 +25,13 @@ export function AppMessageProvider({ children }: { children: React.ReactNode }) 
       {children}
       {open && (
         <div
-          className="fixed inset-0 z-[100000] flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm"
+          className="fixed inset-0 z-[100000] flex items-center justify-center p-4 bg-zinc-950/85 backdrop-blur-md"
           role="alertdialog"
           aria-modal="true"
           aria-labelledby={open.title ? 'app-msg-title' : 'app-msg-body'}
           onClick={(e) => e.target === e.currentTarget && close()}
         >
-          <div className="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-3xl shadow-2xl overflow-hidden text-white">
+          <div className="w-full max-w-md overflow-hidden rounded-3xl border border-white/[0.08] bg-zinc-900/95 text-white shadow-[0_24px_80px_-12px_rgba(0,0,0,0.65)] ring-1 ring-white/[0.04]">
             <div className="p-5 sm:p-6">
               <div className="flex items-start gap-3">
                 {open.variant === 'error' ? (
@@ -56,11 +56,11 @@ export function AppMessageProvider({ children }: { children: React.ReactNode }) 
                 </div>
               </div>
             </div>
-            <div className="px-5 pb-5 sm:px-6 sm:pb-6">
+            <div className="border-t border-white/[0.06] bg-zinc-950/40 px-5 pb-5 pt-4 sm:px-6 sm:pb-6">
               <button
                 type="button"
                 onClick={close}
-                className="w-full bg-orange-500 hover:bg-orange-400 text-white font-black py-3 rounded-2xl transition-colors"
+                className="w-full rounded-2xl bg-gradient-to-r from-amber-500 to-orange-600 py-3 font-black text-white shadow-lg shadow-orange-500/20 transition-all hover:brightness-105 active:scale-[0.99]"
               >
                 Aceptar
               </button>

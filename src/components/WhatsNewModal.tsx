@@ -3,7 +3,7 @@ import { Check } from 'lucide-react';
 import appLogo from '../../ICONO.png';
 
 /** Sube este valor cuando cambien las novedades para volver a mostrar el aviso una vez por dispositivo. */
-export const WHATS_NEW_VERSION = '2026.04.25';
+export const WHATS_NEW_VERSION = '2026.04.27';
 
 const STORAGE_KEY = 'motoride_whats_new_seen_version';
 
@@ -20,13 +20,23 @@ export type ChangelogEntry = {
 const CHANGELOG: ChangelogEntry[] = [
   {
     kind: 'novedad',
-    text: 'Menú en apaisado: en el panel principal, con el móvil en horizontal, aparece una columna lateral con Crear ruta, Unirse con código e accesos rápidos (invitaciones, amigos, apoyar) para aprovechar mejor el alto útil y leer las listas con más comodidad.',
-    updatedAt: '2026-04-25T14:00:00',
+    text: 'Resumen al terminar la ruta: un solo botón «Continuar». El historial solo guarda rutas de más de 5 km; los puntos y la distancia total en tu perfil se suman siempre.',
+    updatedAt: '2026-04-27T14:00:00',
   },
   {
     kind: 'novedad',
-    text: 'Listado de novedades con etiqueta «Novedad» o «Arreglo», fecha y hora de cada cambio, y orden del más nuevo al más antiguo.',
-    updatedAt: '2026-04-25T13:45:00',
+    text: 'Interfaz más pulida: tipografía Plus Jakarta Sans, pantalla de acceso, avisos del sistema y cabecera del panel con un aspecto más claro y profesional.',
+    updatedAt: '2026-04-27T13:45:00',
+  },
+  {
+    kind: 'novedad',
+    text: 'Apaisado: el menú «Opciones de mapa» (rueda, Modificar ruta, capa lluvia, etc.) usa más alto útil y ancho, con scroll cómodo para ver toda la lista.',
+    updatedAt: '2026-04-26T12:00:00',
+  },
+  {
+    kind: 'novedad',
+    text: 'Anfitrión: si aún no has pulsado «Iniciar grabación», al moverte unos 20 m la app inicia la grabación sola (misma acción que el botón).',
+    updatedAt: '2026-04-26T11:45:00',
   },
   {
     kind: 'arreglo',
