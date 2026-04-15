@@ -1002,9 +1002,10 @@ export default function MapView({
   const angleHistoryRef = useRef<number[]>([]);
   const lastLeanAutoCalibMsRef = useRef(0);
 
-  // Activate real-time location tracking
+  // GPS del mapa y presencia en el grupo: siempre en sesión real (no solo al grabar ni solo sin pausa).
+  // Inclinómetro / km / trazado siguen condicionados por `rideActive` aparte.
   const { speed, heading, currentLocation, courseOverGround, horizontalAccuracy, error: gpsError } = useLocationTracking(
-    !!groupId && groupId !== 'REPEATED' && isRecording && !ridePaused,
+    !!groupId && groupId !== 'REPEATED',
     groupId,
     {
       score,
