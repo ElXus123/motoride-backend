@@ -58,7 +58,7 @@ import socket from '../lib/socket';
 import { useVoiceChat } from '../hooks/useVoiceChat';
 import PremiumBadge from './PremiumBadge';
 import InviteFriendsModal from './InviteFriendsModal';
-import { Upload, ArrowLeft, Copy, Check, Navigation, AlertTriangle, Play, Square, MapPin, Trophy, Bell, AlertCircle, Wrench, Fuel, X, Maximize, Minimize, Search, Share2, Menu, Target, LogOut, Users, UserPlus, Mic, MicOff, ShieldAlert, Activity, Layers, Lock, LockOpen, Smartphone, RotateCw, Crown, WifiOff, Monitor, Loader2, Mail, Ban, CloudRain } from 'lucide-react';
+import { Upload, ArrowLeft, Copy, Check, Navigation, AlertTriangle, Play, Square, MapPin, Trophy, Bell, AlertCircle, Wrench, Fuel, X, Maximize, Minimize, Search, Share2, Menu, Target, LogOut, Users, UserPlus, Mic, MicOff, ShieldAlert, Activity, Layers, Lock, LockOpen, Smartphone, RotateCw, Crown, WifiOff, Monitor, Loader2, Mail, Ban, CloudRain, Pause, Coffee } from 'lucide-react';
 import { getDirectionIcon } from './NavManeuverIcons';
 import { copyTextToClipboard, getSupportMailtoHref } from '../lib/clientInfo';
 import { formatNavDistanceMeters } from '../lib/navFormat';
@@ -90,6 +90,15 @@ function blendLeanPocketMirror(
 
 /** Por debajo de esto el modelo v·ω/g pierde sentido; alineado con bolsillo (blend desde 3 m/s). */
 const MIN_SPEED_MPS_GPS_LEAN = 3.2;
+
+/** Importe en € desde texto del usuario (coma o punto). */
+function parseEuroAmount(raw: string): number | null {
+  const t = raw.trim().replace(',', '.');
+  if (!t) return null;
+  const v = Number.parseFloat(t);
+  if (!Number.isFinite(v) || v < 0 || v > 1e7) return null;
+  return Math.round(v * 100) / 100;
+}
 
 /**
  * Valores válidos para `screen.orientation.lock()` (Screen Orientation API).
@@ -430,6 +439,7 @@ export default function MapView({
   onPromoteFromRepeat?: (liveGroupCode: string) => void;
 }) {
   const LOCAL_RIDE_DRAFT_KEY = `motoride_ride_draft_${groupId}`;
+  const SESSION_PAUSED_KEY = `motoride_session_paused_${groupId}`;
   const { user } = useAuth();
   const showMessage = useAppMessage();
   const [customName, setCustomName] = useState<string | null>(null);
@@ -984,14 +994,17 @@ export default function MapView({
   const isHostRef = useRef(!!isHost);
   isHostRef.current = !!isHost;
   const isRecording = group?.isRecording || false;
-  
+  const ridePaused = group?.ridePaused === true;
+  /** Ruta en curso sin pausa (conteo km/puntos, GPS activo). */
+  const rideActive = isRecording && !ridePaused;
+
   const headingHistoryRef = useRef<{heading: number, time: number}[]>([]);
   const angleHistoryRef = useRef<number[]>([]);
   const lastLeanAutoCalibMsRef = useRef(0);
 
   // Activate real-time location tracking
   const { speed, heading, currentLocation, courseOverGround, horizontalAccuracy, error: gpsError } = useLocationTracking(
-    true,
+    !!groupId && groupId !== 'REPEATED' && isRecording && !ridePaused,
     groupId,
     {
       score,
@@ -1003,6 +1016,8 @@ export default function MapView({
     },
     { enableHighAccuracy: gpsHighAccuracyEnabled }
   );
+
+  const speedForLean = rideActive ? speed : 0;
 
   const [precipitationBanner, setPrecipitationBanner] = useState(false);
   const lastPrecipBannerAtRef = useRef(0);
@@ -1029,7 +1044,7 @@ export default function MapView({
     resetMaxLean,
     calibrate,
     applyCalibrationStep,
-  } = useLeanAngle(speed, leanCalibrationProfile);
+  } = useLeanAngle(speedForLean, leanCalibrationProfile);
   const isScreenShareLikeMode = touchLockKind === 'mirrorlink' || forceLandscapeUi;
 
   const playTouchLockReadyFeedback = () => {
@@ -1079,6 +1094,7 @@ export default function MapView({
 
   // Auto-calibración en recta: antes era casi imposible (>40 km/h y rumbo ±1,5°). Afinado para uso real.
   useEffect(() => {
+    if (!rideActive) return;
     if (touchLockKind !== null) return;
     if (!currentLocation || headingOrCourseForTelemetry === null) return;
 
@@ -1118,11 +1134,11 @@ export default function MapView({
 
     const strength = currentSpeedKmh > 45 ? 0.022 : currentSpeedKmh > 30 ? 0.016 : 0.012;
     applyCalibrationStep(avgAngle, strength);
-  }, [touchLockKind, currentLocation, headingOrCourseForTelemetry, speed, sensorLeanAngle, applyCalibrationStep]);
+  }, [rideActive, touchLockKind, currentLocation, headingOrCourseForTelemetry, speed, sensorLeanAngle, applyCalibrationStep]);
 
   // Auto-calibración también en modo GPS normal (sin bolsillo/mirrorlink): ayuda a centrar en uso real continuado.
   useEffect(() => {
-    if (!isRecording || isPocketLocked || touchLockKind) return;
+    if (!rideActive || isPocketLocked || touchLockKind) return;
     if (!currentLocation || headingOrCourseForTelemetry === null) return;
 
     const speedKmh = (speed || 0) * 3.6;
@@ -1151,7 +1167,7 @@ export default function MapView({
     const strength = speedKmh > 40 ? 0.014 : speedKmh > 28 ? 0.01 : 0.008;
     applyCalibrationStep(avgAngle, strength);
   }, [
-    isRecording,
+    rideActive,
     isPocketLocked,
     touchLockKind,
     currentLocation,
@@ -1162,6 +1178,7 @@ export default function MapView({
 
   const leftTurnsRef = useRef(0);
   const rightTurnsRef = useRef(0);
+  /** Tiempo en pausa acumulado en esta sesión (ms), si el host no ha sincronizado aún con Firestore. */
   /** Entrada en curva con ≥20 km/h e inclinación >10° → permite puntuar al salir aunque baje un poco la velocidad. */
   const curveEntryQualifiedRef = useRef(false);
   const [parsedRoute, setParsedRoute] = useState<any>(null);
@@ -1604,7 +1621,7 @@ export default function MapView({
 
   // GPS-based lean angle estimation (fallback for when phone is in pocket/screen off)
   useEffect(() => {
-    if (!isRecording || !currentLocation || speed === null || speed < MIN_SPEED_MPS_GPS_LEAN) {
+    if (!rideActive || !currentLocation || speed === null || speed < MIN_SPEED_MPS_GPS_LEAN) {
       setEstimatedLeanAngle(0);
       return;
     }
@@ -1650,7 +1667,7 @@ export default function MapView({
       lastHeadingRef.current = headingOrCourseForTelemetry;
       lastHeadingTimeRef.current = Date.now();
     }
-  }, [currentLocation, headingOrCourseForTelemetry, speed, isRecording]);
+  }, [currentLocation, headingOrCourseForTelemetry, speed, rideActive]);
 
   useEffect(() => {
     if (currentLocation) {
@@ -1702,7 +1719,7 @@ export default function MapView({
   }, [
     touchLockKind,
     isPocketLocked,
-    isRecording,
+    rideActive,
     speed,
     estimatedLeanAngle,
     sensorLeanAngle,
@@ -1711,7 +1728,7 @@ export default function MapView({
 
   // Curve detection & scoring (>20 km/h e inclinación >10° al entrar; puntuación si hubo pico >10°)
   useEffect(() => {
-    if (!isRecording) return;
+    if (!rideActive) return;
     const currentSpeed = (speed || 0) * 3.6;
     const MIN_CURVE_SPEED_KMH = 20;
     const CURVE_START_DEG = 10;
@@ -1736,18 +1753,31 @@ export default function MapView({
       curveEntryQualifiedRef.current = false;
       setCurrentCurveMax(0);
     }
-  }, [leanAngle, isRecording, inCurve, currentCurveMax, speed]);
+  }, [leanAngle, rideActive, inCurve, currentCurveMax, speed]);
 
   useEffect(() => {
-    if (isRecording) return;
+    if (rideActive) return;
     setInCurve(false);
     setCurrentCurveMax(0);
     curveEntryQualifiedRef.current = false;
-  }, [isRecording]);
+  }, [rideActive]);
 
   const [showSummary, setShowSummary] = useState(false);
   const [summaryData, setSummaryData] = useState<any>(null);
   const [isSharingSummary, setIsSharingSummary] = useState(false);
+  const [showResumeSessionModal, setShowResumeSessionModal] = useState(false);
+  const [foodExpenseInput, setFoodExpenseInput] = useState('');
+
+  const memberCountForSplit = useMemo(() => {
+    if (!Array.isArray(group?.members) || group.members.length < 1) return 1;
+    return group.members.length;
+  }, [group?.members]);
+
+  const foodExpenseEurosParsed = useMemo(() => parseEuroAmount(foodExpenseInput), [foodExpenseInput]);
+  const splitPerPersonEuros =
+    foodExpenseEurosParsed != null && foodExpenseEurosParsed > 0 && memberCountForSplit > 0
+      ? Math.round((foodExpenseEurosParsed / memberCountForSplit) * 100) / 100
+      : null;
 
   const prevRecordingRef = useRef(isRecording);
   const recordingStartTimeRef = useRef<number>(0);
@@ -1759,6 +1789,9 @@ export default function MapView({
     if (draft?.summaryData) {
       setSummaryData(draft.summaryData);
       setRecordedPath(Array.isArray(draft.path) ? draft.path : []);
+      if (typeof draft.foodExpenseInput === 'string') {
+        setFoodExpenseInput(draft.foodExpenseInput);
+      }
       setShowSummary(true);
       // Borradores antiguos sin clave: asumimos que los puntos ya se sumaron al cerrar la ruta.
       ridePointsCommittedSessionKeyRef.current =
@@ -2010,6 +2043,20 @@ export default function MapView({
     }
   }, [isRecording, group?.startTime]);
 
+  useEffect(() => {
+    if (!isRecording || !ridePaused) {
+      setShowResumeSessionModal(false);
+      return;
+    }
+    try {
+      if (sessionStorage.getItem(SESSION_PAUSED_KEY) === '1') {
+        setShowResumeSessionModal(true);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [isRecording, ridePaused, groupId]);
+
   const commitRidePointsToProfile = useCallback(
     async (stats: {
       distance: number;
@@ -2070,7 +2117,12 @@ export default function MapView({
         return;
       }
 
-      const rideDuration = Math.max(0, Date.now() - startTime);
+      const effectivePausedMs =
+        (Number(group?.pausedTimeMs) || 0) +
+        (ridePaused && typeof group?.ridePauseStartedAt === 'number'
+          ? Math.max(0, Date.now() - group.ridePauseStartedAt)
+          : 0);
+      const rideDuration = Math.max(0, Date.now() - startTime - effectivePausedMs);
       const distanceBonus = Math.floor(localDistance / 100) * 20;
       const pointsConfig = await getActivePointsConfig();
       const adjustedBaseScore = Math.round(score * pointsConfig.baseMultiplier);
@@ -2103,7 +2155,12 @@ export default function MapView({
       if (!ok) {
         setSummaryData(currentRideStats);
         setShowSummary(true);
-        persistRideDraft({ createdAt: Date.now(), summaryData: currentRideStats, path: pathSnapshot });
+        persistRideDraft({
+          createdAt: Date.now(),
+          summaryData: currentRideStats,
+          path: pathSnapshot,
+          foodExpenseInput,
+        });
         return;
       }
 
@@ -2114,6 +2171,7 @@ export default function MapView({
         createdAt: Date.now(),
         summaryData: currentRideStats,
         path: pathSnapshot,
+        foodExpenseInput,
       });
 
       setRecordedPath([]);
@@ -2141,6 +2199,9 @@ export default function MapView({
     isRecording,
     user,
     group?.startTime,
+    group?.pausedTimeMs,
+    group?.ridePauseStartedAt,
+    ridePaused,
     localDistance,
     maxLeanLeft,
     maxLeanRight,
@@ -2151,10 +2212,12 @@ export default function MapView({
     currentLocation,
     group?.name,
     commitRidePointsToProfile,
+    foodExpenseInput,
   ]);
 
   // Record path locally from the moment movement starts
   useEffect(() => {
+    if (!rideActive) return;
     if (currentLocation) {
       setRecordedPath(prev => {
         const last = prev[prev.length - 1];
@@ -2164,10 +2227,11 @@ export default function MapView({
         return prev;
       });
     }
-  }, [currentLocation]);
+  }, [currentLocation, rideActive]);
 
   // Calculate distance and handle auto-start
   useEffect(() => {
+    if (!rideActive) return;
     if (currentLocation) {
       if (lastLocRef.current) {
         const R = 6371; // Earth's radius in km
@@ -2187,8 +2251,8 @@ export default function MapView({
 
           // Add 1 point per kilometer (d is in km)
           // Only update when we cross a kilometer boundary
-          if (isRecording && Math.floor(newDist) > Math.floor(prev)) {
-            setScore(s => s + (Math.floor(newDist) - Math.floor(prev)));
+          if (rideActive && Math.floor(newDist) > Math.floor(prev)) {
+            setScore((s) => s + (Math.floor(newDist) - Math.floor(prev)));
           }
 
           // Auto-start recording for group if host and distance >= 100m (0.1km)
@@ -2201,7 +2265,7 @@ export default function MapView({
       }
       lastLocRef.current = currentLocation;
     }
-  }, [currentLocation, isRecording, isHost, autoStarted, touchLockKind]);
+  }, [currentLocation, rideActive, isRecording, isHost, autoStarted, touchLockKind]);
 
   const handleFileUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     const input = e.currentTarget;
@@ -2498,19 +2562,68 @@ export default function MapView({
   const toggleRecording = async () => {
     if (!isHost) return;
     if (!isRecording) {
+      setFoodExpenseInput('');
       await requestPermission();
       setIsFollowing(true); // Force following when starting route
       try {
-        await updateDoc(doc(db, 'groups', groupId), { isRecording: true, startTime: Date.now() });
+        await updateDoc(doc(db, 'groups', groupId), {
+          isRecording: true,
+          startTime: Date.now(),
+          ridePaused: false,
+          pausedTimeMs: 0,
+          ridePauseStartedAt: deleteField(),
+        });
       } catch (error) {
         handleFirestoreError(error, OperationType.UPDATE, `groups/${groupId}`);
       }
     } else {
       try {
-        await updateDoc(doc(db, 'groups', groupId), { isRecording: false });
+        let pausedTotal = Number(group?.pausedTimeMs) || 0;
+        if (ridePaused && typeof group?.ridePauseStartedAt === 'number') {
+          pausedTotal += Math.max(0, Date.now() - group.ridePauseStartedAt);
+        }
+        await updateDoc(doc(db, 'groups', groupId), {
+          isRecording: false,
+          ridePaused: false,
+          ridePauseStartedAt: deleteField(),
+          ...(pausedTotal > 0 ? { pausedTimeMs: Math.round(pausedTotal) } : {}),
+        });
       } catch (error) {
         handleFirestoreError(error, OperationType.UPDATE, `groups/${groupId}`);
       }
+    }
+  };
+
+  const toggleRidePause = async () => {
+    if (!isHost || !isRecording) return;
+    try {
+      if (!ridePaused) {
+        await updateDoc(doc(db, 'groups', groupId), {
+          ridePaused: true,
+          ridePauseStartedAt: Date.now(),
+        });
+        try {
+          sessionStorage.setItem(SESSION_PAUSED_KEY, '1');
+        } catch {
+          /* ignore */
+        }
+      } else {
+        const started = typeof group?.ridePauseStartedAt === 'number' ? group.ridePauseStartedAt : Date.now();
+        const delta = Math.max(0, Date.now() - started);
+        const prev = Number(group?.pausedTimeMs) || 0;
+        await updateDoc(doc(db, 'groups', groupId), {
+          ridePaused: false,
+          ridePauseStartedAt: deleteField(),
+          pausedTimeMs: prev + delta,
+        });
+        try {
+          sessionStorage.removeItem(SESSION_PAUSED_KEY);
+        } catch {
+          /* ignore */
+        }
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `groups/${groupId}`);
     }
   };
 
@@ -3883,14 +3996,31 @@ export default function MapView({
               </div>
               
               {isHost && isRecording && localDistance >= 0.05 && (
-                <button 
-                  onClick={toggleRecording}
-                  className="flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 sm:py-1.5 bg-red-600 hover:bg-red-700 rounded-lg sm:rounded-xl shadow-lg shadow-red-600/20 transition-all active:scale-95 border border-white/20"
-                  title="Finalizar Ruta"
-                >
-                  <Square fill="currentColor" size={12} className="text-white sm:w-[14px] sm:h-[14px]" />
-                  <span className="text-[9px] sm:text-xs font-black text-white uppercase tracking-tight">Finalizar</span>
-                </button>
+                <div className="flex flex-col gap-1 w-full">
+                  <button
+                    type="button"
+                    onClick={() => void toggleRidePause()}
+                    className={`flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl shadow-lg transition-all active:scale-95 border ${
+                      ridePaused
+                        ? 'bg-emerald-600 hover:bg-emerald-500 border-white/20 shadow-emerald-600/20'
+                        : 'bg-amber-600/95 hover:bg-amber-500 border-white/20 shadow-amber-600/20'
+                    }`}
+                    title={ridePaused ? 'Reanudar grabación de ruta' : 'Pausar (almuerzo, café…) — el grupo sigue activo'}
+                  >
+                    {ridePaused ? <Play size={12} className="text-white sm:w-[14px] sm:h-[14px]" /> : <Pause size={12} className="text-white sm:w-[14px] sm:h-[14px]" />}
+                    <span className="text-[9px] sm:text-xs font-black text-white uppercase tracking-tight">
+                      {ridePaused ? 'Reanudar' : 'Pausa'}
+                    </span>
+                  </button>
+                  <button
+                    onClick={toggleRecording}
+                    className="flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 sm:py-1.5 bg-red-600 hover:bg-red-700 rounded-lg sm:rounded-xl shadow-lg shadow-red-600/20 transition-all active:scale-95 border border-white/20"
+                    title="Finalizar Ruta"
+                  >
+                    <Square fill="currentColor" size={12} className="text-white sm:w-[14px] sm:h-[14px]" />
+                    <span className="text-[9px] sm:text-xs font-black text-white uppercase tracking-tight">Finalizar</span>
+                  </button>
+                </div>
               )}
             </div>
           </div>
@@ -4219,6 +4349,38 @@ export default function MapView({
                 </div>
               </div>
 
+              {isHost && (
+                <div className="mb-6 rounded-2xl border border-zinc-800/80 bg-zinc-950/60 p-4 text-left">
+                  <div className="mb-2 flex items-center gap-2">
+                    <Coffee size={16} className="text-amber-500/90 shrink-0" aria-hidden />
+                    <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
+                      Gastos comida / bebida (€)
+                    </p>
+                  </div>
+                  <p className="mb-3 text-[11px] text-zinc-500 leading-snug">
+                    Opcional. No se incluye en la imagen al compartir. Reparto a escote entre {memberCountForSplit}{' '}
+                    {memberCountForSplit === 1 ? 'persona' : 'personas'} del grupo.
+                  </p>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    autoComplete="off"
+                    placeholder="Ej. 24,50"
+                    value={foodExpenseInput}
+                    onChange={(e) => setFoodExpenseInput(e.target.value)}
+                    className="w-full rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500/80"
+                  />
+                  {foodExpenseEurosParsed != null && foodExpenseEurosParsed > 0 && splitPerPersonEuros != null && (
+                    <p className="mt-2 text-xs text-emerald-400/95 font-semibold tabular-nums">
+                      Total {foodExpenseEurosParsed.toFixed(2)} € · A pagar por persona ~ {splitPerPersonEuros.toFixed(2)} €
+                    </p>
+                  )}
+                  {foodExpenseInput.trim() !== '' && foodExpenseEurosParsed === null && (
+                    <p className="mt-2 text-[11px] text-amber-400/90">Introduce un importe válido (número ≥ 0).</p>
+                  )}
+                </div>
+              )}
+
               <div className="space-y-3">
                 <button 
                   onClick={async () => {
@@ -4263,8 +4425,18 @@ export default function MapView({
                         baseScore: summaryData.baseScore ?? summaryData.score,
                         pointsEarned: summaryData.score,
                         path: pathForHistory,
+                        ...(foodExpenseEurosParsed != null &&
+                        foodExpenseEurosParsed > 0 &&
+                        splitPerPersonEuros != null
+                          ? {
+                              foodExpenseEuros: foodExpenseEurosParsed,
+                              splitPerPersonEuros,
+                              memberCountForSplit,
+                            }
+                          : {}),
                       });
                       clearRideDraft();
+                      setFoodExpenseInput('');
                       setShowSummary(false);
                       showMessage({ variant: 'success', title: 'Historial', message: 'Ruta guardada en tu historial.' });
                     } catch (e) {
@@ -4301,6 +4473,7 @@ export default function MapView({
                       }
                     }
                     clearRideDraft();
+                    setFoodExpenseInput('');
                     setShowSummary(false);
                   }}
                   className="w-full bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-4 rounded-2xl transition-all"

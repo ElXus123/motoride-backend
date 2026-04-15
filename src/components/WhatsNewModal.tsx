@@ -3,7 +3,7 @@ import { Check } from 'lucide-react';
 import appLogo from '../../ICONO.png';
 
 /** Sube este valor cuando cambien las novedades para volver a mostrar el aviso una vez por dispositivo. */
-export const WHATS_NEW_VERSION = '2026.04.15c';
+export const WHATS_NEW_VERSION = '2026.04.15e';
 
 const STORAGE_KEY = 'motoride_whats_new_seen_version';
 
@@ -16,6 +16,8 @@ const HIGHLIGHTS: string[] = [
   'Resumen al terminar la ruta: pantalla de cierre más cuidada y una imagen para compartir con mejor diseño (WhatsApp, etc.).',
   'Archivos GPX: lectura más fiable (más tipos de track) y mensajes claros al subir o si el archivo no trae una ruta válida.',
   'Al planificar una ruta: si subes un archivo GPX, el buscador de destino se oculta y ves distancia y tiempo estimado; puedes volver al buscador con un solo toque. En salidas espontáneas el GPX no está en este cuadro (sigue disponible desde el mapa).',
+  'Ruta en marcha: el anfitrión puede pausar la grabación (almuerzo, café…) sin cerrar el grupo; el tiempo en pausa no cuenta en el resumen. Si cierras la web estando en pausa, al volver verás un aviso para continuar.',
+  'Gastos de comida o bebida (opcional): en el resumen puedes anotar el total en euros y ver cuánto toca por persona a escote; no sale en la imagen al compartir el resumen.',
   'Dos ceros guardados: uno con el móvil en el soporte o manillar y otro en bolsillo o MirrorLink; al terminar la cuenta atrás del modo bolsillo se ajusta el cero con el teléfono ya guardado.',
   'Si llevas el móvil suelto en el pantalón, la inclinación va más suavizada para que en la pantalla de la moto no salten tanto los números.',
   'Si vas a rodar y puede llover en tu ruta o cerca de ti (unos 10 km), verás un aviso unos segundos. Conduce con cuidado.',
