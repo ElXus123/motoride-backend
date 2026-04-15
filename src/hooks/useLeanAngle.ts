@@ -31,6 +31,12 @@ const EZ: [number, number, number] = [0, 0, 1];
 const RAD = Math.PI / 180;
 const DEG = 180 / Math.PI;
 
+/**
+ * Alinea el signo del IMU con la UI: leanAngle &gt; 0 = inclinación a la derecha, &lt; 0 = izquierda.
+ * En algunos dispositivos el eje lateral del marco moto queda invertido respecto a esa convención.
+ */
+const LEAN_SENSOR_SIGN = -1;
+
 function clampOffset(v: number): number {
   return Math.max(-30, Math.min(30, v));
 }
@@ -185,7 +191,7 @@ export const useLeanAngle = (
     if (!rotationFromTo(g, EZ, R)) return;
     buildBikeBasisAtCalibration(g, forwardCal.current, lateralCal.current, upCal.current);
     const ld = leanDegFromGravityInBikeFrame(g, RAlign.current, gbScratch.current);
-    compAngleRadRef.current = ld * RAD;
+    compAngleRadRef.current = ld * RAD * LEAN_SENSOR_SIGN;
     calibratedRef.current = true;
     straightAccumSecRef.current = 0;
   }, []);
@@ -306,10 +312,12 @@ export const useLeanAngle = (
         const wy = rr?.gamma ?? 0;
         const wz = rr?.alpha ?? 0;
 
-        const leanDegAccel = leanDegFromGravityInBikeFrame(gUnit.current, RAlign.current, gbScratch.current);
+        const leanDegAccel =
+          leanDegFromGravityInBikeFrame(gUnit.current, RAlign.current, gbScratch.current) * LEAN_SENSOR_SIGN;
         const thetaAccRad = leanDegAccel * RAD;
 
-        const omegaRoll = rollRateFromGyro(wx, wy, wz, forwardCal.current);
+        const omegaRoll =
+          rollRateFromGyro(wx, wy, wz, forwardCal.current) * LEAN_SENSOR_SIGN;
 
         const yawAboutG = yawRateAboutGravityDegPerSec(
           wx,
@@ -322,7 +330,7 @@ export const useLeanAngle = (
 
         const speed = speedRef.current ?? 0;
         const speedAbs = Math.abs(speed);
-        let kinDeg = kinematicLeanDegFromSpeedAndYaw(speedAbs, yawAboutG);
+        let kinDeg = kinematicLeanDegFromSpeedAndYaw(speedAbs, yawAboutG) * LEAN_SENSOR_SIGN;
         if (Math.abs(leanDegAccel) > 4 && Math.abs(kinDeg) > 4 && Math.sign(leanDegAccel) !== Math.sign(kinDeg)) {
           kinDeg = -kinDeg;
         }

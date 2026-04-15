@@ -265,3 +265,9 @@ Fecha: 2026-04-14
   - Al cerrar el modal de crear ruta se resetean GPX y destino.
   - Fallback provincia/municipio por primer punto del GPX al crear grupo (si sigue faltando) se mantiene.
 - `src/components/WhatsNewModal.tsx`: `WHATS_NEW_VERSION` `2026.04.15b`; entrada sobre planificar con GPX vs buscador.
+
+=== BLOQUE 26 — INCLINOMETRO: SIGNO IZQUIERDA / DERECHA ===
+- `src/hooks/useLeanAngle.ts`
+  - Constante `LEAN_SENSOR_SIGN = -1`: invierte medida de gravedad, roll rate del giro y término cinemático para que coincida con la UI (positivo = derecha, negativo = izquierda).
+- `src/lib/motorcycleLean/geometry.ts`
+  - Comentario de convención de signo: el alineado final lo hace `useLeanAngle`.

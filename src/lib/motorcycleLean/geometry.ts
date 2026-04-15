@@ -4,10 +4,9 @@
  * NO usamos gamma/beta crudos del DeviceOrientationEvent: aquí todo sale de
  * accelerationIncludingGravity + eje de referencia guardado en calibración.
  *
- * Convención de signo de salida:
- *   leanDeg > 0  →  inclinación hacia la derecha (vista desde atrás de la moto)
- *   leanDeg < 0  →  izquierda
- * (Ajusta en UI si tu convención visual es distinta.)
+ * Convención de signo de salida (atan2 lateral vs up en marco calibrado):
+ *   leanDeg > 0  →  un lado; &lt; 0 → el otro. En la app, `useLeanAngle` aplica `LEAN_SENSOR_SIGN`
+ *   para alinear con UI: positivo = derecha, negativo = izquierda (vista desde atrás).
  */
 
 const DEG = 180 / Math.PI;
