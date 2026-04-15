@@ -7,6 +7,8 @@ import {
   type CSSProperties,
   type MutableRefObject,
   type ChangeEvent,
+  type FC,
+  type ReactNode,
 } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, GeoJSON, useMap, useMapEvents, Pane } from 'react-leaflet';
 import L from 'leaflet';
@@ -189,7 +191,7 @@ const CurrentUserMarker = ({
   }, [heading]);
 
   return (
-    <Marker 
+    <Marker
       position={position}
       icon={icon}
       zIndexOffset={1000}
@@ -202,6 +204,65 @@ const CurrentUserMarker = ({
           {isPremium ? <div className="mt-1 text-amber-500 font-bold">Premium</div> : null}
         </div>
       </Popup>
+    </Marker>
+  );
+};
+
+const SELF_MAP_SMOOTH_ALPHA = 0.22;
+const SELF_MAP_SNAP_M = 0.1;
+const PEER_SMOOTH_ALPHA = 0.2;
+const PEER_SNAP_M = 0.12;
+
+/** Interpola posición en el mapa sin re-render por frame (evita saltos por GPS/socket). */
+const SmoothedPeerMarker: FC<{
+  targetLat: number;
+  targetLng: number;
+  icon: L.DivIcon;
+  children?: ReactNode;
+}> = ({ targetLat, targetLng, icon, children }) => {
+  const markerRef = useRef<L.Marker | null>(null);
+  const smoothRef = useRef<{ lat: number; lng: number }>({ lat: targetLat, lng: targetLng });
+  const targetRef = useRef({ lat: targetLat, lng: targetLng });
+  targetRef.current = { lat: targetLat, lng: targetLng };
+
+  useEffect(() => {
+    let rafId = 0;
+    const tick = () => {
+      try {
+        const t = targetRef.current;
+        const s = smoothRef.current;
+        const nlat = s.lat + (t.lat - s.lat) * PEER_SMOOTH_ALPHA;
+        const nlng = s.lng + (t.lng - s.lng) * PEER_SMOOTH_ALPHA;
+        const errM = getDistance(nlat, nlng, t.lat, t.lng);
+        if (errM <= PEER_SNAP_M) {
+          smoothRef.current = { lat: t.lat, lng: t.lng };
+        } else {
+          smoothRef.current = { lat: nlat, lng: nlng };
+        }
+        const m = markerRef.current;
+        if (m) {
+          const p = smoothRef.current;
+          m.setLatLng([p.lat, p.lng]);
+        }
+        const p = smoothRef.current;
+        const remainM = getDistance(p.lat, p.lng, t.lat, t.lng);
+        if (remainM > PEER_SNAP_M) {
+          rafId = requestAnimationFrame(tick);
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(rafId);
+    };
+  }, [targetLat, targetLng]);
+
+  const p0 = smoothRef.current;
+  return (
+    <Marker ref={markerRef} position={[p0.lat, p0.lng]} icon={icon} zIndexOffset={100}>
+      {children}
     </Marker>
   );
 };
@@ -330,6 +391,7 @@ const MapController = ({
   speedKmh,
   hasActiveRoute,
   isLandscapeUi,
+  smoothFollow = false,
 }: {
   location: any;
   /** Rumbo para desplazar el centro en horizontal con mapa rotado (flecha a la derecha como GPS). */
@@ -343,6 +405,8 @@ const MapController = ({
   hasActiveRoute: boolean;
   /** Sincronizado con resize/orientación (evita desfase flecha / centro tras MirrorLink o giro). */
   isLandscapeUi: boolean;
+  /** Posición ya interpolada: relaja el anti-jitter del seguimiento para no quedar el centro atrás. */
+  smoothFollow?: boolean;
 }) => {
   const map = useMap();
   const hasAutoZoomedRef = useRef(false);
@@ -376,7 +440,7 @@ const MapController = ({
       const movedM =
         prev != null ? getDistance(location.lat, location.lng, prev.lat, prev.lng) : Number.POSITIVE_INFINITY;
       const tooSoon = prev != null && now - prev.t < 1100 && movedM < 3.2 && !zoomChanged;
-      if (hasAutoZoomedRef.current && tooSoon) {
+      if (hasAutoZoomedRef.current && tooSoon && !smoothFollow) {
         return;
       }
 
@@ -426,6 +490,7 @@ const MapController = ({
     isLandscapeUi,
     bearingForMapOffset,
     headingRotationActive,
+    smoothFollow,
   ]);
 
   return null;
@@ -1317,6 +1382,74 @@ export default function MapView({
     }
     return currentLocation;
   }, [currentLocation, navState.routeGeometry, effectiveRouteForNav, horizontalAccuracy]);
+
+  const [smoothMapLocation, setSmoothMapLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const smoothMapRef = useRef<{ lat: number; lng: number } | null>(null);
+  const smoothMapTargetRef = useRef<{ lat: number; lng: number } | null>(null);
+
+  useEffect(() => {
+    if (!displayLocation) {
+      smoothMapTargetRef.current = null;
+      smoothMapRef.current = null;
+      setSmoothMapLocation(null);
+      return;
+    }
+    const t = { lat: displayLocation.lat, lng: displayLocation.lng };
+    if (typeof t.lat !== 'number' || typeof t.lng !== 'number' || !Number.isFinite(t.lat) || !Number.isFinite(t.lng)) {
+      return;
+    }
+    smoothMapTargetRef.current = t;
+    if (!smoothMapRef.current) {
+      smoothMapRef.current = t;
+      setSmoothMapLocation(t);
+    }
+  }, [displayLocation]);
+
+  useEffect(() => {
+    if (!displayLocation || !smoothMapRef.current) return;
+
+    let rafId = 0;
+    const tick = () => {
+      try {
+        const targ = smoothMapTargetRef.current;
+        const cur = smoothMapRef.current;
+        if (!targ || !cur) return;
+
+        const nlat = cur.lat + (targ.lat - cur.lat) * SELF_MAP_SMOOTH_ALPHA;
+        const nlng = cur.lng + (targ.lng - cur.lng) * SELF_MAP_SMOOTH_ALPHA;
+        const errM = getDistance(nlat, nlng, targ.lat, targ.lng);
+
+        if (errM <= SELF_MAP_SNAP_M) {
+          smoothMapRef.current = { lat: targ.lat, lng: targ.lng };
+          setSmoothMapLocation({ lat: targ.lat, lng: targ.lng });
+        } else {
+          smoothMapRef.current = { lat: nlat, lng: nlng };
+          setSmoothMapLocation({ lat: nlat, lng: nlng });
+        }
+
+        const p = smoothMapRef.current;
+        const remainM = getDistance(p.lat, p.lng, targ.lat, targ.lng);
+        if (remainM > SELF_MAP_SNAP_M) {
+          rafId = requestAnimationFrame(tick);
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, [displayLocation?.lat, displayLocation?.lng, displayLocation]);
+
+  const mapVisualLocation =
+    smoothMapLocation ??
+    (displayLocation &&
+    typeof displayLocation.lat === 'number' &&
+    typeof displayLocation.lng === 'number' &&
+    Number.isFinite(displayLocation.lat) &&
+    Number.isFinite(displayLocation.lng)
+      ? { lat: displayLocation.lat, lng: displayLocation.lng }
+      : null);
 
   const { nearbyRadar, radars } = useRoadData(currentLocation);
   const [hostIsPremium, setHostIsPremium] = useState(false);
@@ -4455,11 +4588,11 @@ export default function MapView({
 
         {/* Other Users' Markers */}
         {markerLocations.map((loc) => (
-          <Marker
+          <SmoothedPeerMarker
             key={loc.uid}
-            position={[loc.lat, loc.lng]}
+            targetLat={loc.lat}
+            targetLng={loc.lng}
             icon={createAvatarIcon(loc.photoURL, loc.level, loc.isPremium === true)}
-            zIndexOffset={100}
           >
             <Popup className="custom-popup">
               <div className="font-semibold text-center">{loc.displayName}</div>
@@ -4468,13 +4601,13 @@ export default function MapView({
                 {loc.isPremium ? <div className="mt-1 text-amber-500 font-bold">Premium</div> : null}
               </div>
             </Popup>
-          </Marker>
+          </SmoothedPeerMarker>
         ))}
 
         {/* Current User Marker (Navigation Arrow) */}
-        {displayLocation && typeof displayLocation.lat === 'number' && typeof displayLocation.lng === 'number' && (
+        {mapVisualLocation && typeof mapVisualLocation.lat === 'number' && typeof mapVisualLocation.lng === 'number' && (
           <CurrentUserMarker
-            position={[displayLocation.lat, displayLocation.lng]}
+            position={[mapVisualLocation.lat, mapVisualLocation.lng]}
             heading={currentSpeedKmh > 2 ? navigationHeading : 0}
             displayNameToUse={displayNameToUse}
             userLevel={userLevel}
@@ -4484,7 +4617,7 @@ export default function MapView({
         )}
 
         <MapController
-          location={displayLocation}
+          location={mapVisualLocation}
           bearingForMapOffset={navigationHeading}
           headingRotationActive={
             isRecording && currentSpeedKmh > 3 && localDistance >= 0.05
@@ -4495,6 +4628,7 @@ export default function MapView({
           speedKmh={speedKmhForMapFollow}
           hasActiveRoute={!!effectiveRouteForNav}
           isLandscapeUi={isLandscapeUi}
+          smoothFollow
         />
           </MapContainer>
         </div>

@@ -3,7 +3,7 @@ import { Check } from 'lucide-react';
 import appLogo from '../../ICONO.png';
 
 /** Sube este valor cuando cambien las novedades para volver a mostrar el aviso una vez por dispositivo. */
-export const WHATS_NEW_VERSION = '2026.04.28';
+export const WHATS_NEW_VERSION = '2026.04.29';
 
 const STORAGE_KEY = 'motoride_whats_new_seen_version';
 
@@ -18,6 +18,11 @@ export type ChangelogEntry = {
 
 /** Orden visual: más recientes arriba; `updatedAt` descendente. */
 const CHANGELOG: ChangelogEntry[] = [
+  {
+    kind: 'novedad',
+    text: 'Geolocalización en el mapa: hemos mejorado cómo se muestra la posición; tu flecha y los avatares de los demás van ahora más suaves, con menos saltos y sensación de seguimiento más fluido al navegar.',
+    updatedAt: '2026-04-29T10:00:00',
+  },
   {
     kind: 'novedad',
     text: 'Enlace con ?join= a una ruta programada: la app pregunta si quieres apuntarte; al confirmar quedas en la lista sin entrar al mapa GPS (el mapa en vivo sigue siendo desde 1 h antes, como siempre).',
