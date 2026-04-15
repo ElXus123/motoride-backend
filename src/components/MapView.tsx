@@ -1494,8 +1494,8 @@ export default function MapView({
     }
   }, [group?.hostLeftAt, isHost]);
 
-  const deleteGroupIfHost = async (reason: string) => {
-    if (!groupId || groupId === 'REPEATED' || !user || leaveInProgressRef.current) return;
+  const deleteGroupIfHost = async (reason: string): Promise<boolean> => {
+    if (!groupId || groupId === 'REPEATED' || !user || leaveInProgressRef.current) return false;
     leaveInProgressRef.current = true;
     try {
       if (isHostRef.current) {
@@ -1513,9 +1513,11 @@ export default function MapView({
         });
         socket.emit('leave-group', { groupId, uid: user.uid, isHost: false, timestamp: Date.now() });
       }
+      return true;
     } catch (error) {
       console.error(`Error leaving group (${reason}):`, error);
       handleFirestoreError(error, OperationType.UPDATE, `groups/${groupId}`);
+      return false;
     } finally {
       leaveInProgressRef.current = false;
     }
@@ -2282,7 +2284,17 @@ export default function MapView({
     setShowInviteFriends(false);
     setInviteModalContext(null);
     try {
-      await deleteGroupIfHost('leave-route');
+      const leftGroupOk = await deleteGroupIfHost('leave-route');
+      if (!leftGroupOk) {
+        hasExplicitlyLeftRef.current = false;
+        showMessage({
+          variant: 'error',
+          title: 'Salir de la ruta',
+          message:
+            'No se pudo abandonar el grupo en el servidor. Comprueba la conexión y vuelve a intentar. Si el fallo continúa, cierra la pestaña y entra de nuevo.',
+        });
+        return;
+      }
 
       const startTime = group?.startTime ?? recordingStartTimeRef.current;
       if (!isHost && user && isRecording && startTime) {
