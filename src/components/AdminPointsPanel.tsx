@@ -9,6 +9,7 @@ import {
   addDoc,
   updateDoc,
   getDocs,
+  getDoc,
   getCountFromServer,
   writeBatch,
   limit,
@@ -35,6 +36,7 @@ import {
   Skull,
   Users,
   RefreshCw,
+  Award,
 } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
@@ -44,12 +46,14 @@ import {
   normalizePremiumGpsPolicy,
   type PremiumGpsPolicy,
 } from '../lib/premiumGpsConfig';
+import { calculateLevel } from '../lib/utils';
 
-type AdminSection = 'gps' | 'accounts' | 'points' | 'events' | 'danger';
+type AdminSection = 'gps' | 'accounts' | 'userstats' | 'points' | 'events' | 'danger';
 
 const SECTIONS: { id: AdminSection; label: string; icon: React.ReactNode }[] = [
   { id: 'gps', label: 'GPS Premium', icon: <Navigation size={16} /> },
   { id: 'accounts', label: 'Cuentas Premium', icon: <Crown size={16} /> },
+  { id: 'userstats', label: 'Nivel y puntos', icon: <Award size={16} /> },
   { id: 'points', label: 'Puntos', icon: <Coins size={16} /> },
   { id: 'events', label: 'Eventos puntos', icon: <CalendarRange size={16} /> },
   { id: 'danger', label: 'Zona peligro', icon: <Skull size={16} /> },
@@ -108,9 +112,15 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
   const [eventName, setEventName] = useState('');
   const [eventMultiplier, setEventMultiplier] = useState(1.2);
   const [eventHours, setEventHours] = useState(24);
-  const [premiumSearchQuery, setPremiumSearchQuery] = useState('');
-  const [premiumSearchResults, setPremiumSearchResults] = useState<any[]>([]);
-  const [premiumSearchLoading, setPremiumSearchLoading] = useState(false);
+  const [userSearchQuery, setUserSearchQuery] = useState('');
+  const [userSearchResults, setUserSearchResults] = useState<any[]>([]);
+  const [userSearchLoading, setUserSearchLoading] = useState(false);
+  const [statsEditUid, setStatsEditUid] = useState<string | null>(null);
+  const [statsEditName, setStatsEditName] = useState('');
+  const [statsPointsInput, setStatsPointsInput] = useState('');
+  const [statsLevelInput, setStatsLevelInput] = useState('');
+  const [statsEditLoading, setStatsEditLoading] = useState(false);
+  const [statsSaveLoading, setStatsSaveLoading] = useState(false);
   const [premiumCandidates, setPremiumCandidates] = useState<any[]>([]);
   const [premiumGpsDraft, setPremiumGpsDraft] = useState<PremiumGpsPolicy>(DEFAULT_PREMIUM_GPS_POLICY);
   const [totalUsers, setTotalUsers] = useState<number | null>(null);
@@ -178,8 +188,8 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
   }, []);
 
   useEffect(() => {
-    if (premiumSearchQuery.trim().length < 2) {
-      setPremiumSearchResults([]);
+    if (userSearchQuery.trim().length < 2) {
+      setUserSearchResults([]);
       return;
     }
     const normalize = (txt: string) =>
@@ -190,9 +200,9 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
         .trim();
     const t = window.setTimeout(() => {
       void (async () => {
-        setPremiumSearchLoading(true);
+        setUserSearchLoading(true);
         try {
-          const qText = normalize(premiumSearchQuery);
+          const qText = normalize(userSearchQuery);
           const q = query(
             collection(db, 'users'),
             orderBy('displayNameLower'),
@@ -211,21 +221,90 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
             [...results, ...merged].forEach((u) => map.set(u.id, u));
             results = Array.from(map.values()).slice(0, 30);
           }
-          setPremiumSearchResults(results);
+          setUserSearchResults(results);
         } catch (e) {
           console.error(e);
         } finally {
-          setPremiumSearchLoading(false);
+          setUserSearchLoading(false);
         }
       })();
     }, 350);
     return () => clearTimeout(t);
-  }, [premiumSearchQuery]);
+  }, [userSearchQuery]);
+
+  const openStatsEditor = async (u: { id: string; displayName?: string; points?: number; level?: number }) => {
+    setStatsEditUid(u.id);
+    setStatsEditName(String(u.displayName || u.id));
+    setStatsPointsInput('');
+    setStatsLevelInput('');
+    setStatsEditLoading(true);
+    try {
+      const snap = await getDoc(doc(db, 'users', u.id));
+      if (!snap.exists()) {
+        showMessage({ variant: 'error', title: 'Usuario', message: 'No se encontró el documento en Firestore.' });
+        setStatsEditUid(null);
+        return;
+      }
+      const d = snap.data() as Record<string, unknown>;
+      const pts = Math.max(0, Math.round(Number(d.points) || 0));
+      const lvl = Math.max(1, Math.round(Number(d.level) || calculateLevel(pts).level));
+      setStatsPointsInput(String(pts));
+      setStatsLevelInput(String(lvl));
+    } catch (e) {
+      console.error(e);
+      showMessage({ variant: 'error', title: 'Usuario', message: 'No se pudo cargar el perfil.' });
+      setStatsEditUid(null);
+    } finally {
+      setStatsEditLoading(false);
+    }
+  };
+
+  const applyPointsFromLevel = () => {
+    const lv = Math.max(1, Math.round(Number(statsLevelInput) || 1));
+    const ptsMin = (lv - 1) * 1000;
+    setStatsLevelInput(String(lv));
+    setStatsPointsInput(String(ptsMin));
+  };
+
+  const applyLevelFromPoints = () => {
+    const pts = Math.max(0, Math.round(Number(statsPointsInput) || 0));
+    const { level } = calculateLevel(pts);
+    setStatsPointsInput(String(pts));
+    setStatsLevelInput(String(level));
+  };
+
+  const saveUserStats = async () => {
+    if (!statsEditUid) return;
+    const pts = Math.max(0, Math.round(Number(statsPointsInput)));
+    const lvl = Math.max(1, Math.round(Number(statsLevelInput)));
+    if (!Number.isFinite(pts) || !Number.isFinite(lvl)) {
+      showMessage({ variant: 'error', title: 'Valores', message: 'Introduce números válidos.' });
+      return;
+    }
+    setStatsSaveLoading(true);
+    try {
+      await updateDoc(doc(db, 'users', statsEditUid), { points: pts, level: lvl });
+      setUserSearchResults((prev) =>
+        prev.map((u) => (u.id === statsEditUid ? { ...u, points: pts, level: lvl } : u))
+      );
+      showMessage({ variant: 'success', title: 'Perfil', message: 'Puntos y nivel actualizados.' });
+      setStatsEditUid(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${statsEditUid}`);
+      showMessage({
+        variant: 'error',
+        title: 'Guardar',
+        message: 'No se pudo guardar. ¿Reglas de Firestore desplegadas?',
+      });
+    } finally {
+      setStatsSaveLoading(false);
+    }
+  };
 
   const setUserPremium = async (uid: string, premium: boolean) => {
     try {
       await updateDoc(doc(db, 'users', uid), { isPremium: premium });
-      setPremiumSearchResults((prev) => prev.map((u) => (u.id === uid ? { ...u, isPremium: premium } : u)));
+      setUserSearchResults((prev) => prev.map((u) => (u.id === uid ? { ...u, isPremium: premium } : u)));
       showMessage({
         variant: 'success',
         title: 'Premium',
@@ -475,17 +554,17 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
                     <div className="relative flex-1">
                       <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
                       <input
-                        value={premiumSearchQuery}
-                        onChange={(e) => setPremiumSearchQuery(e.target.value)}
+                        value={userSearchQuery}
+                        onChange={(e) => setUserSearchQuery(e.target.value)}
                         placeholder="Nombre de usuario…"
                         className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-3 py-2 text-sm text-white"
                       />
                     </div>
-                    {premiumSearchLoading && <span className="text-xs text-zinc-500 self-center">Buscando…</span>}
+                    {userSearchLoading && <span className="text-xs text-zinc-500 self-center">Buscando…</span>}
                   </div>
-                  {premiumSearchResults.length > 0 && (
+                  {userSearchResults.length > 0 && (
                     <ul className="space-y-2 max-h-52 overflow-y-auto">
-                      {premiumSearchResults.map((u) => (
+                      {userSearchResults.map((u) => (
                         <li
                           key={u.id}
                           className="flex items-center justify-between gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2"
@@ -556,6 +635,60 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
                               <Trash2 size={14} />
                             </button>
                           </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {section === 'userstats' && (
+              <div className="space-y-6 max-w-xl">
+                <div>
+                  <h3 className="text-white font-bold flex items-center gap-2">
+                    <Award size={18} className="text-amber-400" />
+                    Puntos y nivel por usuario
+                  </h3>
+                  <p className="text-xs text-zinc-500 mt-1 leading-relaxed">
+                    Busca por nombre (mín. 2 caracteres), elige un usuario y edita puntos y nivel. La app usa 1000 puntos por
+                    nivel; puedes alinear nivel con puntos con los botones de ayuda.
+                  </p>
+                </div>
+                <div className="border border-zinc-800 rounded-2xl p-4 space-y-3 bg-zinc-950/50">
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                      <input
+                        value={userSearchQuery}
+                        onChange={(e) => setUserSearchQuery(e.target.value)}
+                        placeholder="Nombre de usuario…"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-3 py-2 text-sm text-white"
+                      />
+                    </div>
+                    {userSearchLoading && <span className="text-xs text-zinc-500 self-center">Buscando…</span>}
+                  </div>
+                  {userSearchResults.length > 0 && (
+                    <ul className="space-y-2 max-h-56 overflow-y-auto">
+                      {userSearchResults.map((u) => (
+                        <li
+                          key={u.id}
+                          className="flex items-center justify-between gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2"
+                        >
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-white truncate">{u.displayName || u.id}</p>
+                            <p className="text-[10px] text-zinc-500 truncate">
+                              {u.id} · pts {u.points != null ? Math.round(Number(u.points)) : '—'} · nv{' '}
+                              {u.level != null ? Math.round(Number(u.level)) : '—'}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => void openStatsEditor(u)}
+                            className="shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-lg bg-orange-500/20 text-orange-300 hover:bg-orange-500/30"
+                          >
+                            Editar
+                          </button>
                         </li>
                       ))}
                     </ul>
@@ -680,6 +813,92 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
           </div>
         </div>
       </div>
+
+      {statsEditUid && (
+        <div
+          className="fixed inset-0 z-[95] flex items-center justify-center p-4 bg-black/70"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="admin-stats-title"
+          onClick={() => !statsSaveLoading && !statsEditLoading && setStatsEditUid(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-zinc-700 bg-zinc-900 p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="admin-stats-title" className="text-lg font-bold text-white mb-1">
+              Editar puntos y nivel
+            </h3>
+            <p className="text-xs text-zinc-500 mb-4 truncate" title={statsEditName}>
+              {statsEditName}
+            </p>
+            {statsEditLoading ? (
+              <p className="text-sm text-zinc-400 py-8 text-center">Cargando datos…</p>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                  <label className="text-sm text-zinc-300">
+                    Puntos totales
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={statsPointsInput}
+                      onChange={(e) => setStatsPointsInput(e.target.value)}
+                      className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-white tabular-nums"
+                    />
+                  </label>
+                  <label className="text-sm text-zinc-300">
+                    Nivel
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={statsLevelInput}
+                      onChange={(e) => setStatsLevelInput(e.target.value)}
+                      className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-white tabular-nums"
+                    />
+                  </label>
+                </div>
+                <div className="flex flex-wrap gap-2 mb-4">
+                  <button
+                    type="button"
+                    onClick={applyLevelFromPoints}
+                    className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                  >
+                    Nivel según puntos (1000 pts / nivel)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={applyPointsFromLevel}
+                    className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                  >
+                    Puntos mínimos del nivel
+                  </button>
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <button
+                    type="button"
+                    disabled={statsSaveLoading}
+                    onClick={() => setStatsEditUid(null)}
+                    className="px-4 py-2 rounded-xl text-sm font-semibold text-zinc-400 hover:bg-zinc-800"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    disabled={statsSaveLoading}
+                    onClick={() => void saveUserStats()}
+                    className="px-4 py-2 rounded-xl text-sm font-bold bg-orange-500 hover:bg-orange-600 text-white disabled:opacity-50"
+                  >
+                    {statsSaveLoading ? 'Guardando…' : 'Guardar'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
