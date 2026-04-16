@@ -144,6 +144,15 @@ function scoreItem(item: NominatimItem, queryLower: string): number {
     }
   }
 
+  // Priorizar población cuyo nombre de ciudad coincide exactamente con el término buscado (p. ej. Huesca ≠ Adahuesca).
+  const cityOrTown = (addr.city || addr.town || addr.village || addr.municipality || '').toLowerCase();
+  if (primary.length >= 3 && cityOrTown) {
+    const head = firstToponymSegment(cityOrTown);
+    if (head === primary || head.startsWith(`${primary} /`) || head.startsWith(`${primary}/`)) {
+      s += 38;
+    }
+  }
+
   if (city && matchesAsWholeWord(city, primary)) s += 6;
   else if (city && q.includes(city) && matchesAsWholeWord(q, city)) s += 6;
 

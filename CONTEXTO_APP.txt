@@ -1,5 +1,5 @@
 MotoRide — registro de contexto / cambios recientes
-Ultima actualizacion: 2026-04-16 (historial sin duplicados, curvas 15deg, resumen al pulsar)
+Ultima actualizacion: 2026-05-01 (bloque 33 + historial sin duplicados / curvas / resumen)
 
 === Contacto y soporte ===
 - Correo publico de contacto: motorideapp1@gmail.com
@@ -313,8 +313,57 @@ Fecha: 2026-04-14
 - Problema: `useLocationTracking` solo estaba activo con `isRecording && !ridePaused`, así que al abrir el mapa sin haber iniciado ruta (o en pausa) no había fix GPS y el marcador no aparecía.
 - Cambio: tracking activo con grupo válido (`groupId` y no `REPEATED`). Inclinómetro y métricas de ruta siguen ligados a `rideActive`.
 
-=== BLOQUE 30 — HISTORIAL, CURVAS Y DUPLICADOS ===
+=== BLOQUE 30 — HUD EN RUTA: BOTONES PAUSA / FINALIZAR (ANFITRION) ===
+- `src/components/MapView.tsx`
+  - El contenedor del HUD inferior tenía `max-w-full overflow-hidden`: al subir km/h el bloque de velocidad ensanchaba la fila y **recortaba** la columna derecha (Pausa / Finalizar).
+  - Ajuste: `overflow-visible`, `max-w-[min(100%,calc(100vw-1rem))]`, columna de velocidad con **ancho fijo** (`w-[5rem]` / `sm:w-[6.25rem]`), cifra `min-w-[3ch] text-center`, columna de puntuación + acciones con `shrink-0`.
+  - Los botones Pausa y Finalizar del anfitrión pasan a mostrarse **en cuanto** `isRecording` (sin el umbral previo `localDistance >= 0.05` ~50 m), para que siempre estén disponibles al iniciar la grabación.
+
+=== BLOQUE 31 — PARTICIPANTE: SALIR DE RUTA CON RESUMEN Y PUNTOS ===
+- `src/components/MapView.tsx`
+  - Antes: al salir un usuario no anfitrión solo se le quitaba del grupo; no se disparaba el efecto de fin de grabación (el host sigue con `isRecording: true`), así que **no** veía resumen ni se consolidaban puntos como al finalizar.
+  - Ahora: si no eres anfitrión y sales con la ruta **en marcha** (`isRecording` y `startTime`), tras `deleteGroupIfHost` se calculan las mismas estadísticas que al parar la grabación (`computeCurrentSessionRideStats`: bonus distancia, multiplicadores `getActivePointsConfig`, tiempo descontando pausas), se llama a `commitRidePointsToProfile`, se guarda borrador (`persistRideDraft`) y se muestra el **mismo modal de resumen**.
+  - Se reutiliza `rideSessionKey` / `ridePointsCommittedSessionKeyRef` para no duplicar puntos si el host sigue rodando después.
+  - La navegación de salida (`prepareHistoryLeave`, `onLeave`, `history.back`) se **aplaza** hasta cerrar el resumen (botones Guardar / No guardar en historial) vía `pendingLeaveAfterSummaryRef` y `completeParticipantLeaveIfNeeded`.
+- `src/components/WhatsNewModal.tsx`: versión de novedades actualizada; entradas ordenadas por orden de implementación en el producto (más antiguas arriba, más recientes abajo).
+
+=== BLOQUE 32 — MAPA (POSICION SUAVE), HISTORIAL (TARJETAS), VOZ (RECONEXION UI) ===
+- `src/components/MapView.tsx`
+  - Posición mostrada interpolada hacia el GPS / snap a ruta (`smoothMapLocation`, refs `smoothMapTargetRef` / `smoothMapRef`, constantes `SELF_MAP_SMOOTH_ALPHA`, `SELF_MAP_SNAP_M`) para que la flecha del usuario y el seguimiento del mapa no vayan a saltos.
+  - `MapController`: prop `smoothFollow` para relajar el anti-jitter (`tooSoon`) cuando se usa la posición suavizada y el centro no se queda atrás.
+  - Componente `SmoothedPeerMarker`: actualización imperativa `setLatLng` con `requestAnimationFrame` y lerp hacia la posición objetivo de otros moteros (`PEER_SMOOTH_ALPHA`, `PEER_SNAP_M`); evita re-renders por frame.
+- `src/lib/rideHistoryDisplay.ts` (nuevo)
+  - `formatRideCardTitle`, `formatRideCardSubtitle` (es-ES), `rideHistoryPointsEarned` para listados de historial.
+- `src/components/FriendsModal.tsx`
+  - Historial de rutas del amigo: tarjeta vertical alineada con diseño de referencia (título naranja con nombre de ruta + fecha, línea fecha/hora, fila DIST. / PTS con puntos en `text-orange-400`); cabecera del perfil amigo con puntos totales en naranja.
+- `src/components/Profile.tsx`
+  - Misma estructura de tarjeta en «Historial de rutas»; barra de nivel: puntos actuales del usuario en naranja.
+- `src/hooks/useVoiceChat.ts`
+  - Estados `voiceTransportLost` (socket desconectado con voz activa) y `voiceMeshResetting` (~1,4 s al llamar `rebuildVoiceRoom`: reconexión socket, `connect`, `visibilitychange`).
+  - Valor derivado `voiceReconnecting` expuesto al UI.
+- `src/components/MapView.tsx` (botón micrófono)
+  - Si `voiceReconnecting`: botón ámbar, icono `Loader2` animado, texto «Reconectando» debajo; badge de número de peers oculto durante la reconexión.
+- `src/components/WhatsNewModal.tsx`
+  - `WHATS_NEW_VERSION` `2026.04.30`: entradas para chat de voz (reconectando), historial en tarjetas con puntos en color, y geolocalización suave en mapa (lista completa en el modal).
+
+=== BLOQUE 33 — VOZ (RECONEXIÓN FIABLE) Y VIENTO EN EL HUD ===
+- `src/hooks/useVoiceChat.ts`
+  - Handler unificado `onSocketTransportRestored`: primero limpia `voiceTransportLost` si hay voz activa y sala unida; luego `rebuildVoiceRoom` solo con stream y permisos (evita quedar en ámbar al volver la red).
+  - Registrado en `socket.on('connect')` y `socket.io.on('reconnect')` (Manager); eliminado el antiguo `socket.on('reconnect')` del socket aislado.
+  - `window.addEventListener('online')` como refuerzo si el socket ya está `connected`.
+  - UI de malla WebRTC acortada (~900 ms); fail-safe ~4,5 s para limpiar `voiceMeshResetting` si el temporizador no dispara.
+- `src/components/MapView.tsx` (micrófono)
+  - Modo reconectando: tarjeta con borde/blur, botón oscuro con anillo ámbar, `Loader2`; texto «Reconectando» + «Restaurando enlace de voz»; voz activa estable en verde esmeralda (`emerald-500`).
+- `src/hooks/useOpenMeteoWeather.ts`
+  - Petición ampliada: `wind_speed_10m`, `wind_direction_10m`, `windspeed_unit=kmh`.
+  - `windBlowToDeg`: dirección hacia la que sopla el viento (opuesta a la procedencia de la API); `windSpeedKmh`.
+- `src/components/MapView.tsx` (HUD izquierdo)
+  - Encima de temperatura/icono: fila con flecha (`ArrowUp` rotada según `windBlowToDeg`) y velocidad en km/h; mismo criterio Premium que el HUD meteorológico (`showHudWeather`).
+- `src/components/WhatsNewModal.tsx`
+  - `WHATS_NEW_VERSION` `2026.05.01`: entradas para viento en mapa y refuerzo de reconexión de voz (ver changelog).
+
+=== BLOQUE 34 — HISTORIAL SIN DUPLICADOS, CURVAS 15°, RESUMEN EN PERFIL ===
 - **Curvas:** cuenta solo si velocidad **> 20 km/h** (no ≥) e inclinación **> 15°**; salida de curva con umbral ~8° (`MapView`).
-- **Historial duplicado:** al guardar, `setDoc` con id `${uid}_${groupId}_${startTime}` (startTime del `rideSessionKey`) + `merge`; campos `durationMs`, `rideSessionKey` opcional; `routeGeoJSON` del grupo si existe (repetir ruta).
-- **Firestore:** `rideHistory` permite `update` al dueño (mismo uid) para merges idempotentes; validación `routeGeoJSON`, `durationMs`, `rideSessionKey`.
-- **Perfil:** tocar una entrada abre modal con distancia, tiempo, puntos, curvas I/D, inclinación máx., gastos si los hay; botón repetir ruta.
+- **Historial:** `setDoc` id `${uid}_${groupId}_${startTime}` + `merge` (evita duplicados al pulsar Continuar varias veces); `durationMs`, `rideSessionKey` opcional; `routeGeoJSON` del grupo si existe.
+- **Firestore:** `rideHistory` permite `update` al dueño para merges; validación de campos opcionales.
+- **Perfil:** tocar tarjeta abre modal de resumen (curvas, tiempo, etc.); tarjetas con `formatRideCardTitle` / `rideHistoryPointsEarned` como en main.

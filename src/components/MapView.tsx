@@ -7,6 +7,8 @@ import {
   type CSSProperties,
   type MutableRefObject,
   type ChangeEvent,
+  type FC,
+  type ReactNode,
 } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, GeoJSON, useMap, useMapEvents, Pane } from 'react-leaflet';
 import L from 'leaflet';
@@ -57,13 +59,17 @@ import socket from '../lib/socket';
 import { useVoiceChat } from '../hooks/useVoiceChat';
 import PremiumBadge from './PremiumBadge';
 import InviteFriendsModal from './InviteFriendsModal';
-import { Upload, ArrowLeft, Copy, Check, Navigation, AlertTriangle, Play, Square, MapPin, Trophy, Bell, AlertCircle, Wrench, Fuel, X, Maximize, Minimize, Search, Share2, Menu, Target, LogOut, Users, UserPlus, Mic, MicOff, ShieldAlert, Activity, Layers, Lock, LockOpen, Smartphone, RotateCw, Crown, WifiOff, Monitor, Loader2, Mail, Ban, CloudRain, Pause, Coffee } from 'lucide-react';
+import { Upload, ArrowLeft, Copy, Check, Navigation, AlertTriangle, Play, Square, MapPin, Trophy, Bell, AlertCircle, Wrench, Fuel, X, Maximize, Minimize, Search, Share2, Menu, Target, LogOut, Users, UserPlus, Mic, MicOff, ShieldAlert, Activity, Layers, Lock, LockOpen, Smartphone, RotateCw, Crown, WifiOff, Monitor, Loader2, Mail, Ban, CloudRain, Pause, Coffee, ArrowUp } from 'lucide-react';
 import { getDirectionIcon } from './NavManeuverIcons';
 import { copyTextToClipboard, getSupportMailtoHref } from '../lib/clientInfo';
+import { buildScheduledInviteSharePayload } from '../lib/scheduledRouteShare';
 import { formatNavDistanceMeters } from '../lib/navFormat';
 import { generateGroupCode } from '../lib/groupCode';
 import { motion, AnimatePresence } from 'motion/react';
 import appIcon from '../../ICONO.png';
+
+/** Rutas con distancia ≤ esta cifra (km) no crean entrada en `rideHistory`; puntos y km al perfil sí. */
+const MIN_KM_TO_SAVE_RIDE_HISTORY = 5;
 
 /**
  * Modo bolsillo / MirrorLink: el móvil no va fijado al chasis → el IMU no mide la inclinación de la moto.
@@ -89,6 +95,9 @@ function blendLeanPocketMirror(
 
 /** Por debajo de esto el modelo v·ω/g pierde sentido; alineado con bolsillo (blend desde 3 m/s). */
 const MIN_SPEED_MPS_GPS_LEAN = 3.2;
+
+/** Metros recorridos sin grabación (solo anfitrión) antes de iniciar la grabación sola. */
+const AUTO_RECORD_IDLE_METERS = 20;
 
 /** Importe en € desde texto del usuario (coma o punto). */
 function parseEuroAmount(raw: string): number | null {
@@ -181,7 +190,7 @@ const CurrentUserMarker = ({
   }, [heading]);
 
   return (
-    <Marker 
+    <Marker
       position={position}
       icon={icon}
       zIndexOffset={1000}
@@ -194,6 +203,65 @@ const CurrentUserMarker = ({
           {isPremium ? <div className="mt-1 text-amber-500 font-bold">Premium</div> : null}
         </div>
       </Popup>
+    </Marker>
+  );
+};
+
+const SELF_MAP_SMOOTH_ALPHA = 0.22;
+const SELF_MAP_SNAP_M = 0.1;
+const PEER_SMOOTH_ALPHA = 0.2;
+const PEER_SNAP_M = 0.12;
+
+/** Interpola posición en el mapa sin re-render por frame (evita saltos por GPS/socket). */
+const SmoothedPeerMarker: FC<{
+  targetLat: number;
+  targetLng: number;
+  icon: L.DivIcon;
+  children?: ReactNode;
+}> = ({ targetLat, targetLng, icon, children }) => {
+  const markerRef = useRef<L.Marker | null>(null);
+  const smoothRef = useRef<{ lat: number; lng: number }>({ lat: targetLat, lng: targetLng });
+  const targetRef = useRef({ lat: targetLat, lng: targetLng });
+  targetRef.current = { lat: targetLat, lng: targetLng };
+
+  useEffect(() => {
+    let rafId = 0;
+    const tick = () => {
+      try {
+        const t = targetRef.current;
+        const s = smoothRef.current;
+        const nlat = s.lat + (t.lat - s.lat) * PEER_SMOOTH_ALPHA;
+        const nlng = s.lng + (t.lng - s.lng) * PEER_SMOOTH_ALPHA;
+        const errM = getDistance(nlat, nlng, t.lat, t.lng);
+        if (errM <= PEER_SNAP_M) {
+          smoothRef.current = { lat: t.lat, lng: t.lng };
+        } else {
+          smoothRef.current = { lat: nlat, lng: nlng };
+        }
+        const m = markerRef.current;
+        if (m) {
+          const p = smoothRef.current;
+          m.setLatLng([p.lat, p.lng]);
+        }
+        const p = smoothRef.current;
+        const remainM = getDistance(p.lat, p.lng, t.lat, t.lng);
+        if (remainM > PEER_SNAP_M) {
+          rafId = requestAnimationFrame(tick);
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(rafId);
+    };
+  }, [targetLat, targetLng]);
+
+  const p0 = smoothRef.current;
+  return (
+    <Marker ref={markerRef} position={[p0.lat, p0.lng]} icon={icon} zIndexOffset={100}>
+      {children}
     </Marker>
   );
 };
@@ -322,6 +390,7 @@ const MapController = ({
   speedKmh,
   hasActiveRoute,
   isLandscapeUi,
+  smoothFollow = false,
 }: {
   location: any;
   /** Rumbo para desplazar el centro en horizontal con mapa rotado (flecha a la derecha como GPS). */
@@ -335,6 +404,8 @@ const MapController = ({
   hasActiveRoute: boolean;
   /** Sincronizado con resize/orientación (evita desfase flecha / centro tras MirrorLink o giro). */
   isLandscapeUi: boolean;
+  /** Posición ya interpolada: relaja el anti-jitter del seguimiento para no quedar el centro atrás. */
+  smoothFollow?: boolean;
 }) => {
   const map = useMap();
   const hasAutoZoomedRef = useRef(false);
@@ -368,7 +439,7 @@ const MapController = ({
       const movedM =
         prev != null ? getDistance(location.lat, location.lng, prev.lat, prev.lng) : Number.POSITIVE_INFINITY;
       const tooSoon = prev != null && now - prev.t < 1100 && movedM < 3.2 && !zoomChanged;
-      if (hasAutoZoomedRef.current && tooSoon) {
+      if (hasAutoZoomedRef.current && tooSoon && !smoothFollow) {
         return;
       }
 
@@ -418,6 +489,7 @@ const MapController = ({
     isLandscapeUi,
     bearingForMapOffset,
     headingRotationActive,
+    smoothFollow,
   ]);
 
   return null;
@@ -543,8 +615,10 @@ export default function MapView({
   const [distance, setDistance] = useState(0); // in km
   const [localDistance, setLocalDistance] = useState(0); // for auto-start and save check
   const lastLocRef = useRef<{lat: number, lng: number} | null>(null);
-  const [autoStarted, setAutoStarted] = useState(false);
-  
+  const idleMotionBeforeRecordMRef = useRef(0);
+  const idlePrevLocForAutoRecordRef = useRef<{ lat: number; lng: number } | null>(null);
+  const idleAutoRecordFiringRef = useRef(false);
+
   // New state for ranking and alerts
   const [score, setScore] = useState(0);
   const [inCurve, setInCurve] = useState(false);
@@ -587,6 +661,8 @@ export default function MapView({
   }, [score]);
 
   const confirmLeaveInFlightRef = useRef(false);
+  /** Participante: salida con resumen pendiente → `onLeave` solo al cerrar el modal. */
+  const pendingLeaveAfterSummaryRef = useRef(false);
 
   useEffect(() => {
     const onRouteBack = () => {
@@ -1306,6 +1382,74 @@ export default function MapView({
     return currentLocation;
   }, [currentLocation, navState.routeGeometry, effectiveRouteForNav, horizontalAccuracy]);
 
+  const [smoothMapLocation, setSmoothMapLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const smoothMapRef = useRef<{ lat: number; lng: number } | null>(null);
+  const smoothMapTargetRef = useRef<{ lat: number; lng: number } | null>(null);
+
+  useEffect(() => {
+    if (!displayLocation) {
+      smoothMapTargetRef.current = null;
+      smoothMapRef.current = null;
+      setSmoothMapLocation(null);
+      return;
+    }
+    const t = { lat: displayLocation.lat, lng: displayLocation.lng };
+    if (typeof t.lat !== 'number' || typeof t.lng !== 'number' || !Number.isFinite(t.lat) || !Number.isFinite(t.lng)) {
+      return;
+    }
+    smoothMapTargetRef.current = t;
+    if (!smoothMapRef.current) {
+      smoothMapRef.current = t;
+      setSmoothMapLocation(t);
+    }
+  }, [displayLocation]);
+
+  useEffect(() => {
+    if (!displayLocation || !smoothMapRef.current) return;
+
+    let rafId = 0;
+    const tick = () => {
+      try {
+        const targ = smoothMapTargetRef.current;
+        const cur = smoothMapRef.current;
+        if (!targ || !cur) return;
+
+        const nlat = cur.lat + (targ.lat - cur.lat) * SELF_MAP_SMOOTH_ALPHA;
+        const nlng = cur.lng + (targ.lng - cur.lng) * SELF_MAP_SMOOTH_ALPHA;
+        const errM = getDistance(nlat, nlng, targ.lat, targ.lng);
+
+        if (errM <= SELF_MAP_SNAP_M) {
+          smoothMapRef.current = { lat: targ.lat, lng: targ.lng };
+          setSmoothMapLocation({ lat: targ.lat, lng: targ.lng });
+        } else {
+          smoothMapRef.current = { lat: nlat, lng: nlng };
+          setSmoothMapLocation({ lat: nlat, lng: nlng });
+        }
+
+        const p = smoothMapRef.current;
+        const remainM = getDistance(p.lat, p.lng, targ.lat, targ.lng);
+        if (remainM > SELF_MAP_SNAP_M) {
+          rafId = requestAnimationFrame(tick);
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, [displayLocation?.lat, displayLocation?.lng, displayLocation]);
+
+  const mapVisualLocation =
+    smoothMapLocation ??
+    (displayLocation &&
+    typeof displayLocation.lat === 'number' &&
+    typeof displayLocation.lng === 'number' &&
+    Number.isFinite(displayLocation.lat) &&
+    Number.isFinite(displayLocation.lng)
+      ? { lat: displayLocation.lat, lng: displayLocation.lng }
+      : null);
+
   const { nearbyRadar, radars } = useRoadData(currentLocation);
   const [hostIsPremium, setHostIsPremium] = useState(false);
   useEffect(() => {
@@ -1328,7 +1472,10 @@ export default function MapView({
     ? selfPremium || hostIsPremium
     : true;
 
-  const { isVoiceActive, toggleVoice, peersCount, micError, clearMicError } = useVoiceChat(groupId, voiceAllowed);
+  const { isVoiceActive, toggleVoice, peersCount, micError, clearMicError, voiceReconnecting } = useVoiceChat(
+    groupId,
+    voiceAllowed
+  );
 
   // Listen to group data
   useEffect(() => {
@@ -1482,8 +1629,8 @@ export default function MapView({
     }
   }, [group?.hostLeftAt, isHost]);
 
-  const deleteGroupIfHost = async (reason: string) => {
-    if (!groupId || groupId === 'REPEATED' || !user || leaveInProgressRef.current) return;
+  const deleteGroupIfHost = async (reason: string): Promise<boolean> => {
+    if (!groupId || groupId === 'REPEATED' || !user || leaveInProgressRef.current) return false;
     leaveInProgressRef.current = true;
     try {
       if (isHostRef.current) {
@@ -1501,32 +1648,13 @@ export default function MapView({
         });
         socket.emit('leave-group', { groupId, uid: user.uid, isHost: false, timestamp: Date.now() });
       }
+      return true;
     } catch (error) {
       console.error(`Error leaving group (${reason}):`, error);
       handleFirestoreError(error, OperationType.UPDATE, `groups/${groupId}`);
+      return false;
     } finally {
       leaveInProgressRef.current = false;
-    }
-  };
-
-  const confirmLeaveRoute = async () => {
-    if (confirmLeaveInFlightRef.current) return;
-    confirmLeaveInFlightRef.current = true;
-    setExitLeaving(true);
-    setShowExitConfirm(false);
-    hasExplicitlyLeftRef.current = true;
-    try {
-      await deleteGroupIfHost('leave-route');
-    } catch (e) {
-      console.error('confirmLeaveRoute:', e);
-    } finally {
-      prepareHistoryLeave?.();
-      onLeave();
-      if (window.history.state && (window.history.state as { motorideRoute?: boolean }).motorideRoute) {
-        window.history.back();
-      }
-      confirmLeaveInFlightRef.current = false;
-      setExitLeaving(false);
     }
   };
 
@@ -2215,6 +2343,149 @@ export default function MapView({
     foodExpenseInput,
   ]);
 
+  const finalizeRouteLeaveNavigation = useCallback(() => {
+    try {
+      prepareHistoryLeave?.();
+      onLeave();
+      if (window.history.state && (window.history.state as { motorideRoute?: boolean }).motorideRoute) {
+        window.history.back();
+      }
+    } catch (e) {
+      console.error('finalizeRouteLeaveNavigation:', e);
+    }
+  }, [prepareHistoryLeave, onLeave]);
+
+  /** Misma fórmula que al finalizar grabación (host): bonus distancia, multiplicadores activos. */
+  const computeCurrentSessionRideStats = useCallback(async () => {
+    const startTime = group?.startTime ?? recordingStartTimeRef.current;
+    if (!user?.uid || !startTime) return null;
+    const effectivePausedMs =
+      (Number(group?.pausedTimeMs) || 0) +
+      (ridePaused && typeof group?.ridePauseStartedAt === 'number'
+        ? Math.max(0, Date.now() - group.ridePauseStartedAt)
+        : 0);
+    const rideDuration = Math.max(0, Date.now() - startTime - effectivePausedMs);
+    const distanceBonus = Math.floor(localDistance / 100) * 20;
+    try {
+      const pointsConfig = await getActivePointsConfig();
+      const adjustedBaseScore = Math.round(score * pointsConfig.baseMultiplier);
+      const adjustedDistanceBonus = Math.round(distanceBonus * pointsConfig.distanceMultiplier);
+      const finalScore = Math.round((adjustedBaseScore + adjustedDistanceBonus) * pointsConfig.eventMultiplier);
+      const rideSessionKey = `${user.uid}:${groupId}:${startTime}`;
+      return {
+        distance: Number(localDistance.toFixed(2)),
+        score: finalScore,
+        baseScore: adjustedBaseScore,
+        distanceBonus: adjustedDistanceBonus,
+        leftTurns: leftTurnsRef.current,
+        rightTurns: rightTurnsRef.current,
+        maxLeanLeft,
+        maxLeanRight,
+        duration: rideDuration,
+        multipliers: pointsConfig,
+        rideSessionKey,
+      };
+    } catch (e) {
+      console.error('computeCurrentSessionRideStats:', e);
+      return null;
+    }
+  }, [
+    user?.uid,
+    groupId,
+    group?.startTime,
+    group?.pausedTimeMs,
+    group?.ridePauseStartedAt,
+    ridePaused,
+    localDistance,
+    score,
+    maxLeanLeft,
+    maxLeanRight,
+  ]);
+
+  const completeParticipantLeaveIfNeeded = useCallback(() => {
+    if (!pendingLeaveAfterSummaryRef.current) return;
+    pendingLeaveAfterSummaryRef.current = false;
+    confirmLeaveInFlightRef.current = false;
+    finalizeRouteLeaveNavigation();
+  }, [finalizeRouteLeaveNavigation]);
+
+  const confirmLeaveRoute = async () => {
+    if (confirmLeaveInFlightRef.current) return;
+    confirmLeaveInFlightRef.current = true;
+    setExitLeaving(true);
+    setShowExitConfirm(false);
+    hasExplicitlyLeftRef.current = true;
+    /** Evita que el resumen de participante quede detrás del modal de invitar (z-5000) y bloquee nuevos intentos de salida. */
+    setShowInviteFriends(false);
+    setInviteModalContext(null);
+    try {
+      const leftGroupOk = await deleteGroupIfHost('leave-route');
+      if (!leftGroupOk) {
+        hasExplicitlyLeftRef.current = false;
+        showMessage({
+          variant: 'error',
+          title: 'Salir de la ruta',
+          message:
+            'No se pudo abandonar el grupo en el servidor. Comprueba la conexión y vuelve a intentar. Si el fallo continúa, cierra la pestaña y entra de nuevo.',
+        });
+        return;
+      }
+
+      const startTime = group?.startTime ?? recordingStartTimeRef.current;
+      if (!isHost && user && isRecording && startTime) {
+        const currentRideStats = await computeCurrentSessionRideStats();
+        if (currentRideStats) {
+          const pathSnapshot = [...recordedPath];
+          const ok = await commitRidePointsToProfile({
+            distance: currentRideStats.distance,
+            score: currentRideStats.score,
+            leftTurns: currentRideStats.leftTurns,
+            rightTurns: currentRideStats.rightTurns,
+            maxLeanLeft: currentRideStats.maxLeanLeft,
+            maxLeanRight: currentRideStats.maxLeanRight,
+          });
+
+          if (!ok) {
+            setSummaryData(currentRideStats);
+            persistRideDraft({
+              createdAt: Date.now(),
+              summaryData: currentRideStats,
+              path: pathSnapshot,
+              foodExpenseInput,
+            });
+            setShowSummary(true);
+            pendingLeaveAfterSummaryRef.current = true;
+            return;
+          }
+
+          ridePointsCommittedSessionKeyRef.current = currentRideStats.rideSessionKey;
+          setSummaryData(currentRideStats);
+          persistRideDraft({
+            createdAt: Date.now(),
+            summaryData: currentRideStats,
+            path: pathSnapshot,
+            foodExpenseInput,
+          });
+          setShowSummary(true);
+          pendingLeaveAfterSummaryRef.current = true;
+          return;
+        }
+      }
+
+      finalizeRouteLeaveNavigation();
+    } catch (e) {
+      console.error('confirmLeaveRoute:', e);
+      /** No dejar el flujo bloqueado si falla Firestore u otra operación antes del resumen. */
+      pendingLeaveAfterSummaryRef.current = false;
+      confirmLeaveInFlightRef.current = false;
+    } finally {
+      setExitLeaving(false);
+      if (!pendingLeaveAfterSummaryRef.current) {
+        confirmLeaveInFlightRef.current = false;
+      }
+    }
+  };
+
   // Record path locally from the moment movement starts
   useEffect(() => {
     if (!rideActive) return;
@@ -2255,17 +2526,12 @@ export default function MapView({
             setScore((s) => s + (Math.floor(newDist) - Math.floor(prev)));
           }
 
-          // Auto-start recording for group if host and distance >= 100m (0.1km)
-          if (isHost && newDist >= 0.1 && !isRecording && !autoStarted) {
-            setAutoStarted(true);
-            toggleRecording();
-          }
           return newDist;
         });
       }
       lastLocRef.current = currentLocation;
     }
-  }, [currentLocation, rideActive, isRecording, isHost, autoStarted, touchLockKind]);
+  }, [currentLocation, rideActive, isRecording, isHost, touchLockKind]);
 
   const handleFileUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     const input = e.currentTarget;
@@ -2338,7 +2604,7 @@ export default function MapView({
       }
 
       if (!destCoords) {
-        const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(typedDestination)}&limit=12&countrycodes=es&addressdetails=1`;
+        const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(typedDestination)}&limit=12&countrycodes=es&addressdetails=1&dedupe=1`;
         const geoData = await requestJson<any[]>(geocodeUrl, {
           timeoutMs: 10000,
           retries: 1,
@@ -2425,7 +2691,7 @@ export default function MapView({
     const timer = setTimeout(async () => {
       try {
         const q = searchDestination.trim();
-        const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=12&countrycodes=es&addressdetails=1`;
+        const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=12&countrycodes=es&addressdetails=1&dedupe=1`;
         const geoData = await requestJson<any[]>(geocodeUrl, {
           timeoutMs: 9000,
           retries: 1,
@@ -2490,9 +2756,32 @@ export default function MapView({
 
   const shareRoute = async () => {
     const url = `${window.location.origin}${window.location.pathname}?join=${groupId}`;
-    const copied = await copyTextToClipboard(url);
+    const routeName = String(group?.name || 'Ruta Motera').trim() || 'Ruta Motera';
+    const ts = typeof group?.scheduledTimestamp === 'number' ? group.scheduledTimestamp : NaN;
+    const isScheduled =
+      group?.isScheduled === true && Number.isFinite(ts) && ts > 0;
+
+    let clipboardText = url;
+    let shareTitle = `Únete a mi ruta: ${routeName}`;
+    let shareText = `¡Hola! Únete a mi ruta en tiempo real usando este enlace:`;
+
+    if (isScheduled) {
+      const p = buildScheduledInviteSharePayload({
+        routeName,
+        scheduledTimestamp: ts,
+        url,
+      });
+      clipboardText = p.clipboardText;
+      shareTitle = p.title;
+      shareText = p.text;
+    }
+
+    const copied = await copyTextToClipboard(clipboardText);
     if (!copied) {
-      window.prompt('Copia este enlace para invitar a tu ruta:', url);
+      window.prompt(
+        isScheduled ? 'Copia este mensaje y enlace para invitar:' : 'Copia este enlace para invitar a tu ruta:',
+        clipboardText
+      );
       return;
     }
     setShared(true);
@@ -2501,8 +2790,8 @@ export default function MapView({
     if (typeof navigator !== 'undefined' && navigator.share) {
       try {
         await navigator.share({
-          title: `Únete a mi ruta: ${group?.name || 'Ruta Motera'}`,
-          text: `¡Hola! Únete a mi ruta en tiempo real usando este enlace:`,
+          title: shareTitle,
+          text: shareText,
           url,
         });
       } catch (err: unknown) {
@@ -2593,6 +2882,47 @@ export default function MapView({
       }
     }
   };
+
+  const toggleRecordingRef = useRef(toggleRecording);
+  toggleRecordingRef.current = toggleRecording;
+
+  /** Anfitrión: si aún no grabas y te mueves ~20 m, inicia la grabación (misma lógica que el botón). */
+  useEffect(() => {
+    if (isRecording) {
+      idleMotionBeforeRecordMRef.current = 0;
+      idlePrevLocForAutoRecordRef.current = null;
+      idleAutoRecordFiringRef.current = false;
+      return;
+    }
+    if (!isHost || groupId === 'REPEATED' || !currentLocation) return;
+
+    const prev = idlePrevLocForAutoRecordRef.current;
+    idlePrevLocForAutoRecordRef.current = {
+      lat: currentLocation.lat,
+      lng: currentLocation.lng,
+    };
+    if (!prev) return;
+
+    const segmentM = getDistance(
+      prev.lat,
+      prev.lng,
+      currentLocation.lat,
+      currentLocation.lng
+    );
+    if (Number.isFinite(segmentM) && segmentM > 0) {
+      idleMotionBeforeRecordMRef.current += segmentM;
+    }
+
+    if (
+      idleMotionBeforeRecordMRef.current >= AUTO_RECORD_IDLE_METERS &&
+      !idleAutoRecordFiringRef.current
+    ) {
+      idleAutoRecordFiringRef.current = true;
+      void Promise.resolve(toggleRecordingRef.current()).finally(() => {
+        idleAutoRecordFiringRef.current = false;
+      });
+    }
+  }, [currentLocation, isRecording, isHost, groupId]);
 
   const toggleRidePause = async () => {
     if (!isHost || !isRecording) return;
@@ -3136,7 +3466,11 @@ export default function MapView({
            >
             <button
               type="button"
-              onClick={() => setShowExitConfirm(true)}
+              onClick={() => {
+                setShowInviteFriends(false);
+                setInviteModalContext(null);
+                setShowExitConfirm(true);
+              }}
               className="p-2 bg-zinc-800 hover:bg-zinc-700 rounded-full transition-colors text-white shrink-0"
             >
                <ArrowLeft size={18}/>
@@ -3234,45 +3568,71 @@ export default function MapView({
                </button>
              </div>
            )}
-           <button 
-             type="button"
-             onClick={() => {
-               clearMicError();
-               if (!voiceAllowed) {
-                 showMessage({
-                   variant: 'info',
-                   title: 'Chat de voz',
-                   message:
-                     'El chat de voz es Premium. Si el anfitrión de esta ruta tiene Premium, todo el grupo puede usarlo. Si no, puedes obtenerlo apoyando el proyecto (Ko-fi; activación manual). Menú principal → Apoyar proyecto.',
-                 });
-                 return;
-               }
-               void toggleVoice();
-             }}
-             className={`p-3 rounded-full shadow-xl transition-colors relative shrink-0 ${
-               isVoiceActive
-                 ? 'bg-green-500 text-white'
-                 : micError
-                   ? 'bg-red-900/80 text-red-200 ring-2 ring-red-500/50'
-                   : !voiceAllowed
-                     ? 'bg-zinc-800 text-amber-400 ring-2 ring-amber-500/35'
-                     : 'bg-zinc-800 text-zinc-400'
-             }`}
-             title={
-               !voiceAllowed
-                 ? 'Voz Premium (o anfitrión con Premium)'
-                 : isVoiceActive
-                   ? 'Desconectar voz'
-                   : 'Conectar voz (micrófono)'
-             }
-           >
-             {isVoiceActive ? <Mic size={20} /> : !voiceAllowed ? <Crown size={20} /> : <MicOff size={20} />}
-             {isVoiceActive && peersCount > 0 && (
-               <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-4 h-4 flex items-center justify-center rounded-full">
-                 {peersCount}
-               </span>
-             )}
-           </button>
+           <div className="flex flex-col items-end gap-1 pointer-events-auto">
+             <div
+               className={`flex flex-col items-end gap-1.5 transition-all duration-300 ${
+                 voiceReconnecting ? 'rounded-2xl border border-amber-500/20 bg-zinc-950/85 backdrop-blur-md px-2 py-2 shadow-lg shadow-black/25 ring-1 ring-amber-400/15' : ''
+               }`}
+             >
+               <button
+                 type="button"
+                 onClick={() => {
+                   clearMicError();
+                   if (!voiceAllowed) {
+                     showMessage({
+                       variant: 'info',
+                       title: 'Chat de voz',
+                       message:
+                         'El chat de voz es Premium. Si el anfitrión de esta ruta tiene Premium, todo el grupo puede usarlo. Si no, puedes obtenerlo apoyando el proyecto (Ko-fi; activación manual). Menú principal → Apoyar proyecto.',
+                     });
+                     return;
+                   }
+                   void toggleVoice();
+                 }}
+                 className={`p-3 rounded-full shadow-xl transition-all duration-300 ease-out relative shrink-0 ${
+                   voiceReconnecting
+                     ? 'bg-zinc-900 text-amber-400 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] ring-2 ring-amber-400/45'
+                     : isVoiceActive
+                       ? 'bg-emerald-500 text-white shadow-emerald-900/30 hover:bg-emerald-400'
+                       : micError
+                         ? 'bg-red-900/80 text-red-200 ring-2 ring-red-500/50'
+                         : !voiceAllowed
+                           ? 'bg-zinc-800 text-amber-400 ring-2 ring-amber-500/35'
+                           : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+                 }`}
+                 title={
+                   !voiceAllowed
+                     ? 'Voz Premium (o anfitrión con Premium)'
+                     : voiceReconnecting
+                       ? 'Reconectando chat de voz…'
+                       : isVoiceActive
+                         ? 'Desconectar voz'
+                         : 'Conectar voz (micrófono)'
+                 }
+               >
+                 {voiceReconnecting ? (
+                   <Loader2 size={20} strokeWidth={2.25} className="animate-spin text-amber-300" aria-hidden />
+                 ) : isVoiceActive ? (
+                   <Mic size={20} />
+                 ) : !voiceAllowed ? (
+                   <Crown size={20} />
+                 ) : (
+                   <MicOff size={20} />
+                 )}
+                 {isVoiceActive && !voiceReconnecting && peersCount > 0 && (
+                   <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold min-w-[1rem] h-4 px-0.5 flex items-center justify-center rounded-full ring-2 ring-zinc-950">
+                     {peersCount}
+                   </span>
+                 )}
+               </button>
+               {voiceReconnecting && (
+                 <div className="text-right pr-0.5 pb-0.5 max-w-[10rem]">
+                   <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-200/95">Reconectando</p>
+                   <p className="text-[9px] text-zinc-500 mt-0.5 leading-snug">Restaurando enlace de voz</p>
+                 </div>
+               )}
+             </div>
+           </div>
 
            <button 
              onClick={() => setIsFollowing(!isFollowing)}
@@ -3330,7 +3690,7 @@ export default function MapView({
               </button>
               
               {showSettings && (
-                <div className="absolute top-0 right-14 bg-zinc-950/95 backdrop-blur-xl border border-zinc-800 rounded-3xl p-2 shadow-2xl flex flex-col gap-1 min-w-[220px] max-w-[min(90vw,300px)] z-[2001] animate-in fade-in slide-in-from-right-4 duration-200 max-h-[calc(100vh-140px)] overflow-y-auto custom-scrollbar">
+                <div className="absolute top-0 right-14 bg-zinc-950/95 backdrop-blur-xl border border-zinc-800 rounded-3xl p-2 sm:p-2.5 shadow-2xl flex flex-col gap-1 min-w-[220px] max-w-[min(90vw,300px)] landscape:min-w-[260px] landscape:max-w-[min(92vw,400px)] landscape:gap-1.5 z-[2001] animate-in fade-in slide-in-from-right-4 duration-200 max-h-[min(calc(100dvh-5rem),calc(100svh-5rem),85vh)] landscape:max-h-[min(88dvh,calc(100dvh-2.5rem))] overflow-y-auto overscroll-contain custom-scrollbar">
                   <div className="px-4 py-2 border-b border-zinc-800 mb-1">
                     <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Opciones de Mapa</p>
                   </div>
@@ -3922,10 +4282,41 @@ export default function MapView({
 
       {/* HUD Overlay */}
       <div className={`absolute left-0 right-0 z-[1000] pointer-events-none flex justify-center px-2 sm:px-4 landscape:justify-start landscape:left-4 landscape:right-auto ${isLandscapeUi ? 'landscape:bottom-3' : 'bottom-5'}`}>
-        <div className="bg-zinc-950/90 backdrop-blur-3xl rounded-[2rem] sm:rounded-[2.5rem] p-1.5 border border-white/10 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.8)] flex items-center gap-0.5 sm:gap-1 pointer-events-auto max-w-full overflow-hidden landscape:scale-90 landscape:origin-bottom-left">
+        <div className="bg-zinc-950/90 backdrop-blur-3xl rounded-[2rem] sm:rounded-[2.5rem] p-1.5 border border-white/10 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.8)] flex items-center gap-0.5 sm:gap-1 pointer-events-auto max-w-[min(100%,calc(100vw-1rem))] min-w-0 overflow-visible landscape:scale-90 landscape:origin-bottom-left">
           
-          {/* Speed + tiempo en ubicación */}
-          <div className="flex flex-col items-center justify-center min-w-[80px] sm:min-w-[120px] py-2 sm:py-3 px-3 sm:px-6 bg-white/5 rounded-[1.5rem] sm:rounded-[2rem] border border-white/5 shrink-0 landscape:min-w-[80px] landscape:px-3">
+          {/* Speed + tiempo en ubicación — ancho fijo para no empujar Pausa/Finalizar fuera del viewport */}
+          <div className="flex flex-col items-center justify-center w-[5rem] sm:w-[6.25rem] shrink-0 py-2 sm:py-3 px-2 sm:px-4 bg-white/5 rounded-[1.5rem] sm:rounded-[2rem] border border-white/5 landscape:w-[5rem] landscape:px-2">
+            {showHudWeather && (
+              <div
+                className="flex items-center justify-center gap-1 mb-0.5 sm:mb-1 min-h-[18px] sm:min-h-[20px] w-full"
+                title="Viento (~10 m). La flecha indica hacia dónde sopla; velocidad en km/h (Open-Meteo)."
+              >
+                {mapWeather.loading && mapWeather.windSpeedKmh == null ? (
+                  <span
+                    className="inline-block h-3 w-3 border-2 border-cyan-400/25 border-t-cyan-300/80 rounded-full animate-spin"
+                    aria-hidden
+                  />
+                ) : mapWeather.windSpeedKmh != null && mapWeather.windBlowToDeg != null ? (
+                  <>
+                    <span className="inline-flex items-center justify-center w-4 h-4 sm:w-[18px] sm:h-[18px] shrink-0 text-cyan-300">
+                      <ArrowUp
+                        size={isLandscapeUi ? 13 : 15}
+                        strokeWidth={2.5}
+                        className="drop-shadow-sm"
+                        style={{ transform: `rotate(${mapWeather.windBlowToDeg}deg)` }}
+                        aria-hidden
+                      />
+                    </span>
+                    <span className="text-[9px] sm:text-[10px] font-black tabular-nums text-cyan-100/95 leading-none tracking-tight">
+                      {Math.round(mapWeather.windSpeedKmh)}
+                      <span className="text-[7px] sm:text-[8px] font-semibold text-zinc-500 ml-0.5">km/h</span>
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-[9px] text-zinc-600 tabular-nums">—</span>
+                )}
+              </div>
+            )}
             <div
               className="flex items-center justify-center gap-1 sm:gap-1.5 mb-0.5 sm:mb-1 min-h-[22px] sm:min-h-[26px]"
               title={
@@ -3957,7 +4348,7 @@ export default function MapView({
                 </span>
               )}
             </div>
-            <span className="text-3xl sm:text-5xl font-black leading-none tracking-tighter text-white tabular-nums">{currentSpeedKmh}</span>
+            <span className="text-3xl sm:text-5xl font-black leading-none tracking-tighter text-white tabular-nums inline-block min-w-[3ch] text-center">{currentSpeedKmh}</span>
             <span className="text-[8px] sm:text-[9px] font-black uppercase tracking-[0.1em] sm:tracking-[0.2em] text-blue-400 mt-0.5 sm:mt-1">km/h</span>
           </div>
 
@@ -3994,13 +4385,26 @@ export default function MapView({
             <div className="w-px h-10 sm:h-12 bg-white/10 shrink-0" />
 
             {/* Score & Stop Recording */}
-            <div className="flex flex-col gap-1 sm:gap-1.5 min-w-[80px] sm:min-w-[100px]">
+            <div className="flex flex-col gap-1 sm:gap-1.5 min-w-[80px] sm:min-w-[100px] shrink-0">
               <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 sm:py-1.5 bg-yellow-500/10 rounded-lg sm:rounded-xl border border-yellow-500/20">
                 <Trophy size={12} className="text-yellow-500 sm:w-[14px] sm:h-[14px]" />
                 <span className="text-xs sm:text-sm font-black text-white tabular-nums">{score}</span>
               </div>
               
-              {isHost && isRecording && localDistance >= 0.05 && (
+              {isHost && !isRecording && (
+                <button
+                  type="button"
+                  onClick={() => void toggleRecording()}
+                  className="flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg sm:rounded-xl shadow-lg transition-all active:scale-95 border border-white/20 bg-gradient-to-r from-orange-500 to-amber-600 hover:brightness-105 w-full"
+                  title="Inicia la grabación de la ruta para el grupo (GPS, puntos y resumen)"
+                >
+                  <Play size={12} className="text-zinc-950 sm:w-[14px] sm:h-[14px]" fill="currentColor" />
+                  <span className="text-[9px] sm:text-xs font-black text-zinc-950 uppercase tracking-tight">
+                    Iniciar grabación
+                  </span>
+                </button>
+              )}
+              {isHost && isRecording && (
                 <div className="flex flex-col gap-1 w-full">
                   <button
                     type="button"
@@ -4018,7 +4422,8 @@ export default function MapView({
                     </span>
                   </button>
                   <button
-                    onClick={toggleRecording}
+                    type="button"
+                    onClick={() => void toggleRecording()}
                     className="flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 sm:py-1.5 bg-red-600 hover:bg-red-700 rounded-lg sm:rounded-xl shadow-lg shadow-red-600/20 transition-all active:scale-95 border border-white/20"
                     title="Finalizar Ruta"
                   >
@@ -4242,11 +4647,11 @@ export default function MapView({
 
         {/* Other Users' Markers */}
         {markerLocations.map((loc) => (
-          <Marker
+          <SmoothedPeerMarker
             key={loc.uid}
-            position={[loc.lat, loc.lng]}
+            targetLat={loc.lat}
+            targetLng={loc.lng}
             icon={createAvatarIcon(loc.photoURL, loc.level, loc.isPremium === true)}
-            zIndexOffset={100}
           >
             <Popup className="custom-popup">
               <div className="font-semibold text-center">{loc.displayName}</div>
@@ -4255,13 +4660,13 @@ export default function MapView({
                 {loc.isPremium ? <div className="mt-1 text-amber-500 font-bold">Premium</div> : null}
               </div>
             </Popup>
-          </Marker>
+          </SmoothedPeerMarker>
         ))}
 
         {/* Current User Marker (Navigation Arrow) */}
-        {displayLocation && typeof displayLocation.lat === 'number' && typeof displayLocation.lng === 'number' && (
+        {mapVisualLocation && typeof mapVisualLocation.lat === 'number' && typeof mapVisualLocation.lng === 'number' && (
           <CurrentUserMarker
-            position={[displayLocation.lat, displayLocation.lng]}
+            position={[mapVisualLocation.lat, mapVisualLocation.lng]}
             heading={currentSpeedKmh > 2 ? navigationHeading : 0}
             displayNameToUse={displayNameToUse}
             userLevel={userLevel}
@@ -4271,7 +4676,7 @@ export default function MapView({
         )}
 
         <MapController
-          location={displayLocation}
+          location={mapVisualLocation}
           bearingForMapOffset={navigationHeading}
           headingRotationActive={
             isRecording && currentSpeedKmh > 3 && localDistance >= 0.05
@@ -4282,6 +4687,7 @@ export default function MapView({
           speedKmh={speedKmhForMapFollow}
           hasActiveRoute={!!effectiveRouteForNav}
           isLandscapeUi={isLandscapeUi}
+          smoothFollow
         />
           </MapContainer>
         </div>
@@ -4293,7 +4699,7 @@ export default function MapView({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 z-[3000] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md overflow-y-auto"
+            className="fixed inset-0 z-[6200] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md overflow-y-auto"
           >
             <motion.div 
               initial={{ scale: 0.9, y: 20 }}
@@ -4386,39 +4792,53 @@ export default function MapView({
                 </div>
               )}
 
-              <div className="space-y-3">
-                <button 
-                  onClick={async () => {
-                    if (!summaryData || !user?.uid) return;
-                    try {
-                      if (
-                        summaryData.rideSessionKey &&
-                        ridePointsCommittedSessionKeyRef.current !== summaryData.rideSessionKey
-                      ) {
-                        const ok = await commitRidePointsToProfile({
-                          distance: summaryData.distance,
-                          score: summaryData.score,
-                          leftTurns: summaryData.leftTurns,
-                          rightTurns: summaryData.rightTurns,
-                          maxLeanLeft: summaryData.maxLeanLeft,
-                          maxLeanRight: summaryData.maxLeanRight,
+              <p className="mb-4 text-[11px] leading-relaxed text-zinc-500">
+                Historial solo para rutas mayores a {MIN_KM_TO_SAVE_RIDE_HISTORY} km. Puntos y distancia total en tu perfil
+                siempre.
+              </p>
+
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!summaryData || !user?.uid) return;
+                  try {
+                    if (
+                      summaryData.rideSessionKey &&
+                      ridePointsCommittedSessionKeyRef.current !== summaryData.rideSessionKey
+                    ) {
+                      const ok = await commitRidePointsToProfile({
+                        distance: summaryData.distance,
+                        score: summaryData.score,
+                        leftTurns: summaryData.leftTurns,
+                        rightTurns: summaryData.rightTurns,
+                        maxLeanLeft: summaryData.maxLeanLeft,
+                        maxLeanRight: summaryData.maxLeanRight,
+                      });
+                      if (!ok) {
+                        showMessage({
+                          variant: 'error',
+                          title: 'Puntos',
+                          message:
+                            'No se pudieron sumar los puntos al perfil. Revisa la conexión e inténtalo de nuevo.',
                         });
-                        if (!ok) {
-                          showMessage({
-                            variant: 'error',
-                            title: 'Puntos',
-                            message: 'No se pudieron sumar los puntos al perfil. Revisa la conexión e inténtalo de nuevo.',
-                          });
-                          return;
-                        }
-                        ridePointsCommittedSessionKeyRef.current = summaryData.rideSessionKey;
+                        return;
                       }
+                      ridePointsCommittedSessionKeyRef.current = summaryData.rideSessionKey;
+                    }
+
+                    const rideDistanceKm =
+                      typeof summaryData.distance === 'number' && Number.isFinite(summaryData.distance)
+                        ? summaryData.distance
+                        : 0;
+                    const shouldPersistHistory = rideDistanceKm > MIN_KM_TO_SAVE_RIDE_HISTORY;
+
+                    if (shouldPersistHistory) {
                       const draft = readRideDraft();
-                      const pathForHistory = Array.isArray(draft?.path) && draft.path.length > 0 ? draft.path : recordedPath;
+                      const pathForHistory =
+                        Array.isArray(draft?.path) && draft.path.length > 0 ? draft.path : recordedPath;
                       const sk = String(summaryData.rideSessionKey || '');
                       const parts = sk.split(':');
-                      const startFromKey =
-                        parts.length >= 3 ? Number(parts[2]) : NaN;
+                      const startFromKey = parts.length >= 3 ? Number(parts[2]) : NaN;
                       const startTime =
                         Number.isFinite(startFromKey) && startFromKey > 0
                           ? startFromKey
@@ -4461,52 +4881,36 @@ export default function MapView({
                         },
                         { merge: true }
                       );
-                      clearRideDraft();
-                      setFoodExpenseInput('');
-                      setShowSummary(false);
-                      showMessage({ variant: 'success', title: 'Historial', message: 'Ruta guardada en tu historial.' });
-                    } catch (e) {
-                      console.error(e);
-                      showMessage({ variant: 'error', title: 'Historial', message: 'Error al guardar en el historial.' });
+                      showMessage({
+                        variant: 'success',
+                        title: 'Historial',
+                        message: 'Ruta guardada en tu historial.',
+                      });
+                    } else {
+                      showMessage({
+                        variant: 'success',
+                        title: 'Sesión registrada',
+                        message: `Puntos y distancia sumados en tu perfil. Rutas de ${MIN_KM_TO_SAVE_RIDE_HISTORY} km o menos no se guardan en el historial.`,
+                      });
                     }
-                  }}
-                  className="w-full bg-orange-500 hover:bg-orange-600 text-white font-black py-4 rounded-2xl transition-all shadow-lg shadow-orange-500/20"
-                >
-                  Guardar en Historial
-                </button>
-                <button 
-                  onClick={async () => {
-                    if (summaryData?.rideSessionKey && user?.uid) {
-                      if (ridePointsCommittedSessionKeyRef.current !== summaryData.rideSessionKey) {
-                        const ok = await commitRidePointsToProfile({
-                          distance: summaryData.distance,
-                          score: summaryData.score,
-                          leftTurns: summaryData.leftTurns,
-                          rightTurns: summaryData.rightTurns,
-                          maxLeanLeft: summaryData.maxLeanLeft,
-                          maxLeanRight: summaryData.maxLeanRight,
-                        });
-                        if (ok) {
-                          ridePointsCommittedSessionKeyRef.current = summaryData.rideSessionKey;
-                        } else {
-                          showMessage({
-                            variant: 'error',
-                            title: 'Puntos',
-                            message:
-                              'Los puntos de esta ruta no se han podido sumar al perfil (conexión o servidor). Los intentaremos de nuevo si reaparece el resumen al volver a entrar.',
-                          });
-                        }
-                      }
-                    }
+
                     clearRideDraft();
                     setFoodExpenseInput('');
                     setShowSummary(false);
-                  }}
-                  className="w-full bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-4 rounded-2xl transition-all"
-                >
-                  No guardar en historial (los puntos sí cuentan para el nivel)
-                </button>
-              </div>
+                    completeParticipantLeaveIfNeeded();
+                  } catch (e) {
+                    console.error(e);
+                    showMessage({
+                      variant: 'error',
+                      title: 'Resumen',
+                      message: 'No se pudo completar la acción. Inténtalo de nuevo.',
+                    });
+                  }
+                }}
+                className="w-full rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 py-4 font-black text-white shadow-[0_12px_40px_-8px_rgba(234,88,12,0.45)] transition-all hover:brightness-105 active:scale-[0.99]"
+              >
+                Continuar
+              </button>
             </div>
             </motion.div>
           </motion.div>

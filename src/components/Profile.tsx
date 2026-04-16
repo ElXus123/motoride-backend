@@ -18,6 +18,7 @@ import { calculateLevel } from '../lib/utils';
 import { ArrowLeft, Camera, LogOut, ChevronDown, ChevronUp, Activity, Trash2, Play, Clock, Shield, X, Trophy } from 'lucide-react';
 import PremiumBadge from './PremiumBadge';
 import AdminPointsPanel from './AdminPointsPanel';
+import { formatRideCardSubtitle, formatRideCardTitle, rideHistoryPointsEarned } from '../lib/rideHistoryDisplay';
 
 type Props = {
   onBack: () => void;
@@ -243,7 +244,9 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
                   <div className="flex justify-between items-center text-xs font-bold text-zinc-400 mb-2">
                     <span className="text-orange-500 font-black tracking-wider">NIVEL {level}</span>
                     <span className="text-zinc-500">
-                      {totalPoints} / {pointsForNextLevel} pts
+                      <span className="font-bold text-orange-400 tabular-nums">{totalPoints}</span>
+                      {' / '}
+                      {pointsForNextLevel} pts
                     </span>
                   </div>
                   <div className="h-3 bg-zinc-950 rounded-full overflow-hidden border border-zinc-800">
@@ -328,7 +331,7 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
                   rideHistory.map((ride) => (
                     <div
                       key={ride.id}
-                      className="bg-zinc-950 border border-zinc-800 p-4 sm:p-5 rounded-2xl relative group"
+                      className="bg-zinc-950 border border-zinc-800 p-4 sm:p-5 rounded-2xl relative group flex flex-col gap-2"
                     >
                       <div className="absolute top-3 right-3 z-10">
                         {deletingId === ride.id ? (
@@ -362,19 +365,26 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
                         onClick={() => setDetailRide(ride)}
                         className="w-full text-left pr-14 rounded-xl -m-1 p-1 hover:bg-zinc-900/80 transition-colors"
                       >
-                        <h4 className="font-bold text-orange-500 pr-2">{ride.groupName || 'Ruta sin nombre'}</h4>
-                        <p className="text-xs text-zinc-500 mt-1">
-                          {new Date(ride.endTime).toLocaleDateString()} •{' '}
-                          {new Date(ride.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </p>
-                        <div className="flex flex-wrap gap-4 mt-2 text-sm">
-                          <span>
-                            <span className="text-zinc-500 text-[10px] uppercase">Dist. </span>
-                            {ride.distance != null ? Number(ride.distance).toFixed(1) : '—'} km
+                        <h4 className="text-lg font-black text-orange-500 leading-snug tracking-tight pr-2">
+                          {formatRideCardTitle(ride.groupName, ride.endTime)}
+                        </h4>
+                        <p className="text-sm text-zinc-500">{formatRideCardSubtitle(ride.endTime)}</p>
+                        <div className="mt-1 flex flex-wrap items-baseline gap-x-8 gap-y-1 pr-2">
+                          <span className="text-sm">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                              Dist.{' '}
+                            </span>
+                            <span className="font-semibold text-white tabular-nums">
+                              {ride.distance != null ? Number(ride.distance).toFixed(1) : '—'} km
+                            </span>
                           </span>
-                          <span>
-                            <span className="text-zinc-500 text-[10px] uppercase">Pts </span>+
-                            {Math.round(Number(ride.score ?? ride.pointsEarned ?? 0))}
+                          <span className="text-sm">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                              Pts{' '}
+                            </span>
+                            <span className="font-bold text-orange-400 tabular-nums">
+                              +{rideHistoryPointsEarned(ride)}
+                            </span>
                           </span>
                         </div>
                       </button>
@@ -385,7 +395,7 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
                             e.stopPropagation();
                             repeatFromHistory(ride.routeGeoJSON as string);
                           }}
-                          className="mt-3 flex items-center gap-2 text-xs font-bold bg-zinc-800 hover:bg-zinc-700 text-white px-3 py-2 rounded-xl"
+                          className="mt-2 flex w-full items-center gap-2 self-start rounded-xl bg-zinc-800 px-3 py-2 text-xs font-bold text-white hover:bg-zinc-700 sm:w-auto"
                         >
                           <Play size={14} /> Repetir ruta
                         </button>

@@ -52,12 +52,45 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
   const joinedVoiceRoomRef = useRef<string | null>(null);
   /** Evita re-montar listeners de socket al activar voz (desregistrar en ese momento perdía señales WebRTC). */
   const isVoiceActiveRef = useRef(false);
+  /** Socket desconectado mientras la voz sigue “activa” (intención de reconectar). */
+  const [voiceTransportLost, setVoiceTransportLost] = useState(false);
+  /** Malla WebRTC en reconstrucción tras reconexión o vuelta al primer plano. */
+  const [voiceMeshResetting, setVoiceMeshResetting] = useState(false);
+  const meshResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearMeshResetTimer = useCallback(() => {
+    if (meshResetTimerRef.current != null) {
+      clearTimeout(meshResetTimerRef.current);
+      meshResetTimerRef.current = null;
+    }
+  }, []);
+
+  const MESH_UI_MS = 900;
+
+  const startMeshResetUi = useCallback(() => {
+    clearMeshResetTimer();
+    setVoiceMeshResetting(true);
+    meshResetTimerRef.current = setTimeout(() => {
+      meshResetTimerRef.current = null;
+      setVoiceMeshResetting(false);
+    }, MESH_UI_MS);
+  }, [clearMeshResetTimer]);
 
   const clearMicError = useCallback(() => setMicError(null), []);
 
   useEffect(() => {
     isVoiceActiveRef.current = isVoiceActive;
   }, [isVoiceActive]);
+
+  /** Evita quedar pillado en «reconectando» si el temporizador de malla no llega a dispararse. */
+  useEffect(() => {
+    if (!voiceMeshResetting) return;
+    const failSafe = window.setTimeout(() => {
+      setVoiceMeshResetting(false);
+      clearMeshResetTimer();
+    }, 4500);
+    return () => clearTimeout(failSafe);
+  }, [voiceMeshResetting, clearMeshResetTimer]);
 
   const isInitiatorVersus = (remoteSocketId: string) => {
     const myId = socket.id || '';
@@ -105,13 +138,14 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
     (gid?: string | null) => {
       const targetGroup = gid || groupId;
       if (!targetGroup || !canUseVoiceRef.current || !masterStreamRef.current) return;
+      startMeshResetUi();
       // Tras reconexión del socket, recreamos malla WebRTC para evitar peers colgados.
       Object.keys(peersRef.current).forEach((peerId) => removePeer(peerId));
       socket.emit('join-voice', targetGroup);
       joinedVoiceRoomRef.current = targetGroup;
       setIsVoiceActive(true);
     },
-    [groupId]
+    [groupId, startMeshResetUi]
   );
 
   const addAudioStream = (peerId: string, stream: MediaStream) => {
@@ -164,6 +198,12 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
       setIsVoiceActive(false);
       setPeers({});
       joinedVoiceRoomRef.current = null;
+      setVoiceTransportLost(false);
+      setVoiceMeshResetting(false);
+      if (meshResetTimerRef.current != null) {
+        clearTimeout(meshResetTimerRef.current);
+        meshResetTimerRef.current = null;
+      }
       if (gid) {
         socket.emit('leave-voice', gid);
       }
@@ -274,36 +314,66 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
     socket.on('webrtc-signal', handleSignal);
     socket.on('user-left-voice', handleUserLeft);
 
-    const handleSocketReconnect = () => {
-      rebuildVoiceRoom(groupId);
-    };
-    const handleSocketConnect = () => {
-      if (joinedVoiceRoomRef.current === groupId && isVoiceActiveRef.current) {
-        rebuildVoiceRoom(groupId);
+    /** Siempre limpiar “sin red” al volver el transporte; el rebuild puede no ejecutarse si falta stream. */
+    const onSocketTransportRestored = () => {
+      try {
+        if (isVoiceActiveRef.current && joinedVoiceRoomRef.current) {
+          setVoiceTransportLost(false);
+        }
+        const gid = joinedVoiceRoomRef.current;
+        if (
+          gid === groupId &&
+          isVoiceActiveRef.current &&
+          masterStreamRef.current &&
+          canUseVoiceRef.current
+        ) {
+          rebuildVoiceRoom(gid);
+        }
+      } catch {
+        /* ignore */
       }
     };
+
     const handleSocketDisconnect = () => {
       // No desactivamos voz: mantenemos intención activa y reconstruimos al reconectar.
       Object.keys(peersRef.current).forEach((peerId) => removePeer(peerId));
+      if (isVoiceActiveRef.current && joinedVoiceRoomRef.current) {
+        setVoiceTransportLost(true);
+      }
     };
+
+    const handleBrowserOnline = () => {
+      try {
+        if (socket.connected && isVoiceActiveRef.current && joinedVoiceRoomRef.current) {
+          setVoiceTransportLost(false);
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && isVoiceActiveRef.current && joinedVoiceRoomRef.current === groupId) {
         // Safari/iOS puede congelar WebRTC al volver de segundo plano; forzamos reenganche.
         rebuildVoiceRoom(groupId);
       }
     };
-    socket.on('reconnect', handleSocketReconnect);
-    socket.on('connect', handleSocketConnect);
+
+    socket.on('connect', onSocketTransportRestored);
+    /** En socket.io v4 el Manager emite `reconnect` al recuperar la sesión; redundante con `connect` pero cubre casos raros. */
+    socket.io.on('reconnect', onSocketTransportRestored);
     socket.on('disconnect', handleSocketDisconnect);
+    window.addEventListener('online', handleBrowserOnline);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       socket.off('user-joined-voice', handleUserJoined);
       socket.off('webrtc-signal', handleSignal);
       socket.off('user-left-voice', handleUserLeft);
-      socket.off('reconnect', handleSocketReconnect);
-      socket.off('connect', handleSocketConnect);
+      socket.off('connect', onSocketTransportRestored);
+      socket.io.off('reconnect', onSocketTransportRestored);
       socket.off('disconnect', handleSocketDisconnect);
+      window.removeEventListener('online', handleBrowserOnline);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [groupId, canUseVoice, rebuildVoiceRoom]);
@@ -322,15 +392,21 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
     setIsVoiceActive(false);
     setPeers({});
     joinedVoiceRoomRef.current = null;
+    setVoiceTransportLost(false);
+    setVoiceMeshResetting(false);
+    clearMeshResetTimer();
     if (groupId) {
       socket.emit('leave-voice', groupId);
     }
-  }, [canUseVoice, groupId]);
+  }, [canUseVoice, groupId, clearMeshResetTimer]);
 
   const toggleVoice = () => {
     if (!canUseVoiceRef.current) return;
     if (isVoiceActive) {
       setMicError(null);
+      setVoiceTransportLost(false);
+      setVoiceMeshResetting(false);
+      clearMeshResetTimer();
       Object.keys(peersRef.current).forEach((peerId) => removePeer(peerId));
       if (masterStreamRef.current) {
         masterStreamRef.current.getTracks().forEach((track) => track.stop());
@@ -408,11 +484,14 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
       });
   };
 
+  const voiceReconnecting = isVoiceActive && (voiceTransportLost || voiceMeshResetting);
+
   return {
     isVoiceActive,
     toggleVoice,
     peersCount: Object.keys(peers).length,
     micError,
     clearMicError,
+    voiceReconnecting,
   };
 }

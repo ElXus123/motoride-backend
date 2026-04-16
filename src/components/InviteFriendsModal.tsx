@@ -3,9 +3,11 @@ import { doc, onSnapshot, getDoc, updateDoc, arrayUnion, setDoc } from 'firebase
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppMessage } from '../contexts/AppMessageContext';
-import { X, UserPlus, Check, Loader2, User as UserIcon } from 'lucide-react';
+import { X, UserPlus, Check, Loader2, User as UserIcon, Copy, Share2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import PremiumBadge from './PremiumBadge';
+import { copyTextToClipboard } from '../lib/clientInfo';
+import { buildScheduledInviteSharePayload } from '../lib/scheduledRouteShare';
 
 type Props = {
   open: boolean;
@@ -15,6 +17,8 @@ type Props = {
   memberUids: string[];
   /** Por defecto sesión en vivo; `scheduled_ride` para rutas programadas desde el inicio. */
   inviteKind?: 'live_ride' | 'scheduled_ride';
+  /** Para texto del enlace compartido (día de salida). */
+  scheduledTimestamp?: number;
 };
 
 export default function InviteFriendsModal({
@@ -24,6 +28,7 @@ export default function InviteFriendsModal({
   groupName,
   memberUids,
   inviteKind = 'live_ride',
+  scheduledTimestamp = 0,
 }: Props) {
   const { user } = useAuth();
   const showMessage = useAppMessage();
@@ -31,6 +36,7 @@ export default function InviteFriendsModal({
   const [loading, setLoading] = useState(true);
   const [sendingId, setSendingId] = useState<string | null>(null);
   const [sentIds, setSentIds] = useState<Record<string, number>>({});
+  const [scheduleShareCopied, setScheduleShareCopied] = useState<'code' | 'link' | null>(null);
 
   useEffect(() => {
     if (!open || !user) return;
@@ -63,6 +69,15 @@ export default function InviteFriendsModal({
     });
     return () => unsub();
   }, [open, user]);
+
+  useEffect(() => {
+    if (!open) setScheduleShareCopied(null);
+  }, [open]);
+
+  /** Otra ruta / otro código: no mezclar estado "enviado" entre grupos. */
+  useEffect(() => {
+    setSentIds({});
+  }, [groupId]);
 
   const invite = async (friendUid: string) => {
     if (!user) return;
@@ -255,15 +270,15 @@ export default function InviteFriendsModal({
                             {f.isPremium === true ? <PremiumBadge compact /> : null}
                           </p>
                           <p className="text-[11px] text-zinc-500">
-                            {inRoute ? 'Ya está en esta ruta' : sent ? 'Invitación enviada' : 'En tu lista de amigos'}
+                            {inRoute
+                              ? 'Ya está en esta ruta'
+                              : sent
+                                ? 'Aún no está en el grupo — puedes reenviar la invitación'
+                                : 'En tu lista de amigos'}
                           </p>
                         </div>
                         {inRoute ? (
                           <span className="text-[10px] font-bold text-emerald-400 shrink-0 px-2">En ruta</span>
-                        ) : sent ? (
-                          <span className="flex items-center gap-1 text-emerald-400 text-xs font-bold shrink-0">
-                            <Check size={16} /> Listo
-                          </span>
                         ) : (
                           <button
                             type="button"
@@ -272,7 +287,7 @@ export default function InviteFriendsModal({
                             className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl bg-orange-500 hover:bg-orange-400 text-white text-xs font-black disabled:opacity-50"
                           >
                             {sendingId === fid ? <Loader2 size={14} className="animate-spin" /> : <UserPlus size={14} />}
-                            Invitar
+                            {sent ? 'Reenviar' : 'Invitar'}
                           </button>
                         )}
                       </li>
@@ -281,6 +296,101 @@ export default function InviteFriendsModal({
                 </ul>
               )}
             </div>
+
+            {inviteKind === 'scheduled_ride' && (
+              <div className="shrink-0 space-y-3 border-t border-zinc-800 bg-zinc-950/70 px-5 py-4">
+                <p className="text-[11px] leading-relaxed text-zinc-500">
+                  Comparte el <span className="text-zinc-300">código</span> o el{' '}
+                  <span className="text-zinc-300">enlace</span> para que otros se apunten desde MotoRide (mismo formato que
+                  al crear la ruta).
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const code = groupId.toUpperCase().trim();
+                      const ok = await copyTextToClipboard(code);
+                      if (ok) {
+                        setScheduleShareCopied('code');
+                        window.setTimeout(() => setScheduleShareCopied(null), 2000);
+                      } else {
+                        window.prompt('Copia el código:', code);
+                      }
+                    }}
+                    className="flex items-center justify-center gap-2 rounded-xl bg-zinc-800 py-2.5 text-xs font-bold text-white hover:bg-zinc-700"
+                  >
+                    {scheduleShareCopied === 'code' ? (
+                      <Check size={16} className="text-emerald-400" />
+                    ) : (
+                      <Copy size={16} />
+                    )}
+                    Copiar código
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const gid = groupId.toUpperCase().trim();
+                      const url =
+                        typeof window !== 'undefined'
+                          ? `${window.location.origin}${window.location.pathname}?join=${gid}`
+                          : '';
+                      const ts =
+                        typeof scheduledTimestamp === 'number' && Number.isFinite(scheduledTimestamp)
+                          ? scheduledTimestamp
+                          : 0;
+                      const { clipboardText } = buildScheduledInviteSharePayload({
+                        routeName: groupName,
+                        scheduledTimestamp: ts,
+                        url,
+                      });
+                      const ok = await copyTextToClipboard(clipboardText);
+                      if (ok) {
+                        setScheduleShareCopied('link');
+                        window.setTimeout(() => setScheduleShareCopied(null), 2000);
+                      } else {
+                        window.prompt('Copia el mensaje y el enlace:', clipboardText);
+                      }
+                    }}
+                    className="flex items-center justify-center gap-2 rounded-xl bg-zinc-800 py-2.5 text-xs font-bold text-white hover:bg-zinc-700"
+                  >
+                    {scheduleShareCopied === 'link' ? (
+                      <Check size={16} className="text-emerald-400" />
+                    ) : (
+                      <Copy size={16} />
+                    )}
+                    Copiar enlace
+                  </button>
+                </div>
+                {typeof navigator !== 'undefined' && typeof navigator.share === 'function' ? (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const gid = groupId.toUpperCase().trim();
+                      const url = `${window.location.origin}${window.location.pathname}?join=${gid}`;
+                      const ts =
+                        typeof scheduledTimestamp === 'number' && Number.isFinite(scheduledTimestamp)
+                          ? scheduledTimestamp
+                          : 0;
+                      const { title, text } = buildScheduledInviteSharePayload({
+                        routeName: groupName,
+                        scheduledTimestamp: ts,
+                        url,
+                      });
+                      try {
+                        await navigator.share({ title, text, url });
+                      } catch (e) {
+                        const err = e as { name?: string };
+                        if (err?.name !== 'AbortError') console.error(e);
+                      }
+                    }}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-orange-500/90 py-2.5 text-xs font-black text-zinc-950 hover:bg-orange-400"
+                  >
+                    <Share2 size={16} />
+                    Compartir…
+                  </button>
+                ) : null}
+              </div>
+            )}
           </motion.div>
         </motion.div>
       )}

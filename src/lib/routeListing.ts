@@ -44,8 +44,8 @@ export function canShowRouteInExplore(
 }
 
 /**
- * Puede enviar invitaciones a la bandeja (misma lógica que “tuya” o “pública en explorar”):
- * organizador siempre; otros usuarios solo si la ruta es pública en el explorador.
+ * Puede enviar invitaciones a la bandeja y compartir enlace/código:
+ * organizador siempre; cualquier miembro apuntado también (misma utilidad que el organizador).
  */
 export function canInviteToScheduledRoute(
   route: {
@@ -54,6 +54,7 @@ export function canInviteToScheduledRoute(
     isScheduled?: boolean;
     scheduledTimestamp?: number;
     code?: string;
+    members?: unknown;
   },
   viewerUid: string | undefined
 ): boolean {
@@ -61,6 +62,10 @@ export function canInviteToScheduledRoute(
   if (route.isScheduled !== true) return false;
   /** El organizador puede invitar aunque la hora ya haya pasado (sigue en Mis próximas / bandeja). */
   if (route.createdBy === viewerUid) return true;
+
+  const members = normalizeFriendIds(route.members);
+  if (members.includes(viewerUid)) return true;
+
   if ((route.scheduledTimestamp || 0) <= Date.now()) return false;
   const listing = (route.routeListing as RouteListing) || ROUTE_LISTING_DEFAULT;
   if (listing === 'public') return true;
