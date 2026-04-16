@@ -133,7 +133,11 @@ service cloud.firestore {
              (!('path' in data) || data.path is list) &&
              isValidOptionalNumber('foodExpenseEuros') &&
              isValidOptionalNumber('splitPerPersonEuros') &&
-             isValidOptionalNumber('memberCountForSplit');
+             isValidOptionalNumber('memberCountForSplit') &&
+             isValidOptionalNumber('durationMs') &&
+             isValidOptionalString('rideSessionKey', 200) &&
+             (!('routeGeoJSON' in data) ||
+               (data.routeGeoJSON is string && data.routeGeoJSON.size() <= 1000000));
     }
 
     // --- Amistad (escrituras en el documento de otro usuario) ---
@@ -311,7 +315,10 @@ service cloud.firestore {
          request.auth.uid in get(/databases/$(database)/documents/users/$(resource.data.uid)).data.friends)
       );
       allow create: if isAuthenticated() && isValidRideHistory(request.resource.data);
-      allow update: if false;
+      allow update: if isAuthenticated() &&
+        resource.data.uid == request.auth.uid &&
+        request.resource.data.uid == resource.data.uid &&
+        isValidRideHistory(request.resource.data);
       allow delete: if isAuthenticated() && resource.data.uid == request.auth.uid;
     }
 

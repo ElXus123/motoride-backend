@@ -1,5 +1,5 @@
 MotoRide — registro de contexto / cambios recientes
-Ultima actualizacion: 2026-05-01 (bloque 33: viento en HUD, voz reconexión pulida)
+Ultima actualizacion: 2026-05-01 (bloque 33 + historial sin duplicados / curvas / resumen)
 
 === Contacto y soporte ===
 - Correo publico de contacto: motorideapp1@gmail.com
@@ -361,3 +361,9 @@ Fecha: 2026-04-14
   - Encima de temperatura/icono: fila con flecha (`ArrowUp` rotada según `windBlowToDeg`) y velocidad en km/h; mismo criterio Premium que el HUD meteorológico (`showHudWeather`).
 - `src/components/WhatsNewModal.tsx`
   - `WHATS_NEW_VERSION` `2026.05.01`: entradas para viento en mapa y refuerzo de reconexión de voz (ver changelog).
+
+=== BLOQUE 34 — HISTORIAL SIN DUPLICADOS, CURVAS 15°, RESUMEN EN PERFIL ===
+- **Curvas:** cuenta solo si velocidad **> 20 km/h** (no ≥) e inclinación **> 15°**; salida de curva con umbral ~8° (`MapView`).
+- **Historial:** `setDoc` id `${uid}_${groupId}_${startTime}` + `merge` (evita duplicados al pulsar Continuar varias veces); `durationMs`, `rideSessionKey` opcional; `routeGeoJSON` del grupo si existe.
+- **Firestore:** `rideHistory` permite `update` al dueño para merges; validación de campos opcionales.
+- **Perfil:** tocar tarjeta abre modal de resumen (curvas, tiempo, etc.); tarjetas con `formatRideCardTitle` / `rideHistoryPointsEarned` como en main.
