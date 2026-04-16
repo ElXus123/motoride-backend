@@ -1,5 +1,5 @@
 MotoRide — registro de contexto / cambios recientes
-Ultima actualizacion: 2026-05-01 (admin: editar puntos y nivel por usuario)
+Ultima actualizacion: 2026-05-01 (nivel: puntos se reinician al subir de nivel)
 
 === Contacto y soporte ===
 - Correo publico de contacto: motorideapp1@gmail.com
@@ -367,6 +367,14 @@ Fecha: 2026-04-14
 - **Historial:** `setDoc` id `${uid}_${groupId}_${startTime}` + `merge` (evita duplicados al pulsar Continuar varias veces); `durationMs`, `rideSessionKey` opcional; `routeGeoJSON` del grupo si existe.
 - **Firestore:** `rideHistory` permite `update` al dueño para merges; validación de campos opcionales.
 - **Perfil:** tocar tarjeta abre modal de resumen (curvas, tiempo, etc.); tarjetas con `formatRideCardTitle` / `rideHistoryPointsEarned` como en main.
+
+=== BLOQUE 36 — PROGRESO DE NIVEL (0–999, SUBIDA REINICIA PUNTOS) ===
+- **Modelo:** `users.points` = progreso hacia el siguiente nivel (0–999). `users.level` = nivel actual. Cada **1000** puntos de progreso: `level += 1` y `points` pasa a **0** (resto si sobra en un solo golpe).
+- `src/lib/levelProgress.ts` + reexport en `utils.ts`: `calculateLevel(pointsInLevel, storedLevel)`, `addPointsWithLevelUps`.
+- `MapView.tsx`: `commitRidePointsToProfile` usa `addPointsWithLevelUps`; anillo de nivel en mapa lee `level` desde Firestore (`profileLevel`).
+- `Dashboard.tsx`, `Profile.tsx`, `ScheduledRouteAttendees.tsx`: `calculateLevel` con `(points, level)`.
+- `userPointsSync.ts`: migra perfiles antiguos con `points >= 1000` (total acumulado) al nuevo formato.
+- `AdminPointsPanel`: edición coherente (puntos 0–999 tras guardar; botones de ayuda actualizados).
 
 === BLOQUE 35 — ADMIN: PUNTOS Y NIVEL POR USUARIO ===
 - `src/components/AdminPointsPanel.tsx`: sección «Nivel y puntos»; búsqueda de usuario, modal para editar `points` y `level`; botones para alinear nivel↔puntos (1000 pts por nivel).

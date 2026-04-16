@@ -236,7 +236,8 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
           {userData &&
             (() => {
               const totalPoints = Math.max(0, Number(userData.points || 0));
-              const { level, pointsForNextLevel, prevLevelPoints } = calculateLevel(totalPoints);
+              const storedLevel = Math.max(1, Math.floor(Number(userData.level) || 1));
+              const { level, pointsForNextLevel, prevLevelPoints } = calculateLevel(totalPoints, storedLevel);
               const levelProgress = totalPoints - prevLevelPoints;
               const levelRequired = pointsForNextLevel - prevLevelPoints;
               return (

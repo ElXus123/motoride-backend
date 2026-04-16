@@ -1,6 +1,6 @@
 import { doc, getDoc, getDocFromServer, updateDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { calculateLevel } from './utils';
+import { POINTS_PER_LEVEL } from './utils';
 
 /**
  * Lee puntos y nivel desde el servidor, recalcula el nivel según puntos y,
@@ -33,14 +33,21 @@ export async function syncUserPointsAndLevelFromServer(uid: string): Promise<boo
     }
 
     const safePoints = Math.max(0, Math.floor(rawPoints));
-    const calculatedLevel = calculateLevel(safePoints).level;
-    const storedLevel = Number.isFinite(rawLevel) ? Math.max(1, Math.floor(rawLevel)) : calculatedLevel;
+    const storedLevel = Number.isFinite(rawLevel) ? Math.max(1, Math.floor(rawLevel)) : 1;
 
-    const pointsDirty = safePoints !== rawPoints;
-    const levelDirty = storedLevel !== calculatedLevel;
+    /** Migración: antes `points` era total acumulado (≥1000 posible); ahora es progreso 0–999 y el nivel sube al completar 1000. */
+    let nextPoints = safePoints;
+    let nextLevel = storedLevel;
+    if (safePoints >= POINTS_PER_LEVEL) {
+      nextLevel = Math.floor(safePoints / POINTS_PER_LEVEL) + 1;
+      nextPoints = safePoints % POINTS_PER_LEVEL;
+    }
+
+    const pointsDirty = nextPoints !== safePoints;
+    const levelDirty = nextLevel !== storedLevel;
 
     if (pointsDirty || levelDirty) {
-      await updateDoc(ref, { points: safePoints, level: calculatedLevel });
+      await updateDoc(ref, { points: nextPoints, level: nextLevel });
       return true;
     }
   } catch (e) {

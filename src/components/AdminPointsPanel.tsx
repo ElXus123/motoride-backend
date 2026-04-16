@@ -46,7 +46,7 @@ import {
   normalizePremiumGpsPolicy,
   type PremiumGpsPolicy,
 } from '../lib/premiumGpsConfig';
-import { calculateLevel } from '../lib/utils';
+import { addPointsWithLevelUps, POINTS_PER_LEVEL } from '../lib/utils';
 
 type AdminSection = 'gps' | 'accounts' | 'userstats' | 'points' | 'events' | 'danger';
 
@@ -247,7 +247,7 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
       }
       const d = snap.data() as Record<string, unknown>;
       const pts = Math.max(0, Math.round(Number(d.points) || 0));
-      const lvl = Math.max(1, Math.round(Number(d.level) || calculateLevel(pts).level));
+      const lvl = Math.max(1, Math.round(Number(d.level) || 1));
       setStatsPointsInput(String(pts));
       setStatsLevelInput(String(lvl));
     } catch (e) {
@@ -261,25 +261,28 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
 
   const applyPointsFromLevel = () => {
     const lv = Math.max(1, Math.round(Number(statsLevelInput) || 1));
-    const ptsMin = (lv - 1) * 1000;
     setStatsLevelInput(String(lv));
-    setStatsPointsInput(String(ptsMin));
+    setStatsPointsInput('0');
   };
 
   const applyLevelFromPoints = () => {
-    const pts = Math.max(0, Math.round(Number(statsPointsInput) || 0));
-    const { level } = calculateLevel(pts);
-    setStatsPointsInput(String(pts));
-    setStatsLevelInput(String(level));
+    const raw = Math.max(0, Math.round(Number(statsPointsInput) || 0));
+    const normalized = addPointsWithLevelUps(0, 1, raw);
+    setStatsPointsInput(String(normalized.points));
+    setStatsLevelInput(String(normalized.level));
   };
 
   const saveUserStats = async () => {
     if (!statsEditUid) return;
-    const pts = Math.max(0, Math.round(Number(statsPointsInput)));
-    const lvl = Math.max(1, Math.round(Number(statsLevelInput)));
+    let pts = Math.max(0, Math.round(Number(statsPointsInput)));
+    let lvl = Math.max(1, Math.round(Number(statsLevelInput)));
     if (!Number.isFinite(pts) || !Number.isFinite(lvl)) {
       showMessage({ variant: 'error', title: 'Valores', message: 'Introduce números válidos.' });
       return;
+    }
+    while (pts >= POINTS_PER_LEVEL) {
+      pts -= POINTS_PER_LEVEL;
+      lvl += 1;
     }
     setStatsSaveLoading(true);
     try {

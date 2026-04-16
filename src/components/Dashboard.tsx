@@ -85,10 +85,11 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   }, [user]);
 
   const points = Math.max(0, Number(userData?.points || 0));
+  const storedLevel = Math.max(1, Math.floor(Number(userData?.level) || 1));
   const pendingFriendRequestCount = Array.isArray(userData?.friendRequestsIncoming)
     ? userData.friendRequestsIncoming.length
     : 0;
-  const levelData = calculateLevel(points);
+  const levelData = calculateLevel(points, storedLevel);
   const level = levelData.level;
   const levelRange = levelData.pointsForNextLevel - levelData.prevLevelPoints;
   /** 0–100 % del tramo actual hacia el siguiente nivel (solo para la barra visual del header). */
