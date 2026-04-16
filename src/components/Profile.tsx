@@ -15,7 +15,7 @@ import {
 import { updateProfile } from 'firebase/auth';
 import { db, auth, logOut, handleFirestoreError, OperationType } from '../firebase';
 import { calculateLevel } from '../lib/utils';
-import { ArrowLeft, Camera, LogOut, ChevronDown, ChevronUp, Activity, Trash2, Play, Clock, Shield } from 'lucide-react';
+import { ArrowLeft, Camera, LogOut, ChevronDown, ChevronUp, Activity, Trash2, Play, Clock, Shield, X, Trophy } from 'lucide-react';
 import PremiumBadge from './PremiumBadge';
 import AdminPointsPanel from './AdminPointsPanel';
 
@@ -37,6 +37,7 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
   const [indexBuilding, setIndexBuilding] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [detailRide, setDetailRide] = useState<Record<string, unknown> & { id: string } | null>(null);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
 
   const isAdmin = user?.email?.toLowerCase() === 'juarp123@gmail.com';
@@ -162,6 +163,27 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
     },
     [onRepeatRoute, onBack]
   );
+
+  const formatRideDuration = (ride: Record<string, unknown>) => {
+    const dm = ride.durationMs;
+    if (typeof dm === 'number' && Number.isFinite(dm) && dm >= 0) {
+      const totalSec = Math.floor(dm / 1000);
+      const m = Math.floor(totalSec / 60);
+      const s = totalSec % 60;
+      if (m >= 120) {
+        const h = Math.floor(m / 60);
+        const rm = m % 60;
+        return `${h}h ${rm}m`;
+      }
+      return `${m}m ${s}s`;
+    }
+    const st = ride.startTime;
+    const et = ride.endTime;
+    if (typeof st === 'number' && typeof et === 'number' && et >= st) {
+      return formatRideDuration({ durationMs: et - st } as Record<string, unknown>);
+    }
+    return '—';
+  };
 
   return (
     <div className="min-h-dvh bg-zinc-950 text-white pl-[max(1.5rem,env(safe-area-inset-left,0px))] pr-[max(1.5rem,env(safe-area-inset-right,0px))] pt-[max(1.5rem,env(safe-area-inset-top,0px))] pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]">
@@ -308,47 +330,61 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
                       key={ride.id}
                       className="bg-zinc-950 border border-zinc-800 p-4 sm:p-5 rounded-2xl relative group"
                     >
-                      <div className="absolute top-3 right-3">
+                      <div className="absolute top-3 right-3 z-10">
                         {deletingId === ride.id ? (
                           <div className="flex gap-1">
                             <button
+                              type="button"
                               onClick={() => void confirmDeleteRide(ride.id)}
                               className="text-[10px] bg-red-600 text-white px-2 py-1 rounded font-bold"
                             >
                               Confirmar
                             </button>
-                            <button onClick={() => setDeletingId(null)} className="text-[10px] text-zinc-500 px-2">
+                            <button type="button" onClick={() => setDeletingId(null)} className="text-[10px] text-zinc-500 px-2">
                               Cancelar
                             </button>
                           </div>
                         ) : (
                           <button
-                            onClick={() => deleteRide(ride.id)}
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deleteRide(ride.id);
+                            }}
                             className="text-zinc-600 hover:text-red-500 opacity-0 group-hover:opacity-100"
                           >
                             <Trash2 size={14} />
                           </button>
                         )}
                       </div>
-                      <h4 className="font-bold text-orange-500 pr-16">{ride.groupName || 'Ruta sin nombre'}</h4>
-                      <p className="text-xs text-zinc-500 mt-1">
-                        {new Date(ride.endTime).toLocaleDateString()} •{' '}
-                        {new Date(ride.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </p>
-                      <div className="flex flex-wrap gap-4 mt-2 text-sm">
-                        <span>
-                          <span className="text-zinc-500 text-[10px] uppercase">Dist. </span>
-                          {ride.distance != null ? Number(ride.distance).toFixed(1) : '—'} km
-                        </span>
-                        <span>
-                          <span className="text-zinc-500 text-[10px] uppercase">Pts </span>+
-                          {Math.round(Number(ride.score ?? ride.pointsEarned ?? 0))}
-                        </span>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setDetailRide(ride)}
+                        className="w-full text-left pr-14 rounded-xl -m-1 p-1 hover:bg-zinc-900/80 transition-colors"
+                      >
+                        <h4 className="font-bold text-orange-500 pr-2">{ride.groupName || 'Ruta sin nombre'}</h4>
+                        <p className="text-xs text-zinc-500 mt-1">
+                          {new Date(ride.endTime).toLocaleDateString()} •{' '}
+                          {new Date(ride.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                        <div className="flex flex-wrap gap-4 mt-2 text-sm">
+                          <span>
+                            <span className="text-zinc-500 text-[10px] uppercase">Dist. </span>
+                            {ride.distance != null ? Number(ride.distance).toFixed(1) : '—'} km
+                          </span>
+                          <span>
+                            <span className="text-zinc-500 text-[10px] uppercase">Pts </span>+
+                            {Math.round(Number(ride.score ?? ride.pointsEarned ?? 0))}
+                          </span>
+                        </div>
+                      </button>
                       {ride.routeGeoJSON && (
                         <button
                           type="button"
-                          onClick={() => repeatFromHistory(ride.routeGeoJSON)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            repeatFromHistory(ride.routeGeoJSON as string);
+                          }}
                           className="mt-3 flex items-center gap-2 text-xs font-bold bg-zinc-800 hover:bg-zinc-700 text-white px-3 py-2 rounded-xl"
                         >
                           <Play size={14} /> Repetir ruta
@@ -374,6 +410,123 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
       </div>
 
       {showAdminPanel && isAdmin && <AdminPointsPanel onClose={() => setShowAdminPanel(false)} />}
+
+      {detailRide && (
+        <div
+          className="fixed inset-0 z-[6000] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="ride-detail-title"
+          onClick={() => setDetailRide(null)}
+        >
+          <div
+            className="w-full max-w-md max-h-[min(90dvh,640px)] overflow-y-auto rounded-[2rem] border border-zinc-700 bg-zinc-900 p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-orange-500/20 text-orange-400">
+                  <Trophy size={24} />
+                </div>
+                <div className="min-w-0">
+                  <h2 id="ride-detail-title" className="text-lg font-black text-white leading-tight truncate">
+                    {String(detailRide.groupName || 'Ruta')}
+                  </h2>
+                  <p className="text-xs text-zinc-500 mt-0.5">
+                    {detailRide.endTime != null
+                      ? `${new Date(detailRide.endTime as number).toLocaleDateString()} · ${new Date(
+                          detailRide.endTime as number
+                        ).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                      : ''}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDetailRide(null)}
+                className="p-2 rounded-full text-zinc-400 hover:bg-zinc-800 hover:text-white shrink-0"
+                aria-label="Cerrar"
+              >
+                <X size={22} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 text-left">
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-3">
+                <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500">Distancia</p>
+                <p className="text-xl font-black text-white tabular-nums mt-1">
+                  {detailRide.distance != null ? Number(detailRide.distance).toFixed(1) : '—'}{' '}
+                  <span className="text-xs text-zinc-500">km</span>
+                </p>
+              </div>
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-3">
+                <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500">Tiempo</p>
+                <p className="text-xl font-black text-white tabular-nums mt-1">{formatRideDuration(detailRide)}</p>
+              </div>
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-3">
+                <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500">Puntos</p>
+                <p className="text-xl font-black text-orange-400 tabular-nums mt-1">
+                  +{Math.round(Number(detailRide.score ?? detailRide.pointsEarned ?? 0))}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-3">
+                <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500">Curvas (I / D)</p>
+                <p className="text-xl font-black text-white tabular-nums mt-1">
+                  {detailRide.leftTurns != null ? Number(detailRide.leftTurns) : '—'} /{' '}
+                  {detailRide.rightTurns != null ? Number(detailRide.rightTurns) : '—'}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-3 col-span-2">
+                <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500">Inclinación máx.</p>
+                <p className="text-lg font-black text-white tabular-nums mt-1">
+                  Izq. {detailRide.maxLeanLeft != null ? Number(detailRide.maxLeanLeft) : '—'}° · Der.{' '}
+                  {detailRide.maxLeanRight != null ? Number(detailRide.maxLeanRight) : '—'}°
+                </p>
+              </div>
+            </div>
+
+            {typeof detailRide.baseScore === 'number' && (
+              <p className="text-xs text-zinc-500 mt-3">
+                Puntos base +{Math.round(detailRide.baseScore)}
+                {typeof detailRide.pointsEarned === 'number' && detailRide.pointsEarned !== detailRide.baseScore && (
+                  <span className="text-zinc-600"> · Total +{Math.round(Number(detailRide.pointsEarned))}</span>
+                )}
+              </p>
+            )}
+
+            {typeof detailRide.foodExpenseEuros === 'number' && detailRide.foodExpenseEuros > 0 && (
+              <div className="mt-4 rounded-2xl border border-amber-500/25 bg-amber-500/10 p-3 text-left">
+                <p className="text-[10px] font-black uppercase tracking-widest text-amber-400/90">Gastos (escote)</p>
+                <p className="text-sm text-amber-100 mt-1 tabular-nums">
+                  Total {detailRide.foodExpenseEuros.toFixed(2)} €
+                  {typeof detailRide.splitPerPersonEuros === 'number' && (
+                    <span className="text-zinc-400">
+                      {' '}
+                      · ~{detailRide.splitPerPersonEuros.toFixed(2)} € / persona
+                      {typeof detailRide.memberCountForSplit === 'number'
+                        ? ` (${detailRide.memberCountForSplit})`
+                        : ''}
+                    </span>
+                  )}
+                </p>
+              </div>
+            )}
+
+            {detailRide.routeGeoJSON && typeof detailRide.routeGeoJSON === 'string' && (
+              <button
+                type="button"
+                onClick={() => {
+                  repeatFromHistory(detailRide.routeGeoJSON as string);
+                  setDetailRide(null);
+                }}
+                className="mt-5 w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl bg-zinc-800 hover:bg-zinc-700 text-white text-sm font-bold"
+              >
+                <Play size={18} /> Repetir esta ruta
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

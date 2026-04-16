@@ -1,5 +1,5 @@
 MotoRide — registro de contexto / cambios recientes
-Ultima actualizacion: 2026-04-15 (GPS mapa — activo en sesion, no solo al grabar)
+Ultima actualizacion: 2026-04-16 (historial sin duplicados, curvas 15deg, resumen al pulsar)
 
 === Contacto y soporte ===
 - Correo publico de contacto: motorideapp1@gmail.com
@@ -312,3 +312,9 @@ Fecha: 2026-04-14
 === CORRECCION — UBICACION NO VISIBLE FUERA DE GRABACION ===
 - Problema: `useLocationTracking` solo estaba activo con `isRecording && !ridePaused`, así que al abrir el mapa sin haber iniciado ruta (o en pausa) no había fix GPS y el marcador no aparecía.
 - Cambio: tracking activo con grupo válido (`groupId` y no `REPEATED`). Inclinómetro y métricas de ruta siguen ligados a `rideActive`.
+
+=== BLOQUE 30 — HISTORIAL, CURVAS Y DUPLICADOS ===
+- **Curvas:** cuenta solo si velocidad **> 20 km/h** (no ≥) e inclinación **> 15°**; salida de curva con umbral ~8° (`MapView`).
+- **Historial duplicado:** al guardar, `setDoc` con id `${uid}_${groupId}_${startTime}` (startTime del `rideSessionKey`) + `merge`; campos `durationMs`, `rideSessionKey` opcional; `routeGeoJSON` del grupo si existe (repetir ruta).
+- **Firestore:** `rideHistory` permite `update` al dueño (mismo uid) para merges idempotentes; validación `routeGeoJSON`, `durationMs`, `rideSessionKey`.
+- **Perfil:** tocar una entrada abre modal con distancia, tiempo, puntos, curvas I/D, inclinación máx., gastos si los hay; botón repetir ruta.

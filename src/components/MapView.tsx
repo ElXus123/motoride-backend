@@ -17,7 +17,6 @@ import {
   collection,
   query,
   where,
-  addDoc,
   getDoc,
   setDoc,
   arrayRemove,
@@ -1727,15 +1726,15 @@ export default function MapView({
     isScreenShareLikeMode,
   ]);
 
-  // Curve detection & scoring (>20 km/h e inclinación >10° al entrar; puntuación si hubo pico >10°)
+  // Curva: >20 km/h e inclinación estrictamente >15° al entrar; puntuación si el pico superó 15°
   useEffect(() => {
     if (!rideActive) return;
     const currentSpeed = (speed || 0) * 3.6;
     const MIN_CURVE_SPEED_KMH = 20;
-    const CURVE_START_DEG = 10;
-    const CURVE_END_DEG = 5;
+    const CURVE_START_DEG = 15;
+    const CURVE_END_DEG = 8;
     const absAngle = Math.abs(leanAngle);
-    if (currentSpeed >= MIN_CURVE_SPEED_KMH && absAngle > CURVE_START_DEG) {
+    if (currentSpeed > MIN_CURVE_SPEED_KMH && absAngle > CURVE_START_DEG) {
       if (!inCurve) {
         setInCurve(true);
         curveEntryQualifiedRef.current = true;
@@ -1746,7 +1745,7 @@ export default function MapView({
         }
       }
       if (absAngle > currentCurveMax) setCurrentCurveMax(absAngle);
-    } else if ((currentSpeed < MIN_CURVE_SPEED_KMH || absAngle <= CURVE_END_DEG) && inCurve) {
+    } else if ((currentSpeed <= MIN_CURVE_SPEED_KMH || absAngle <= CURVE_END_DEG) && inCurve) {
       setInCurve(false);
       if (curveEntryQualifiedRef.current && currentCurveMax > CURVE_START_DEG) {
         setScore((prev) => Math.ceil(prev + currentCurveMax));
@@ -4416,31 +4415,52 @@ export default function MapView({
                       }
                       const draft = readRideDraft();
                       const pathForHistory = Array.isArray(draft?.path) && draft.path.length > 0 ? draft.path : recordedPath;
-                      await addDoc(collection(db, 'rideHistory'), {
-                        uid: user.uid,
-                        groupId,
-                        groupName: group?.name || 'Ruta',
-                        startTime: Date.now() - summaryData.duration,
-                        endTime: Date.now(),
-                        distance: summaryData.distance,
-                        maxLeanLeft: summaryData.maxLeanLeft,
-                        maxLeanRight: summaryData.maxLeanRight,
-                        leftTurns: summaryData.leftTurns,
-                        rightTurns: summaryData.rightTurns,
-                        score: summaryData.score,
-                        baseScore: summaryData.baseScore ?? summaryData.score,
-                        pointsEarned: summaryData.score,
-                        path: pathForHistory,
-                        ...(foodExpenseEurosParsed != null &&
-                        foodExpenseEurosParsed > 0 &&
-                        splitPerPersonEuros != null
-                          ? {
-                              foodExpenseEuros: foodExpenseEurosParsed,
-                              splitPerPersonEuros,
-                              memberCountForSplit,
-                            }
-                          : {}),
-                      });
+                      const sk = String(summaryData.rideSessionKey || '');
+                      const parts = sk.split(':');
+                      const startFromKey =
+                        parts.length >= 3 ? Number(parts[2]) : NaN;
+                      const startTime =
+                        Number.isFinite(startFromKey) && startFromKey > 0
+                          ? startFromKey
+                          : Math.max(0, Date.now() - summaryData.duration);
+                      const endTime = Date.now();
+                      const historyId = `${user.uid}_${groupId}_${startTime}`;
+                      const routeStr =
+                        typeof group?.routeGeoJSON === 'string' && group.routeGeoJSON.trim().length > 0
+                          ? group.routeGeoJSON
+                          : null;
+                      await setDoc(
+                        doc(db, 'rideHistory', historyId),
+                        {
+                          uid: user.uid,
+                          groupId,
+                          groupName: group?.name || 'Ruta',
+                          startTime,
+                          endTime,
+                          distance: summaryData.distance,
+                          maxLeanLeft: summaryData.maxLeanLeft,
+                          maxLeanRight: summaryData.maxLeanRight,
+                          leftTurns: summaryData.leftTurns,
+                          rightTurns: summaryData.rightTurns,
+                          score: summaryData.score,
+                          baseScore: summaryData.baseScore ?? summaryData.score,
+                          pointsEarned: summaryData.score,
+                          path: pathForHistory,
+                          durationMs: summaryData.duration,
+                          ...(sk ? { rideSessionKey: sk } : {}),
+                          ...(routeStr ? { routeGeoJSON: routeStr } : {}),
+                          ...(foodExpenseEurosParsed != null &&
+                          foodExpenseEurosParsed > 0 &&
+                          splitPerPersonEuros != null
+                            ? {
+                                foodExpenseEuros: foodExpenseEurosParsed,
+                                splitPerPersonEuros,
+                                memberCountForSplit,
+                              }
+                            : {}),
+                        },
+                        { merge: true }
+                      );
                       clearRideDraft();
                       setFoodExpenseInput('');
                       setShowSummary(false);
