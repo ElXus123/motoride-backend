@@ -25,7 +25,7 @@ import {
   deleteField,
 } from 'firebase/firestore';
 import { db, logOut, handleFirestoreError, OperationType } from '../firebase';
-import { calculateLevel } from '../lib/utils';
+import { addPointsWithLevelUps } from '../lib/utils';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppMessage } from '../contexts/AppMessageContext';
 import { useLocationTracking } from '../hooks/useLocationTracking';
@@ -556,12 +556,17 @@ export default function MapView({
     };
   }, [groupMembersKey]);
 
+  const [profileLevel, setProfileLevel] = useState(1);
+
   useEffect(() => {
     if (!user) return;
     const unsub = onSnapshot(doc(db, 'users', user.uid), (doc) => {
       if (doc.exists()) {
-        setCustomName(doc.data().displayName || null);
-        setCustomPhotoURL(doc.data().photoURL || null);
+        const d = doc.data();
+        setCustomName(d.displayName || null);
+        setCustomPhotoURL(d.photoURL || null);
+        const lv = Math.max(1, Math.floor(Number(d.level) || 1));
+        setProfileLevel(lv);
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
@@ -1063,7 +1068,7 @@ export default function MapView({
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
 
-  const { level: userLevel } = calculateLevel(score);
+  const userLevel = profileLevel;
   const isHost = group?.createdBy === user?.uid;
   /** Evita cleanups del efecto pagehide/unmount cuando `isHost` pasa de false→true al cargar el snapshot del grupo (p. ej. tras promover desde REPEATED). */
   const isHostRef = useRef(!!isHost);
@@ -2202,9 +2207,13 @@ export default function MapView({
         const dist = stats.distance;
         if (userSnap.exists()) {
           const userData = userSnap.data();
-          const currentPoints = userData.points || 0;
-          const newPoints = currentPoints + finalScore;
-          const { level: newLevel } = calculateLevel(newPoints);
+          const currentPoints = Math.max(0, Math.floor(Number(userData.points) || 0));
+          const currentLevel = Math.max(1, Math.floor(Number(userData.level) || 1));
+          const { points: newPoints, level: newLevel } = addPointsWithLevelUps(
+            currentPoints,
+            currentLevel,
+            finalScore
+          );
           await updateDoc(userRef, {
             points: newPoints,
             level: newLevel,
@@ -2213,9 +2222,9 @@ export default function MapView({
             totalRightTurns: (userData.totalRightTurns || 0) + stats.rightTurns,
           });
         } else {
-          const { level: newLevel } = calculateLevel(finalScore);
+          const { points: newPoints, level: newLevel } = addPointsWithLevelUps(0, 1, finalScore);
           await setDoc(userRef, {
-            points: finalScore,
+            points: newPoints,
             level: newLevel,
             totalDistance: dist,
             totalLeftTurns: stats.leftTurns,

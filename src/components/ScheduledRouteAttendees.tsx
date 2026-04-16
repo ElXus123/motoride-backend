@@ -70,7 +70,8 @@ export default function ScheduledRouteAttendees({
         }
         const d = snap.data() as Record<string, unknown>;
         const pts = Math.max(0, Number(d.points || 0));
-        const level = calculateLevel(pts).level;
+        const storedLv = Math.max(1, Math.floor(Number(d.level) || 1));
+        const level = calculateLevel(pts, storedLv).level;
         const displayName =
           typeof d.displayName === 'string' && d.displayName.trim() ? d.displayName.trim() : 'Motero';
         const rawMoto = d.motorcycle;
