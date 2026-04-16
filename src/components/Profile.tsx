@@ -150,10 +150,14 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
   const confirmDeleteRide = async (rideId: string) => {
     try {
       await deleteDoc(doc(db, 'rideHistory', rideId));
+      showMessage({ variant: 'success', title: 'Historial', message: 'Ruta eliminada del historial.' });
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `rideHistory/${rideId}`);
     }
     setDeletingId(null);
+    if (detailRide?.id === rideId) {
+      setDetailRide(null);
+    }
   };
 
   const repeatFromHistory = useCallback(
@@ -332,39 +336,12 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
                   rideHistory.map((ride) => (
                     <div
                       key={ride.id}
-                      className="bg-zinc-950 border border-zinc-800 p-4 sm:p-5 rounded-2xl relative group flex flex-col gap-2"
+                      className="bg-zinc-950 border border-zinc-800 p-4 sm:p-5 rounded-2xl flex flex-col gap-2"
                     >
-                      <div className="absolute top-3 right-3 z-10">
-                        {deletingId === ride.id ? (
-                          <div className="flex gap-1">
-                            <button
-                              type="button"
-                              onClick={() => void confirmDeleteRide(ride.id)}
-                              className="text-[10px] bg-red-600 text-white px-2 py-1 rounded font-bold"
-                            >
-                              Confirmar
-                            </button>
-                            <button type="button" onClick={() => setDeletingId(null)} className="text-[10px] text-zinc-500 px-2">
-                              Cancelar
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              deleteRide(ride.id);
-                            }}
-                            className="text-zinc-600 hover:text-red-500 opacity-0 group-hover:opacity-100"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        )}
-                      </div>
                       <button
                         type="button"
                         onClick={() => setDetailRide(ride)}
-                        className="w-full text-left pr-14 rounded-xl -m-1 p-1 hover:bg-zinc-900/80 transition-colors"
+                        className="w-full text-left rounded-xl -m-1 p-1 hover:bg-zinc-900/80 transition-colors"
                       >
                         <h4 className="text-lg font-black text-orange-500 leading-snug tracking-tight pr-2">
                           {formatRideCardTitle(ride.groupName, ride.endTime)}
@@ -428,7 +405,10 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
           role="dialog"
           aria-modal="true"
           aria-labelledby="ride-detail-title"
-          onClick={() => setDetailRide(null)}
+          onClick={() => {
+            setDeletingId(null);
+            setDetailRide(null);
+          }}
         >
           <div
             className="w-full max-w-md max-h-[min(90dvh,640px)] overflow-y-auto rounded-[2rem] border border-zinc-700 bg-zinc-900 p-6 shadow-2xl"
@@ -454,7 +434,10 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
               </div>
               <button
                 type="button"
-                onClick={() => setDetailRide(null)}
+                onClick={() => {
+                  setDeletingId(null);
+                  setDetailRide(null);
+                }}
                 className="p-2 rounded-full text-zinc-400 hover:bg-zinc-800 hover:text-white shrink-0"
                 aria-label="Cerrar"
               >
@@ -535,6 +518,38 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
                 <Play size={18} /> Repetir esta ruta
               </button>
             )}
+
+            <div className="mt-4 border-t border-zinc-800 pt-4">
+              {deletingId === detailRide.id ? (
+                <div className="flex flex-col gap-2">
+                  <p className="text-xs text-zinc-500 text-center">¿Eliminar esta ruta del historial? No se puede deshacer.</p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void confirmDeleteRide(detailRide.id)}
+                      className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-sm font-bold"
+                    >
+                      Sí, eliminar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDeletingId(null)}
+                      className="flex-1 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-sm font-semibold"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => deleteRide(detailRide.id)}
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border border-red-500/35 bg-red-500/10 text-red-300 text-sm font-bold hover:bg-red-500/20 transition-colors"
+                >
+                  <Trash2 size={18} /> Eliminar del historial
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
