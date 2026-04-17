@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { doc, onSnapshot, getDoc, updateDoc, arrayUnion, setDoc } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../firebase';
+import { db, handleFirestoreError, motorideFunctions, OperationType } from '../firebase';
+import { httpsCallable } from 'firebase/functions';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppMessage } from '../contexts/AppMessageContext';
 import { X, UserPlus, Check, Loader2, User as UserIcon, Copy, Share2 } from 'lucide-react';
@@ -167,21 +168,58 @@ export default function InviteFriendsModal({
         sentAt: Date.now(),
         kind: inviteKind,
       };
+      const sendViaFirestore = async () => {
+        try {
+          await updateDoc(targetRef, { rideInvitePending: invitePayload });
+        } catch (step1: unknown) {
+          console.error('[invite] paso 1 updateDoc users/*/rideInvitePending', step1);
+          throw step1;
+        }
+        try {
+          await setDoc(inviteRef, mailboxPayload, { merge: true });
+        } catch (step2: unknown) {
+          console.error('[invite] paso 2 setDoc users/*/invites/*', step2);
+          throw step2;
+        }
+      };
+
       try {
-        await updateDoc(targetRef, { rideInvitePending: invitePayload });
-      } catch (step1: unknown) {
-        console.error('[invite] paso 1 updateDoc users/*/rideInvitePending', step1);
-        throw step1;
-      }
-      try {
-        await setDoc(inviteRef, mailboxPayload, { merge: true });
-      } catch (step2: unknown) {
-        console.error('[invite] paso 2 setDoc users/*/invites/*', step2);
-        throw step2;
+        const sendRideInvite = httpsCallable(motorideFunctions, 'sendRideInvite');
+        await sendRideInvite({
+          toUid: canonUid,
+          groupId: routeCode,
+          groupName: safeName,
+          inviteKind,
+        });
+      } catch (cloudErr: unknown) {
+        const fe = cloudErr as { code?: string; message?: string };
+        if (fe?.code === 'functions/not-found') {
+          console.warn('[invite] sendRideInvite no desplegada; fallback Firestore.');
+          await sendViaFirestore();
+        } else {
+          throw cloudErr;
+        }
       }
       setSentIds((s) => ({ ...s, [targetUid]: Date.now() }));
     } catch (e: unknown) {
-      const code = typeof e === 'object' && e && 'code' in e ? String((e as { code: string }).code) : '';
+      const errObj = e as { code?: string; message?: string };
+      const code = typeof errObj?.code === 'string' ? errObj.code : '';
+      if (code === 'functions/failed-precondition') {
+        showMessage({
+          variant: 'info',
+          title: 'Invitación',
+          message: errObj?.message || 'Esta invitación no se puede reenviar para esta ruta.',
+        });
+        return;
+      }
+      if (code === 'functions/permission-denied' || code === 'functions/invalid-argument') {
+        showMessage({
+          variant: 'error',
+          title: 'Invitación',
+          message: errObj?.message || 'No se pudo enviar la invitación.',
+        });
+        return;
+      }
       if (code === 'permission-denied') {
         try {
           const myRef = doc(db, 'users', user.uid);
@@ -232,17 +270,35 @@ export default function InviteFriendsModal({
             sentAt: Date.now(),
             kind: inviteKind,
           };
+          const sendRetryViaFirestore = async () => {
+            try {
+              await updateDoc(retryTarget, { rideInvitePending: pendingPayload });
+            } catch (rs1: unknown) {
+              console.error('[invite retry] paso 1 updateDoc rideInvitePending', rs1);
+              throw rs1;
+            }
+            try {
+              await setDoc(retryInviteRef, retryMailbox, { merge: true });
+            } catch (rs2: unknown) {
+              console.error('[invite retry] paso 2 setDoc invites', rs2);
+              throw rs2;
+            }
+          };
           try {
-            await updateDoc(retryTarget, { rideInvitePending: pendingPayload });
-          } catch (rs1: unknown) {
-            console.error('[invite retry] paso 1 updateDoc rideInvitePending', rs1);
-            throw rs1;
-          }
-          try {
-            await setDoc(retryInviteRef, retryMailbox, { merge: true });
-          } catch (rs2: unknown) {
-            console.error('[invite retry] paso 2 setDoc invites', rs2);
-            throw rs2;
+            const sendRideInvite = httpsCallable(motorideFunctions, 'sendRideInvite');
+            await sendRideInvite({
+              toUid: canonUid,
+              groupId: routeCode,
+              groupName: safeName,
+              inviteKind,
+            });
+          } catch (ce: unknown) {
+            const c = (ce as { code?: string })?.code || '';
+            if (c === 'functions/not-found') {
+              await sendRetryViaFirestore();
+            } else {
+              throw ce;
+            }
           }
           setSentIds((s) => ({ ...s, [targetUid]: Date.now() }));
           return;

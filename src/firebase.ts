@@ -1,9 +1,13 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
 import { getFirestore, doc, getDocFromCache, getDocFromServer } from 'firebase/firestore';
+import { getFunctions } from 'firebase/functions';
 import firebaseConfig from '../firebase-applet-config.json';
 
 export const app = initializeApp(firebaseConfig);
+
+/** Misma región que las Cloud Functions v2 del proyecto (sendRideInvite, etc.). */
+export const motorideFunctions = getFunctions(app, 'europe-west1');
 
 export const auth = getAuth(app);
 // @ts-ignore - firestoreDatabaseId might be missing in some configs
