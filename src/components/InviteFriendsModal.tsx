@@ -265,6 +265,25 @@ export default function InviteFriendsModal({
         sentAt: Date.now(),
         kind: inviteKind,
       };
+
+      /** Igual que en el reintento: alinear lista `friends` del invitador antes del fallback Firestore. */
+      const syncInviterFriendsIncludesReceiver = async () => {
+        try {
+          const myRef = doc(db, 'users', user.uid);
+          const mySnap = await getDoc(myRef);
+          if (!mySnap.exists()) return;
+          const myData = mySnap.data() as Record<string, unknown>;
+          const myFriends = Array.isArray(myData?.friends)
+            ? myData.friends.map((x: unknown) => String(x).trim()).filter(Boolean)
+            : [];
+          if (!myFriends.includes(canonUid)) {
+            await updateDoc(myRef, { friends: arrayUnion(canonUid) });
+          }
+        } catch (syncErr: unknown) {
+          console.warn('[invite] sync inviter friends antes de Firestore (opcional)', pickFirebaseErr(syncErr));
+        }
+      };
+
       const sendViaFirestore = async () => {
         try {
           await updateDoc(targetRef, { rideInvitePending: invitePayload });
@@ -330,6 +349,7 @@ export default function InviteFriendsModal({
             inviteDocId,
             inviteKind,
           });
+          await syncInviterFriendsIncludesReceiver();
           await sendViaFirestore();
         } else {
           let diag: Record<string, unknown> = {};
@@ -374,7 +394,9 @@ export default function InviteFriendsModal({
         /** Alcance compartido con `catch`: el `try` no expone `const` al `catch`. */
         let retryCanonUid = '';
         try {
-          console.warn('[invite] permission-denied en primer intento; entrando en reintento', {
+          console.info('[invite] permission-denied en primer intento Firestore → reintento', {
+            hint:
+              'Suele ocurrir si sendRideInvite no está en el proyecto (Callable not-found) y el primer updateDoc/setDoc choca con reglas o datos; el reintento vuelve a leer perfiles y sincroniza friends.',
             firstPassError: pickFirebaseErr(e),
             inviterUid: user.uid,
             targetUidInput: targetUid,
