@@ -287,10 +287,18 @@ service cloud.firestore {
       ].toSet();
     }
 
-    /** Escritura cruzada rideInvitePending: no modificar campos sensibles del perfil (solo lista deny). */
+    /**
+     * Escritura cruzada rideInvitePending: bloquear toques reales a campos sensibles.
+     * Usar changed/added/removed en lugar de affectedKeys(): en algunos docs, affectedKeys
+     * incluye claves por normalización de tipos (p. ej. number) aunque el cliente solo envíe
+     * rideInvitePending — y entonces choca con la denylist (points, level, …).
+     */
     function crossUserRideInviteUserDiffOk() {
-      let aff = request.resource.data.diff(resource.data).affectedKeys();
-      return !aff.hasAny(crossUserRideInviteForbiddenTopLevel());
+      let d = request.resource.data.diff(resource.data);
+      let forbid = crossUserRideInviteForbiddenTopLevel();
+      return !d.changedKeys().hasAny(forbid) &&
+        !d.addedKeys().hasAny(forbid) &&
+        !d.removedKeys().hasAny(forbid);
     }
 
     function crossUserSetRideInviteOnFriend(friendId) {
