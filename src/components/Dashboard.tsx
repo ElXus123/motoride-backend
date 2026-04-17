@@ -282,16 +282,22 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     userData?.friends,
     scheduledRoutes
   );
-  const inboxBadgeTotal =
-    inviteInboxCount + (user?.rideInvitePending?.groupId ? 1 : 0) + messageBadgeCount;
+  const inboxBadgeTotal = inviteInboxCount + messageBadgeCount;
   const [friendsPlannedRoutes, setFriendsPlannedRoutes] = useState<any[]>([]);
   const friendsRoutesChunkRef = useRef<Record<number, Record<string, any>>>({});
 
   useEffect(() => {
     if (!user?.uid) return;
-    const unsub = onSnapshot(collection(db, 'users', user.uid, 'invites'), (snap) => {
-      setInviteInboxCount(snap.size);
-    });
+    const unsub = onSnapshot(
+      query(
+        collection(db, 'rideInvites'),
+        where('toUid', '==', user.uid),
+        where('status', '==', 'pending')
+      ),
+      (snap) => {
+        setInviteInboxCount(snap.size);
+      }
+    );
     return unsub;
   }, [user?.uid]);
 

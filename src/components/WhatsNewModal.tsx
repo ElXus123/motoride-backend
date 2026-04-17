@@ -55,7 +55,7 @@ const CHANGELOG: ChangelogEntry[] = [
   },
   {
     kind: 'novedad',
-    text: 'Invitaciones: «Ignorar» en el popup solo quita la alerta; la invitación permanece en el buzón. Si la descartas desde el buzón, el invitador no puede volver a enviar esa misma ruta a tu usuario (registro `inviteRejections` en Firestore).',
+    text: 'Invitaciones: ahora se guardan en la colección `rideInvites` (sin escribir en el perfil de otro usuario). «Ignorar» en el popup borra esa invitación. Si la descartas desde el buzón con la papelera, queda bloqueado el reenvío para esa ruta (`inviteRejections`).',
     updatedAt: '2026-05-19T14:00:00',
   },
   {

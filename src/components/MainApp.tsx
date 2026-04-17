@@ -207,10 +207,9 @@ export default function MainApp() {
     };
   }, [mainMenuVisible, user?.uid]);
 
-  const inviteOverlay =
-    user?.rideInvitePending?.groupId ? (
-      <PendingRideInviteOverlay onJoinGroup={(id) => setActiveGroupId(id)} activeGroupId={activeGroupId} />
-    ) : null;
+  const inviteOverlay = user?.uid ? (
+    <PendingRideInviteOverlay onJoinGroup={(id) => setActiveGroupId(id)} activeGroupId={activeGroupId} />
+  ) : null;
 
   const notificationBanner =
     user && !autoJoining ? <NotificationPermissionBanner userUid={user.uid} /> : null;

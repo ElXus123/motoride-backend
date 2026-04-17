@@ -2,17 +2,19 @@ import { useEffect, useState } from 'react';
 import {
   collection,
   deleteDoc,
-  deleteField,
   doc,
   getDoc,
   onSnapshot,
   query,
+  where,
+  orderBy,
   limit,
   updateDoc,
   arrayUnion,
   setDoc,
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import { buildInviteRejectionDocId } from '../lib/rideInvites';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppMessage } from '../contexts/AppMessageContext';
 import { X, Inbox, ChevronRight, Trash2, Loader2, MessageCircle } from 'lucide-react';
@@ -22,10 +24,12 @@ import { motion, AnimatePresence } from 'motion/react';
 export type RideInviteDoc = {
   id: string;
   fromUid: string;
+  toUid?: string;
   groupId: string;
   groupName: string;
   sentAt: number;
   kind?: string;
+  status?: string;
 };
 
 type Props = {
@@ -57,7 +61,13 @@ export default function InvitesMailboxModal({
   useEffect(() => {
     if (!open || !user?.uid) return;
     setLoading(true);
-    const q = query(collection(db, 'users', user.uid, 'invites'), limit(60));
+    const q = query(
+      collection(db, 'rideInvites'),
+      where('toUid', '==', user.uid),
+      where('status', '==', 'pending'),
+      orderBy('sentAt', 'desc'),
+      limit(60)
+    );
     const unsub = onSnapshot(
       q,
       (snap) => {
@@ -87,13 +97,12 @@ export default function InvitesMailboxModal({
     const inviteDocId = inv.id;
     const gid = String(inv.groupId || '').trim().toUpperCase();
     const from = String(inv.fromUid || '').trim();
-    /** Debe coincidir con `firestore.rules` (`rejId == inviterUid + '_' + groupId`). */
-    const canonicalRejectionId = from && gid.length === 6 ? `${from}_${gid}` : inviteDocId;
+    const canonicalRejectionId = from && gid.length === 6 ? buildInviteRejectionDocId(from, gid) : inviteDocId;
 
     if (gid.length !== 6 || !from) {
       setRemovingId(inviteDocId);
       try {
-        await deleteDoc(doc(db, 'users', user.uid, 'invites', inviteDocId));
+        await deleteDoc(doc(db, 'rideInvites', inviteDocId));
       } catch (e) {
         console.error(e);
         showMessage({
@@ -121,7 +130,7 @@ export default function InvitesMailboxModal({
           { merge: true }
         );
       }
-      await deleteDoc(doc(db, 'users', user.uid, 'invites', inviteDocId));
+      await deleteDoc(doc(db, 'rideInvites', inviteDocId));
     } catch (e) {
       console.error(e);
       showMessage({
@@ -148,23 +157,16 @@ export default function InvitesMailboxModal({
           title: 'Ruta no encontrada',
           message: 'Ese código ya no existe o la ruta se ha borrado.',
         });
-        await deleteDoc(doc(db, 'users', user.uid, 'invites', inv.id)).catch(() => {});
+        await deleteDoc(doc(db, 'rideInvites', inv.id)).catch(() => {});
         return;
       }
       const groupData = snap.data() as { isScheduled?: boolean };
       const isScheduled = groupData?.isScheduled === true || inv.kind === 'scheduled_ride';
 
       await updateDoc(groupRef, { members: arrayUnion(user.uid) });
-      await deleteDoc(doc(db, 'users', user.uid, 'invites', inv.id));
-      const canonRejId = `${String(inv.fromUid || '').trim()}_${gid}`;
+      await deleteDoc(doc(db, 'rideInvites', inv.id));
+      const canonRejId = buildInviteRejectionDocId(String(inv.fromUid || '').trim(), gid);
       await deleteDoc(doc(db, 'users', user.uid, 'inviteRejections', canonRejId)).catch(() => {});
-
-      const uref = doc(db, 'users', user.uid);
-      const usnap = await getDoc(uref);
-      const pending = usnap.data()?.rideInvitePending as { groupId?: string } | undefined;
-      if (pending && String(pending.groupId || '').toUpperCase().trim() === gid) {
-        await updateDoc(uref, { rideInvitePending: deleteField() });
-      }
 
       onClose();
 

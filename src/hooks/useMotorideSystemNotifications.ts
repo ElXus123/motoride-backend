@@ -49,26 +49,23 @@ type RideInvitePayload = {
 /**
  * Notificaciones de sistema (Web Notification API; requiere permiso concedido, p. ej. vía `NotificationPermissionBanner`).
  * - ~1 h antes de una ruta programada (miembro del grupo).
- * - Invitación a ruta (bandeja `invites` y `rideInvitePending`).
+ * - Invitación a ruta (colección `rideInvites`).
  * - Solicitud de amistad (`friendRequestsIncoming`).
  */
 export function useMotorideSystemNotifications(userUid: string | undefined): void {
   const scheduledRoutesRef = useRef<{ id: string; scheduledTimestamp?: number; name?: string }[]>([]);
   const userDocFirstRef = useRef(true);
   const prevFriendIncomingRef = useRef<Set<string>>(new Set());
-  const lastRipKeyRef = useRef<string | null>(null);
   const invitesFirstRef = useRef(true);
 
   useEffect(() => {
     if (!userUid) {
       userDocFirstRef.current = true;
       prevFriendIncomingRef.current = new Set();
-      lastRipKeyRef.current = null;
       return;
     }
     userDocFirstRef.current = true;
     prevFriendIncomingRef.current = new Set();
-    lastRipKeyRef.current = null;
 
     const unsub = onSnapshot(
       doc(db, 'users', userUid),
@@ -79,16 +76,9 @@ export function useMotorideSystemNotifications(userUid: string | undefined): voi
           const incoming: string[] = Array.isArray(data.friendRequestsIncoming)
             ? data.friendRequestsIncoming.map((x: unknown) => String(x || '').trim()).filter(Boolean)
             : [];
-          const rip = data.rideInvitePending as RideInvitePayload | undefined | null;
-          const ripKey =
-            rip && rip.groupId
-              ? `${String(rip.fromUid || '').trim()}_${String(rip.groupId).toUpperCase().trim()}_${Number(rip.sentAt) || 0}`
-              : '';
-
           if (userDocFirstRef.current) {
             userDocFirstRef.current = false;
             prevFriendIncomingRef.current = new Set(incoming);
-            lastRipKeyRef.current = ripKey || null;
             return;
           }
 
@@ -103,24 +93,6 @@ export function useMotorideSystemNotifications(userUid: string | undefined): voi
             }
           }
           prevFriendIncomingRef.current = new Set(incoming);
-
-          if (ripKey && ripKey !== lastRipKeyRef.current) {
-            lastRipKeyRef.current = ripKey;
-            const from = String(rip?.fromUid || '').trim();
-            const gid = String(rip?.groupId || '').toUpperCase().trim();
-            const sentAt = Number(rip?.sentAt) || 0;
-            if (from && gid.length === 6 && tryConsumeDedupeKey(rideInviteDedupeKey(from, gid, sentAt))) {
-              const title =
-                rip?.kind === 'scheduled_ride' ? 'Invitación (ruta programada)' : 'Invitación a ruta';
-              postMotorideNotification(
-                title,
-                `${String(rip?.groupName || 'Ruta').trim() || 'Ruta'} (${gid}). Abre MotoRide para unirte.`,
-                `ride-pending-${from}_${gid}_${sentAt}`
-              );
-            }
-          } else if (!ripKey) {
-            lastRipKeyRef.current = null;
-          }
         } catch {
           /* ignore */
         }
@@ -138,7 +110,12 @@ export function useMotorideSystemNotifications(userUid: string | undefined): voi
       return;
     }
     invitesFirstRef.current = true;
-    const q = query(collection(db, 'users', userUid, 'invites'), limit(60));
+    const q = query(
+      collection(db, 'rideInvites'),
+      where('toUid', '==', userUid),
+      where('status', '==', 'pending'),
+      limit(60)
+    );
     const unsub = onSnapshot(
       q,
       (snap) => {

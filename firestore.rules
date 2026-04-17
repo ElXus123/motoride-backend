@@ -61,15 +61,7 @@ service cloud.firestore {
              (!('friendRequestsOutgoing' in data) || data.friendRequestsOutgoing is list) &&
              isValidOptionalBool('isPremium') &&
              isValidOptionalString('motorcycle', 120) &&
-             (!('rideInvitePending' in data) || data.rideInvitePending == null ||
-               (data.rideInvitePending is map &&
-                data.rideInvitePending.keys().hasAll(['fromUid','groupId','groupName','sentAt']) &&
-                data.rideInvitePending.fromUid is string &&
-                data.rideInvitePending.groupId is string &&
-                data.rideInvitePending.groupId.size() == 6 &&
-                data.rideInvitePending.groupName is string &&
-                data.rideInvitePending.groupName.size() <= 120 &&
-                validRideInviteSentAt(data.rideInvitePending.sentAt)));
+             (!('rideInvitePending' in data) || data.rideInvitePending == null);
     }
 
     function isOptionalRouteGeoJSON(data) {
@@ -279,60 +271,79 @@ service cloud.firestore {
         inviterMemberOfGroup(groupId);
     }
 
-    function crossUserRideInviteForbiddenTopLevel() {
-      return [
-        'friends', 'friendRequestsIncoming', 'friendRequestsOutgoing',
-        'displayName', 'displayNameLower', 'photoURL', 'isPremium', 'points', 'level',
-        'totalDistance', 'totalLeftTurns', 'totalRightTurns', 'motorcycle', 'email', 'uid'
-      ].toSet();
+    function rideInviteRootIdMatches(inviteId, data) {
+      return data.fromUid is string && data.toUid is string && data.groupId is string &&
+        inviteId == data.fromUid + '_' + data.toUid + '_' + data.groupId;
     }
 
-    /**
-     * Escritura cruzada rideInvitePending: bloquear toques reales a campos sensibles.
-     * Usar changed/added/removed en lugar de affectedKeys(): en algunos docs, affectedKeys
-     * incluye claves por normalización de tipos (p. ej. number) aunque el cliente solo envíe
-     * rideInvitePending — y entonces choca con la denylist (points, level, …).
-     */
-    function crossUserRideInviteUserDiffOk() {
-      let d = request.resource.data.diff(resource.data);
-      let forbid = crossUserRideInviteForbiddenTopLevel();
-      return !d.changedKeys().hasAny(forbid) &&
-        !d.addedKeys().hasAny(forbid) &&
-        !d.removedKeys().hasAny(forbid);
-    }
-
-    function crossUserSetRideInviteOnFriend(friendId) {
-      return request.auth.uid != friendId &&
-        crossUserRideInviteUserDiffOk() &&
-        request.resource.data.rideInvitePending is map &&
-        request.resource.data.rideInvitePending.fromUid == request.auth.uid &&
-        request.resource.data.rideInvitePending.groupId is string &&
-        request.resource.data.rideInvitePending.groupId.size() == 6 &&
-        request.resource.data.rideInvitePending.groupName is string &&
-        request.resource.data.rideInvitePending.groupName.size() <= 120 &&
-        validRideInviteSentAt(request.resource.data.rideInvitePending.sentAt) &&
-        rideInviteSocialOk(request.auth.uid, friendId, request.resource.data.rideInvitePending.groupId);
-    }
-
-    function isValidRideInviteDoc(data) {
-      return data.keys().hasAll(['fromUid', 'groupId', 'groupName', 'sentAt']) &&
+    function rideInviteCreatePayloadOk(data) {
+      return data.keys().hasAll(['fromUid', 'toUid', 'groupId', 'groupName', 'sentAt', 'kind', 'status']) &&
         data.fromUid is string &&
+        data.toUid is string &&
+        data.fromUid != data.toUid &&
         data.groupId is string && data.groupId.size() == 6 &&
-        data.groupName is string && data.groupName.size() <= 120 &&
+        data.groupName is string && data.groupName.size() >= 1 && data.groupName.size() <= 120 &&
         validRideInviteSentAt(data.sentAt) &&
-        (!('kind' in data) || (data.kind is string && data.kind.size() <= 32));
+        data.status == 'pending' &&
+        data.kind is string &&
+        (data.kind == 'live_ride' || data.kind == 'scheduled_ride');
     }
 
-    function crossUserWriteInviteDoc(receiverUid) {
-      let gid = request.resource.data.groupId;
-      return request.auth.uid != receiverUid &&
-        rideInviteSocialOk(request.auth.uid, receiverUid, gid);
+    function rideInviteNotBlockedByReceiver(data) {
+      return !exists(/databases/$(database)/documents/users/$(data.toUid)/inviteRejections/$(data.fromUid + '_' + data.groupId));
+    }
+
+    function rideInviteInviterRefreshOnly() {
+      let refreshKeys = ['sentAt', 'groupName', 'kind'].toSet();
+      let aff = request.resource.data.diff(resource.data).affectedKeys();
+      return resource.data.fromUid == request.auth.uid &&
+        resource.data.status == 'pending' &&
+        request.resource.data.fromUid == resource.data.fromUid &&
+        request.resource.data.toUid == resource.data.toUid &&
+        request.resource.data.groupId == resource.data.groupId &&
+        request.resource.data.status == 'pending' &&
+        aff.difference(refreshKeys).size() == 0;
+    }
+
+    function rideInviteRecipientStatusOnly() {
+      let statusOnly = ['status'].toSet();
+      let aff = request.resource.data.diff(resource.data).affectedKeys();
+      return request.auth.uid == resource.data.toUid &&
+        request.resource.data.fromUid == resource.data.fromUid &&
+        request.resource.data.toUid == resource.data.toUid &&
+        request.resource.data.groupId == resource.data.groupId &&
+        aff.difference(statusOnly).size() == 0 &&
+        (request.resource.data.status == 'rejected' ||
+          request.resource.data.status == 'dismissed' ||
+          request.resource.data.status == 'accepted');
     }
 
     function isGroupMember(groupId) {
       return exists(/databases/$(database)/documents/groups/$(groupId)) &&
         get(/databases/$(database)/documents/groups/$(groupId)).data.members is list &&
         request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.members;
+    }
+
+    /**
+     * Invitaciones a ruta (raíz). Solo el invitador crea/actualiza pendientes; invitado lee y borra o cambia estado.
+     * Evita escrituras cruzadas en `users/{otro}`.
+     */
+    match /rideInvites/{inviteId} {
+      allow read: if isAuthenticated() &&
+        (resource.data.fromUid == request.auth.uid || resource.data.toUid == request.auth.uid);
+      allow create: if isAuthenticated() &&
+        request.resource.data.fromUid == request.auth.uid &&
+        rideInviteRootIdMatches(inviteId, request.resource.data) &&
+        rideInviteCreatePayloadOk(request.resource.data) &&
+        rideInviteSocialOk(request.resource.data.fromUid, request.resource.data.toUid, request.resource.data.groupId) &&
+        rideInviteNotBlockedByReceiver(request.resource.data) &&
+        !exists(/databases/$(database)/documents/rideInvites/$(inviteId));
+      allow update: if isAuthenticated() && (
+        rideInviteInviterRefreshOnly() ||
+        rideInviteRecipientStatusOnly()
+      );
+      allow delete: if isAuthenticated() &&
+        (resource.data.fromUid == request.auth.uid || resource.data.toUid == request.auth.uid);
     }
 
     match /users/{userId} {
@@ -358,23 +369,8 @@ service cloud.firestore {
         crossUserRemoveSelfFromTheirIncoming(userId) ||
         crossUserRemoveSelfFromTheirOutgoing(userId) ||
         crossUserAcceptFriendOnRequester(userId) ||
-        crossUserRemoveSelfFromTheirFriends(userId) ||
-        crossUserSetRideInviteOnFriend(userId)
+        crossUserRemoveSelfFromTheirFriends(userId)
       );
-
-      match /invites/{inviteId} {
-        allow read: if isAuthenticated() && request.auth.uid == userId;
-        allow create: if isAuthenticated() &&
-          crossUserWriteInviteDoc(userId) &&
-          request.resource.data.fromUid == request.auth.uid &&
-          isValidRideInviteDoc(request.resource.data);
-        allow update: if isAuthenticated() &&
-          crossUserWriteInviteDoc(userId) &&
-          resource.data.fromUid == request.auth.uid &&
-          request.resource.data.fromUid == request.auth.uid &&
-          isValidRideInviteDoc(request.resource.data);
-        allow delete: if isAuthenticated() && request.auth.uid == userId;
-      }
 
       /** Rechazo definitivo desde buzón: el invitador no puede reenviar para esa ruta. */
       match /inviteRejections/{rejId} {

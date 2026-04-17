@@ -1,69 +1,85 @@
 import { useEffect, useState } from 'react';
-import { doc, getDoc, updateDoc, deleteDoc, deleteField, arrayUnion, setDoc } from 'firebase/firestore';
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  limit,
+  onSnapshot,
+  orderBy,
+  query,
+  updateDoc,
+  arrayUnion,
+  where,
+} from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppMessage } from '../contexts/AppMessageContext';
 import { Loader2 } from 'lucide-react';
+import { buildInviteRejectionDocId } from '../lib/rideInvites';
 
 type Pending = {
-  fromUid?: string;
-  groupId?: string;
-  groupName?: string;
-  sentAt?: number;
+  docId: string;
+  fromUid: string;
+  groupId: string;
+  groupName: string;
+  sentAt: number;
 };
 
 type Props = {
   onJoinGroup: (code: string) => void;
-  /** Si ya estás en esa ruta, no molestar */
   activeGroupId: string | null;
 };
 
-/** Solo quita el popup global; la invitación sigue en el buzón. */
-async function clearRideInvitePendingOnly(userUid: string) {
-  await updateDoc(doc(db, 'users', userUid), { rideInvitePending: deleteField() });
-}
-
-/** Tras unirse o si la ruta ya no existe: quita pendiente y la entrada del buzón. */
-async function clearPendingInviteForUser(userUid: string, pending: Pending, groupIdUpper: string) {
-  await updateDoc(doc(db, 'users', userUid), { rideInvitePending: deleteField() });
-  const from = String(pending.fromUid || '').trim();
-  if (from) {
-    const inviteDocId = `${from}_${groupIdUpper}`;
-    await deleteDoc(doc(db, 'users', userUid, 'invites', inviteDocId)).catch(() => {});
-    await deleteDoc(doc(db, 'users', userUid, 'inviteRejections', inviteDocId)).catch(() => {});
-  }
-}
-
-/** Ignorar popup: asegura copia en buzón por si solo había `rideInvitePending`. */
-async function ensureInviteMailboxCopy(userUid: string, pending: Pending, groupIdUpper: string) {
-  const from = String(pending.fromUid || '').trim();
-  if (!from || groupIdUpper.length !== 6) return;
-  const inviteDocId = `${from}_${groupIdUpper}`;
-  try {
-    const ref = doc(db, 'users', userUid, 'invites', inviteDocId);
-    const snap = await getDoc(ref);
-    if (snap.exists()) return;
-    await setDoc(ref, {
-      fromUid: from,
-      groupId: groupIdUpper,
-      groupName: String(pending.groupName || 'Ruta').trim().slice(0, 120) || 'Ruta',
-      sentAt: Number(pending.sentAt) || Date.now(),
-    });
-  } catch {
-    /* ignore */
-  }
-}
-
-/**
- * Invitación a ruta en tiempo real: debe mostrarse aunque el usuario esté en el mapa
- * (Dashboard no está montado → antes la invitación “no existía” en la UI).
- */
 export default function PendingRideInviteOverlay({ onJoinGroup, activeGroupId }: Props) {
   const { user } = useAuth();
   const showMessage = useAppMessage();
-  const pending = (user?.rideInvitePending || null) as Pending | null;
+  const [pending, setPending] = useState<Pending | null>(null);
   const [fromName, setFromName] = useState<string | null>(null);
   const [joining, setJoining] = useState(false);
+
+  useEffect(() => {
+    if (!user?.uid) {
+      setPending(null);
+      return;
+    }
+    const q = query(
+      collection(db, 'rideInvites'),
+      where('toUid', '==', user.uid),
+      where('status', '==', 'pending'),
+      orderBy('sentAt', 'desc'),
+      limit(1)
+    );
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        try {
+          const d = snap.docs[0];
+          if (!d) {
+            setPending(null);
+            return;
+          }
+          const x = d.data() as Record<string, unknown>;
+          const gid = String(x.groupId || '').toUpperCase().trim();
+          if (gid.length !== 6) {
+            setPending(null);
+            return;
+          }
+          setPending({
+            docId: d.id,
+            fromUid: String(x.fromUid || '').trim(),
+            groupId: gid,
+            groupName: String(x.groupName || 'Ruta').trim() || 'Ruta',
+            sentAt: typeof x.sentAt === 'number' ? x.sentAt : Number(x.sentAt) || 0,
+          });
+        } catch {
+          setPending(null);
+        }
+      },
+      () => setPending(null)
+    );
+    return () => unsub();
+  }, [user?.uid]);
 
   useEffect(() => {
     const uid = pending?.fromUid;
@@ -82,23 +98,21 @@ export default function PendingRideInviteOverlay({ onJoinGroup, activeGroupId }:
   }, [pending?.fromUid, pending?.sentAt]);
 
   useEffect(() => {
-    const gid = pending?.groupId ? String(pending.groupId).toUpperCase().trim() : '';
+    const gid = pending?.groupId || '';
     if (!gid || gid.length !== 6 || !activeGroupId || !user?.uid || !pending) return;
     if (gid !== activeGroupId.toUpperCase().trim()) return;
-    void clearRideInvitePendingOnly(user.uid).catch(() => {});
+    void deleteDoc(doc(db, 'rideInvites', pending.docId)).catch(() => {});
   }, [pending, activeGroupId, user?.uid]);
 
   if (!user || !pending?.groupId) return null;
 
-  const gid = String(pending.groupId).toUpperCase().trim();
-  if (gid.length !== 6) return null;
+  const gid = pending.groupId;
 
   const dismiss = async () => {
     try {
-      await ensureInviteMailboxCopy(user.uid, pending, gid);
-      await clearRideInvitePendingOnly(user.uid);
+      await deleteDoc(doc(db, 'rideInvites', pending.docId));
     } catch (e) {
-      handleFirestoreError(e, OperationType.UPDATE, `users/${user.uid}`);
+      handleFirestoreError(e, OperationType.DELETE, `rideInvites/${pending.docId}`);
     }
   };
 
@@ -113,7 +127,10 @@ export default function PendingRideInviteOverlay({ onJoinGroup, activeGroupId }:
       }
       const groupData = snap.data() as { isScheduled?: boolean };
       await updateDoc(gRef, { members: arrayUnion(user.uid) });
-      await clearPendingInviteForUser(user.uid, pending, gid);
+      await deleteDoc(doc(db, 'rideInvites', pending.docId));
+      const rejId = buildInviteRejectionDocId(pending.fromUid, gid);
+      await deleteDoc(doc(db, 'users', user.uid, 'inviteRejections', rejId)).catch(() => {});
+
       if (groupData?.isScheduled === true) {
         showMessage({
           variant: 'success',

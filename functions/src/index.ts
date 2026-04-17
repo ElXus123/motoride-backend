@@ -111,8 +111,7 @@ async function sendMulticastToUser(
 }
 
 /**
- * Invitación a ruta escrita con Admin SDK (evita reglas Firestore del cliente que estaban fallando).
- * Requisitos: autenticado, invitador en members del grupo, destino existe, amistad/DM o co-miembro.
+ * Invitación a ruta (Admin SDK → `rideInvites/{from}_{to}_{group}`). Opcional si el cliente escribe directo.
  */
 export const sendRideInvite = onCall({ region: 'europe-west1', cors: true }, async (request) => {
   const fromUid = request.auth?.uid;
@@ -166,26 +165,31 @@ export const sendRideInvite = onCall({ region: 'europe-west1', cors: true }, asy
     );
   }
 
-  const inviteDocId = `${fromUid}_${routeCode}`;
-  const rej = await db.collection('users').doc(toUid).collection('inviteRejections').doc(inviteDocId).get();
+  const inviteDocId = `${fromUid}_${toUid}_${routeCode}`;
+  const rejId = `${fromUid}_${routeCode}`;
+  const rej = await db.collection('users').doc(toUid).collection('inviteRejections').doc(rejId).get();
   if (rej.exists) {
     throw new HttpsError('failed-precondition', 'Esta invitación fue rechazada en el buzón para esta ruta.');
   }
 
   const sentAt = Date.now();
-  const invitePayload = { fromUid, groupId: routeCode, groupName, sentAt };
-  const mailboxPayload = { fromUid, groupId: routeCode, groupName, sentAt, kind: inviteKind };
-
-  const toRef = db.collection('users').doc(toUid);
-  const inviteRef = toRef.collection('invites').doc(inviteDocId);
+  const inviteRef = db.collection('rideInvites').doc(inviteDocId);
 
   try {
-    const batch = db.batch();
-    batch.update(toRef, { rideInvitePending: invitePayload });
-    batch.set(inviteRef, mailboxPayload, { merge: true });
-    await batch.commit();
+    await inviteRef.set(
+      {
+        fromUid,
+        toUid,
+        groupId: routeCode,
+        groupName,
+        sentAt,
+        kind: inviteKind,
+        status: 'pending',
+      },
+      { merge: true }
+    );
   } catch (e) {
-    logger.error('sendRideInvite batch', e);
+    logger.error('sendRideInvite rideInvites', e);
     throw new HttpsError('internal', 'No se pudo guardar la invitación.');
   }
 
@@ -194,16 +198,19 @@ export const sendRideInvite = onCall({ region: 'europe-west1', cors: true }, asy
 
 export const onRideInviteWrite = onDocumentWritten(
   {
-    document: 'users/{userId}/invites/{inviteId}',
+    document: 'rideInvites/{inviteId}',
     region: 'europe-west1',
   },
   async (event) => {
     const after = event.data?.after;
     if (!after?.exists) return;
-    const userId = event.params.userId;
+    const userId = String(after.get('toUid') || '').trim();
+    if (!userId) return;
     const prevSent = event.data?.before?.exists ? event.data.before.get('sentAt') : null;
     const nextSent = after.get('sentAt');
     if (prevSent !== null && prevSent === nextSent) return;
+    const st = String(after.get('status') || '');
+    if (st !== '' && st !== 'pending') return;
     const groupName = String(after.get('groupName') || 'Ruta').trim() || 'Ruta';
     const groupId = String(after.get('groupId') || '').trim().toUpperCase();
     if (groupId.length !== 6) return;
