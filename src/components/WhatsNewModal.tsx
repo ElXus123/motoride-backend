@@ -3,7 +3,7 @@ import { Check } from 'lucide-react';
 import appLogo from '../../ICONO.png';
 
 /** Sube este valor cuando cambien las novedades para volver a mostrar el aviso una vez por dispositivo. */
-export const WHATS_NEW_VERSION = '2026.05.01';
+export const WHATS_NEW_VERSION = '2026.05.17';
 
 const STORAGE_KEY = 'motoride_whats_new_seen_version';
 
@@ -19,9 +19,34 @@ export type ChangelogEntry = {
 /** Orden visual: más recientes arriba; `updatedAt` descendente. */
 const CHANGELOG: ChangelogEntry[] = [
   {
+    kind: 'arreglo',
+    text: 'Mapa con el rumbo arriba en marcha: corregidos los huecos grises en las esquinas al girar el mapa; la capa se escala para cubrir siempre el marco de la pantalla.',
+    updatedAt: '2026-05-17T12:00:00',
+  },
+  {
+    kind: 'arreglo',
+    text: 'Desactivada la detección automática de «caída» que podía disparar un aviso al inclinar mucho el móvil estando casi parado; el resto de alertas manuales del menú no cambia.',
+    updatedAt: '2026-05-17T11:55:00',
+  },
+  {
     kind: 'novedad',
-    text: 'HUD del mapa: encima de la temperatura ves la velocidad del viento (km/h) y una flecha que indica hacia dónde sopla (Open-Meteo).',
-    updatedAt: '2026-05-01T12:00:00',
+    text: 'Notificaciones: barra inferior «Activar» para pedir el permiso del navegador con un toque (necesario en muchos móviles); así encajan mejor los avisos de invitación a ruta y amistad.',
+    updatedAt: '2026-05-17T11:50:00',
+  },
+  {
+    kind: 'novedad',
+    text: 'Notificaciones del sistema (navegador): si aceptas el permiso, la app puede avisarte ~1 h antes de una ruta programada a la que vas apuntado, cuando recibes una invitación a ruta (bandeja o invitación en curso) y cuando tienes una solicitud de amistad nueva.',
+    updatedAt: '2026-05-02T14:00:00',
+  },
+  {
+    kind: 'novedad',
+    text: 'Perfil y nivel: progreso hacia el siguiente nivel más claro y coherente con el guardado en servidor; el panel de administración de puntos incluye más detalle y acciones.',
+    updatedAt: '2026-05-02T13:45:00',
+  },
+  {
+    kind: 'novedad',
+    text: 'HUD del mapa: velocidad del viento (km/h, Open-Meteo) y flecha relativa a tu rumbo de GPS/navegación («arriba» = sentido de marcha) para leer mejor viento de frente, lateral o a favor.',
+    updatedAt: '2026-05-02T13:30:00',
   },
   {
     kind: 'arreglo',

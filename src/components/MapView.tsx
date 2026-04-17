@@ -588,6 +588,9 @@ export default function MapView({
   const lastKnownLocForPrefetchRef = useRef<{ lat: number; lng: number } | null>(null);
   const mapZoomRef = useRef(16);
   const mapViewportCenterRef = useRef<{ lat: number; lng: number } | null>(null);
+  /** Medidas del contenedor del mapa (rumbo arriba): escalamos la capa Leaflet para no dejar triángulos vacíos al rotar. */
+  const mapRotationShellRef = useRef<HTMLDivElement>(null);
+  const [mapRotationShellPx, setMapRotationShellPx] = useState({ w: 1, h: 1 });
   const tilePrefetchGenRef = useRef(0);
   const [tilePrefetchEpoch, setTilePrefetchEpoch] = useState(0);
   const bumpTilePrefetch = useCallback(() => setTilePrefetchEpoch((n) => n + 1), []);
@@ -693,6 +696,34 @@ export default function MapView({
       setShowWeather(false);
     }
   }, [premiumGpsPolicy.rainRadarPremiumOnly, selfPremium, showWeather]);
+
+  useEffect(() => {
+    const el = mapRotationShellRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const apply = () => {
+      try {
+        const r = el.getBoundingClientRect();
+        setMapRotationShellPx({ w: Math.max(1, r.width), h: Math.max(1, r.height) });
+      } catch {
+        /* ignore */
+      }
+    };
+    apply();
+    let ro: ResizeObserver | null = null;
+    try {
+      ro = new ResizeObserver(apply);
+      ro.observe(el);
+    } catch {
+      /* ignore */
+    }
+    return () => {
+      try {
+        ro?.disconnect();
+      } catch {
+        /* ignore */
+      }
+    };
+  }, []);
 
   // Rain Viewer: load real tile path from API (paths are hashed; /v2/radar/0 is invalid). Refresh cada 5 min.
   useEffect(() => {
@@ -1369,6 +1400,15 @@ export default function MapView({
     effectiveRouteForNav,
     navState
   );
+
+  /** Misma convención que la flecha del GPS: 0° = hacia donde avanzas; la flecha del viento muestra hacia dónde sopla relativo a ese rumbo. */
+  const windHudArrowRotationDeg = useMemo(() => {
+    if (mapWeather.windBlowToDeg == null || !Number.isFinite(mapWeather.windBlowToDeg)) return null;
+    const h = Number.isFinite(navigationHeading) ? navigationHeading : 0;
+    const rel = mapWeather.windBlowToDeg - h;
+    return ((rel % 360) + 360) % 360;
+  }, [mapWeather.windBlowToDeg, navigationHeading]);
+
   const displayLocation = useMemo(() => {
     if (!currentLocation) return null;
     const snapCandidate = navState.routeGeometry || effectiveRouteForNav;
@@ -2990,21 +3030,28 @@ export default function MapView({
   /** Sin redondear: zoom dinámico suave según velocidad real. */
   const speedKmhForMapFollow = (speed ?? 0) * 3.6;
   const isMoving = currentSpeedKmh > 2;
+  /** Mapa «rumbo arriba»: rotación CSS del contenedor Leaflet. */
+  const mapHeadingRotationActive = isRecording && currentSpeedKmh > 3 && localDistance >= 0.05;
+  /** Escala uniforme mínima para que el rectángulo rotado cubra el viewport (evita esquinas grises). */
+  const mapRotationCoverScale = useMemo(() => {
+    if (!mapHeadingRotationActive) return 1;
+    const W = mapRotationShellPx.w;
+    const H = mapRotationShellPx.h;
+    const rad = (Math.abs(navigationHeading % 360) * Math.PI) / 180;
+    const absCos = Math.abs(Math.cos(rad));
+    const absSin = Math.abs(Math.sin(rad));
+    const denomW = W * absCos + H * absSin;
+    const denomH = W * absSin + H * absCos;
+    if (!(denomW > 0) || !(denomH > 0)) return 1;
+    const s = Math.max(W / denomW, H / denomH);
+    if (!Number.isFinite(s) || s < 1) return 1;
+    return Math.min(s, 4);
+  }, [mapHeadingRotationActive, mapRotationShellPx.w, mapRotationShellPx.h, navigationHeading]);
 
   const DayWeatherIcon = useMemo(
     () => weatherWmoToLucide(mapWeather.dailyWeatherCode),
     [mapWeather.dailyWeatherCode]
   );
-
-  // Fall detection
-  useEffect(() => {
-    const leanThreshold = Math.max(45, maxLeanLeft, maxLeanRight);
-    if (isRecording && currentSpeedKmh < 5 && Math.abs(leanAngle) >= leanThreshold) {
-      if (alertType !== 'Caída') {
-        sendAlert('Caída');
-      }
-    }
-  }, [currentSpeedKmh, leanAngle, alertType, isRecording, maxLeanLeft, maxLeanRight]);
 
   useEffect(() => {
     if (!gpsError || !isHost) return;
@@ -4298,21 +4345,21 @@ export default function MapView({
             {showHudWeather && (
               <div
                 className="flex items-center justify-center gap-1 mb-0.5 sm:mb-1 min-h-[18px] sm:min-h-[20px] w-full"
-                title="Viento (~10 m). La flecha indica hacia dónde sopla; velocidad en km/h (Open-Meteo)."
+                title="Viento (~10 m). Flecha relativa a tu rumbo (misma base que la flecha GPS): arriba = mismo sentido que llevas; km/h (Open-Meteo)."
               >
                 {mapWeather.loading && mapWeather.windSpeedKmh == null ? (
                   <span
                     className="inline-block h-3 w-3 border-2 border-cyan-400/25 border-t-cyan-300/80 rounded-full animate-spin"
                     aria-hidden
                   />
-                ) : mapWeather.windSpeedKmh != null && mapWeather.windBlowToDeg != null ? (
+                ) : mapWeather.windSpeedKmh != null && mapWeather.windBlowToDeg != null && windHudArrowRotationDeg != null ? (
                   <>
                     <span className="inline-flex items-center justify-center w-4 h-4 sm:w-[18px] sm:h-[18px] shrink-0 text-cyan-300">
                       <ArrowUp
                         size={isLandscapeUi ? 13 : 15}
                         strokeWidth={2.5}
                         className="drop-shadow-sm"
-                        style={{ transform: `rotate(${mapWeather.windBlowToDeg}deg)` }}
+                        style={{ transform: `rotate(${windHudArrowRotationDeg}deg)` }}
                         aria-hidden
                       />
                     </span>
@@ -4538,11 +4585,13 @@ export default function MapView({
         </div>
       )}
 
-      <div className="w-full flex-1 relative overflow-hidden bg-[#dfe0e6]">
+      <div ref={mapRotationShellRef} className="w-full flex-1 relative overflow-hidden bg-[#dfe0e6]">
         <div
           className="w-full h-full transition-transform duration-500 ease-out isolate"
           style={{
-            transform: isRecording && currentSpeedKmh > 3 && localDistance >= 0.05 ? `rotate(${-navigationHeading}deg)` : 'none',
+            transform: mapHeadingRotationActive
+              ? `scale(${mapRotationCoverScale}) rotate(${-navigationHeading}deg)`
+              : 'none',
             transformOrigin: 'center center',
             willChange: isRecording && currentSpeedKmh > 5 ? 'transform' : 'auto',
             WebkitBackfaceVisibility: 'hidden',
@@ -4558,9 +4607,7 @@ export default function MapView({
             fadeAnimation={false}
             zoomAnimation
           >
-        <MapInvalidateHelper
-          layoutKey={`${isRecording && currentSpeedKmh > 3 && localDistance >= 0.05 ? 1 : 0}`}
-        />
+        <MapInvalidateHelper layoutKey={`${mapHeadingRotationActive ? 1 : 0}`} />
         <MapTilePrefetchBridge
           mapZoomRef={mapZoomRef}
           mapCenterRef={mapViewportCenterRef}
@@ -4568,9 +4615,7 @@ export default function MapView({
         />
         <TileLayer
           url="https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png"
-          keepBuffer={
-            isRecording && currentSpeedKmh > 3 && localDistance >= 0.05 ? 420 : 300
-          }
+          keepBuffer={mapHeadingRotationActive ? 420 : 300}
           updateWhenIdle={false}
           updateWhenZooming={false}
           maxZoom={20}
@@ -4601,9 +4646,7 @@ export default function MapView({
               maxNativeZoom={rainRadar.maxNativeZoom}
               maxZoom={20}
               className="leaflet-radar-overlay"
-              keepBuffer={
-                isRecording && currentSpeedKmh > 3 && localDistance >= 0.05 ? 168 : 112
-              }
+              keepBuffer={mapHeadingRotationActive ? 168 : 112}
               noWrap={false}
               errorTileUrl={LEAFLET_TRANSPARENT_ERROR_TILE}
               eventHandlers={{
@@ -4687,9 +4730,7 @@ export default function MapView({
         <MapController
           location={mapVisualLocation}
           bearingForMapOffset={navigationHeading}
-          headingRotationActive={
-            isRecording && currentSpeedKmh > 3 && localDistance >= 0.05
-          }
+          headingRotationActive={mapHeadingRotationActive}
           isFollowing={isFollowing}
           showRanking={showRanking}
           isRecording={isRecording}

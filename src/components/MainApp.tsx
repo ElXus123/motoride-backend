@@ -10,6 +10,8 @@ import { doc, getDoc, updateDoc, arrayUnion } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { syncUserPointsAndLevelFromServer } from '../lib/userPointsSync';
 import { formatScheduledRideDayOnlyEs } from '../lib/scheduledRouteShare';
+import { useMotorideSystemNotifications } from '../hooks/useMotorideSystemNotifications';
+import NotificationPermissionBanner from './NotificationPermissionBanner';
 import { Calendar } from 'lucide-react';
 
 type ScheduledJoinPromptState =
@@ -96,6 +98,8 @@ export default function MainApp() {
   useEffect(() => {
     if (!user) setScheduledJoinPrompt(null);
   }, [user]);
+
+  useMotorideSystemNotifications(user?.uid);
 
   const acceptScheduledRsvp = async () => {
     if (!user?.uid || !scheduledJoinPrompt || scheduledJoinPrompt.variant !== 'confirm') return;
@@ -189,6 +193,8 @@ export default function MainApp() {
       <PendingRideInviteOverlay onJoinGroup={(id) => setActiveGroupId(id)} activeGroupId={activeGroupId} />
     ) : null;
 
+  const notificationBanner = user && !autoJoining ? <NotificationPermissionBanner /> : null;
+
   if (autoJoining) {
     return (
       <>
@@ -204,6 +210,7 @@ export default function MainApp() {
   if (showProfile) {
     return (
       <>
+        {notificationBanner}
         {inviteOverlay}
         <Profile
           onBack={() => setShowProfile(false)}
@@ -247,6 +254,7 @@ export default function MainApp() {
 
   return (
     <>
+      {notificationBanner}
       <WhatsNewModal />
       {inviteOverlay}
       {scheduledJoinPrompt && (
