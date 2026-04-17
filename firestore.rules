@@ -293,16 +293,17 @@ service cloud.firestore {
       return !exists(/databases/$(database)/documents/users/$(data.toUid)/inviteRejections/$(data.fromUid + '_' + data.groupId));
     }
 
-    function rideInviteInviterRefreshOnly() {
-      let refreshKeys = ['sentAt', 'groupName', 'kind'].toSet();
-      let aff = request.resource.data.diff(resource.data).affectedKeys();
-      return resource.data.fromUid == request.auth.uid &&
+    /** Reenvío / merge: el invitador puede reescribir el doc mientras siga pending y los ids fijos. */
+    function rideInviteInviterUpdatePending() {
+      return request.auth.uid == resource.data.fromUid &&
         resource.data.status == 'pending' &&
         request.resource.data.fromUid == resource.data.fromUid &&
         request.resource.data.toUid == resource.data.toUid &&
         request.resource.data.groupId == resource.data.groupId &&
         request.resource.data.status == 'pending' &&
-        aff.difference(refreshKeys).size() == 0;
+        rideInviteCreatePayloadOk(request.resource.data) &&
+        rideInviteSocialOk(request.resource.data.fromUid, request.resource.data.toUid, request.resource.data.groupId) &&
+        rideInviteNotBlockedByReceiver(request.resource.data);
     }
 
     function rideInviteRecipientStatusOnly() {
@@ -339,7 +340,7 @@ service cloud.firestore {
         rideInviteNotBlockedByReceiver(request.resource.data) &&
         !exists(/databases/$(database)/documents/rideInvites/$(inviteId));
       allow update: if isAuthenticated() && (
-        rideInviteInviterRefreshOnly() ||
+        rideInviteInviterUpdatePending() ||
         rideInviteRecipientStatusOnly()
       );
       allow delete: if isAuthenticated() &&
@@ -381,12 +382,14 @@ service cloud.firestore {
             data.groupId.size() == 6 &&
             rejId == data.inviterUid + '_' + data.groupId;
         }
+        /**
+         * Lectura: el dueño del perfil; el invitador citado en el doc; o id canónico `inviterUid_codigo6`
+         * (así un `getDoc` previo a enviar invitación no falla si el rechazo aún no existe).
+         */
         allow read: if isAuthenticated() && (
           request.auth.uid == userId ||
-          (
-            exists(/databases/$(database)/documents/users/$(userId)/inviteRejections/$(rejId)) &&
-            get(/databases/$(database)/documents/users/$(userId)/inviteRejections/$(rejId)).data.inviterUid == request.auth.uid
-          )
+          (resource != null && resource.data.inviterUid == request.auth.uid) ||
+          rejId.matches('^' + request.auth.uid + '_[A-Za-z0-9]{6}$')
         );
         allow create: if isOwner(userId) &&
           request.resource.data.keys().hasAll(['inviterUid', 'groupId', 'rejectedAt']) &&
