@@ -255,20 +255,33 @@ service cloud.firestore {
         );
     }
 
-    /** Solo tocar rideInvitePending en el doc del amigo; hasOnly fallaba si el diff marcaba más de una clave. */
-    function crossUserRideInviteUserDiffOk() {
-      let aff = request.resource.data.diff(resource.data).affectedKeys();
-      let forbidden = [
+    function crossUserRideInviteForbiddenTopLevel() {
+      return [
         'friends', 'friendRequestsIncoming', 'friendRequestsOutgoing',
         'displayName', 'displayNameLower', 'photoURL', 'isPremium', 'points', 'level',
         'totalDistance', 'totalLeftTurns', 'totalRightTurns', 'motorcycle', 'email', 'uid'
       ].toSet();
-      return !aff.hasAny(forbidden) && aff.hasAny(['rideInvitePending']);
+    }
+
+    /**
+     * Escritura cruzada rideInvitePending: no tocar campos sensibles del perfil.
+     * addedKeys/changedKeys detectan el mapa mejor que affectedKeys.hasAny en algunos clientes.
+     * Si el invitador es miembro del grupo del payload, se admite aunque el diff de pending falle
+     * (evita falsos denegados cuando las reglas no marcan rideInvitePending como tocado).
+     */
+    function crossUserRideInviteUserDiffOk(gid) {
+      let diff = request.resource.data.diff(resource.data);
+      let aff = diff.affectedKeys();
+      let fk = crossUserRideInviteForbiddenTopLevel();
+      let pendingTouched =
+        diff.addedKeys().hasAny(['rideInvitePending']) ||
+        diff.changedKeys().hasAny(['rideInvitePending']);
+      return !aff.hasAny(fk) &&
+        (pendingTouched || inviterMemberOfGroup(gid));
     }
 
     function crossUserSetRideInviteOnFriend(friendId) {
       return request.auth.uid != friendId &&
-        crossUserRideInviteUserDiffOk() &&
         request.resource.data.rideInvitePending is map &&
         request.resource.data.rideInvitePending.fromUid == request.auth.uid &&
         request.resource.data.rideInvitePending.groupId is string &&
@@ -276,6 +289,7 @@ service cloud.firestore {
         request.resource.data.rideInvitePending.groupName is string &&
         request.resource.data.rideInvitePending.groupName.size() <= 120 &&
         validRideInviteSentAt(request.resource.data.rideInvitePending.sentAt) &&
+        crossUserRideInviteUserDiffOk(request.resource.data.rideInvitePending.groupId) &&
         (
           usersAreFriends(request.auth.uid, friendId) ||
           hasDmRoomBetween(request.auth.uid, friendId) ||

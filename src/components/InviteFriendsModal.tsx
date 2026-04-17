@@ -167,8 +167,18 @@ export default function InviteFriendsModal({
         sentAt: Date.now(),
         kind: inviteKind,
       };
-      await updateDoc(targetRef, { rideInvitePending: invitePayload });
-      await setDoc(inviteRef, mailboxPayload, { merge: true });
+      try {
+        await updateDoc(targetRef, { rideInvitePending: invitePayload });
+      } catch (step1: unknown) {
+        console.error('[invite] paso 1 updateDoc users/*/rideInvitePending', step1);
+        throw step1;
+      }
+      try {
+        await setDoc(inviteRef, mailboxPayload, { merge: true });
+      } catch (step2: unknown) {
+        console.error('[invite] paso 2 setDoc users/*/invites/*', step2);
+        throw step2;
+      }
       setSentIds((s) => ({ ...s, [targetUid]: Date.now() }));
     } catch (e: unknown) {
       const code = typeof e === 'object' && e && 'code' in e ? String((e as { code: string }).code) : '';
@@ -222,17 +232,35 @@ export default function InviteFriendsModal({
             sentAt: Date.now(),
             kind: inviteKind,
           };
-          await updateDoc(retryTarget, { rideInvitePending: pendingPayload });
-          await setDoc(retryInviteRef, retryMailbox, { merge: true });
+          try {
+            await updateDoc(retryTarget, { rideInvitePending: pendingPayload });
+          } catch (rs1: unknown) {
+            console.error('[invite retry] paso 1 updateDoc rideInvitePending', rs1);
+            throw rs1;
+          }
+          try {
+            await setDoc(retryInviteRef, retryMailbox, { merge: true });
+          } catch (rs2: unknown) {
+            console.error('[invite retry] paso 2 setDoc invites', rs2);
+            throw rs2;
+          }
           setSentIds((s) => ({ ...s, [targetUid]: Date.now() }));
           return;
         } catch (retryErr: unknown) {
           console.error('Invite retry failed', retryErr);
+          const detail =
+            retryErr instanceof Error
+              ? retryErr.message
+              : typeof retryErr === 'object' && retryErr && 'message' in retryErr
+                ? String((retryErr as { message: string }).message)
+                : '';
           showMessage({
             variant: 'error',
             title: 'Permiso denegado',
             message:
-              'No se pudo enviar la invitación. Si estáis en la misma ruta como miembros debería permitirse; si no, hace falta ser amigos (al menos uno en la lista del otro). Prueba a cerrar sesión y volver a entrar, o que el otro te envíe una solicitud de amistad.',
+              'No se pudo enviar la invitación. Si estáis en la misma ruta como miembros debería permitirse; si no, hace falta ser amigos (al menos uno en la lista del otro). Prueba a cerrar sesión y volver a entrar, o que el otro te envíe una solicitud de amistad.' +
+              (detail ? ` (detalle técnico: ${detail.slice(0, 120)})` : '') +
+              ' En ordenador: F12 → Consola y busca la línea que empieza por [invite].',
           });
           return;
         }
