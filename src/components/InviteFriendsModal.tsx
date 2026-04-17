@@ -83,13 +83,48 @@ export default function InviteFriendsModal({
     if (!user) return;
     const targetUid = String(friendUid || '').trim();
     if (!targetUid || targetUid === user.uid) return;
-    const gid = groupId.toUpperCase().trim();
-    if (gid === 'REPEATED' || gid.length !== 6) {
+    const gidInput = groupId.toUpperCase().trim();
+    if (gidInput === 'REPEATED' || gidInput.length !== 6) {
       showMessage({
         variant: 'error',
         title: 'Código de ruta',
         message:
           'No se puede enviar la invitación: el código de ruta no es válido (debe ser 6 caracteres). Si acabas de crear la ruta, vuelve a abrir Invitar.',
+      });
+      return;
+    }
+    let routeCode = gidInput;
+    try {
+      const groupSnap = await getDoc(doc(db, 'groups', gidInput));
+      if (!groupSnap.exists()) {
+        showMessage({
+          variant: 'error',
+          title: 'Código de ruta',
+          message:
+            'No hay ningún grupo con ese código en la base de datos. Revisa el código en pantalla; si acabas de desplegar la app, publica también las reglas de Firestore del repo (firebase deploy --only firestore:rules).',
+        });
+        return;
+      }
+      routeCode = groupSnap.id;
+      const rawMembers = (groupSnap.data() as { members?: unknown } | undefined)?.members;
+      const memberArr: string[] = Array.isArray(rawMembers)
+        ? rawMembers.map((x) => String(x)).filter(Boolean)
+        : [];
+      if (!memberArr.includes(user.uid)) {
+        showMessage({
+          variant: 'error',
+          title: 'Invitación',
+          message:
+            'Tu sesión no consta como miembro de esta ruta en el servidor. Sal de la ruta y vuelve a unirte con el código, luego abre Invitar otra vez.',
+        });
+        return;
+      }
+    } catch (ge: unknown) {
+      console.error(ge);
+      showMessage({
+        variant: 'error',
+        title: 'Ruta',
+        message: 'No se pudo comprobar el grupo. Revisa la conexión e inténtalo otra vez.',
       });
       return;
     }
@@ -106,7 +141,7 @@ export default function InviteFriendsModal({
         return;
       }
       const canonUid = targetSnap.id;
-      const inviteDocId = `${user.uid}_${gid}`;
+      const inviteDocId = `${user.uid}_${routeCode}`;
       const rejectionSnap = await getDoc(doc(db, 'users', canonUid, 'inviteRejections', inviteDocId));
       if (rejectionSnap.exists()) {
         showMessage({
@@ -119,7 +154,7 @@ export default function InviteFriendsModal({
       }
       const invitePayload = {
         fromUid: user.uid,
-        groupId: gid,
+        groupId: routeCode,
         groupName: safeName,
         sentAt: Date.now(),
       };
@@ -131,7 +166,7 @@ export default function InviteFriendsModal({
         doc(db, 'users', canonUid, 'invites', inviteDocId),
         {
           fromUid: user.uid,
-          groupId: gid,
+          groupId: routeCode,
           groupName: safeName,
           sentAt: Date.now(),
           kind: inviteKind,
@@ -154,7 +189,7 @@ export default function InviteFriendsModal({
             return;
           }
           const canonUid = targetSnap.id;
-          const inviteDocIdRetry = `${user.uid}_${gid}`;
+          const inviteDocIdRetry = `${user.uid}_${routeCode}`;
           const rejectionRetry = await getDoc(doc(db, 'users', canonUid, 'inviteRejections', inviteDocIdRetry));
           if (rejectionRetry.exists()) {
             showMessage({
@@ -173,7 +208,7 @@ export default function InviteFriendsModal({
           await updateDoc(doc(db, 'users', canonUid), {
             rideInvitePending: {
               fromUid: user.uid,
-              groupId: gid,
+              groupId: routeCode,
               groupName: safeName,
               sentAt: Date.now(),
             },
@@ -182,7 +217,7 @@ export default function InviteFriendsModal({
             doc(db, 'users', canonUid, 'invites', inviteDocIdRetry),
             {
               fromUid: user.uid,
-              groupId: gid,
+              groupId: routeCode,
               groupName: safeName,
               sentAt: Date.now(),
               kind: inviteKind,
@@ -191,7 +226,8 @@ export default function InviteFriendsModal({
           );
           setSentIds((s) => ({ ...s, [targetUid]: Date.now() }));
           return;
-        } catch {
+        } catch (retryErr: unknown) {
+          console.error('Invite retry failed', retryErr);
           showMessage({
             variant: 'error',
             title: 'Permiso denegado',
