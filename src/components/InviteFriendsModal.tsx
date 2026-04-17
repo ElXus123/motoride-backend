@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { doc, onSnapshot, getDoc, updateDoc, arrayUnion, setDoc, writeBatch } from 'firebase/firestore';
+import { doc, onSnapshot, getDoc, updateDoc, arrayUnion, setDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppMessage } from '../contexts/AppMessageContext';
@@ -167,10 +167,8 @@ export default function InviteFriendsModal({
         sentAt: Date.now(),
         kind: inviteKind,
       };
-      const batch = writeBatch(db);
-      batch.update(targetRef, { rideInvitePending: invitePayload });
-      batch.set(inviteRef, mailboxPayload, { merge: true });
-      await batch.commit();
+      await updateDoc(targetRef, { rideInvitePending: invitePayload });
+      await setDoc(inviteRef, mailboxPayload, { merge: true });
       setSentIds((s) => ({ ...s, [targetUid]: Date.now() }));
     } catch (e: unknown) {
       const code = typeof e === 'object' && e && 'code' in e ? String((e as { code: string }).code) : '';
@@ -224,10 +222,8 @@ export default function InviteFriendsModal({
             sentAt: Date.now(),
             kind: inviteKind,
           };
-          const retryBatch = writeBatch(db);
-          retryBatch.update(retryTarget, { rideInvitePending: pendingPayload });
-          retryBatch.set(retryInviteRef, retryMailbox, { merge: true });
-          await retryBatch.commit();
+          await updateDoc(retryTarget, { rideInvitePending: pendingPayload });
+          await setDoc(retryInviteRef, retryMailbox, { merge: true });
           setSentIds((s) => ({ ...s, [targetUid]: Date.now() }));
           return;
         } catch (retryErr: unknown) {
