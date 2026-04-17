@@ -234,6 +234,27 @@ service cloud.firestore {
         );
     }
 
+    /**
+     * DM ya existente (mismo id que `lib/directChatId.ts`: uid menor_uid mayor).
+     * El chat de mensajes no revalida `friends` en cada envío; si las listas fallan,
+     * igual pueden chatear — permitimos invitar en ese caso (sala con ambos en members).
+     */
+    function hasDmRoomBetween(uidA, uidB) {
+      return uidA is string && uidB is string && uidA != uidB &&
+        (
+          (uidA < uidB &&
+            exists(/databases/$(database)/documents/privateChats/$(uidA + '_' + uidB)) &&
+            get(/databases/$(database)/documents/privateChats/$(uidA + '_' + uidB)).data.members is list &&
+            uidA in get(/databases/$(database)/documents/privateChats/$(uidA + '_' + uidB)).data.members &&
+            uidB in get(/databases/$(database)/documents/privateChats/$(uidA + '_' + uidB)).data.members) ||
+          (uidA > uidB &&
+            exists(/databases/$(database)/documents/privateChats/$(uidB + '_' + uidA)) &&
+            get(/databases/$(database)/documents/privateChats/$(uidB + '_' + uidA)).data.members is list &&
+            uidA in get(/databases/$(database)/documents/privateChats/$(uidB + '_' + uidA)).data.members &&
+            uidB in get(/databases/$(database)/documents/privateChats/$(uidB + '_' + uidA)).data.members)
+        );
+    }
+
     /** Solo tocar rideInvitePending en el doc del amigo; hasOnly fallaba si el diff marcaba más de una clave. */
     function crossUserRideInviteUserDiffOk() {
       let aff = request.resource.data.diff(resource.data).affectedKeys();
@@ -257,6 +278,7 @@ service cloud.firestore {
         validRideInviteSentAt(request.resource.data.rideInvitePending.sentAt) &&
         (
           usersAreFriends(request.auth.uid, friendId) ||
+          hasDmRoomBetween(request.auth.uid, friendId) ||
           inviteCoMembersOnGroup(request.resource.data.rideInvitePending.groupId, friendId) ||
           inviterMemberOfGroup(request.resource.data.rideInvitePending.groupId)
         );
@@ -276,6 +298,7 @@ service cloud.firestore {
       return request.auth.uid != receiverUid &&
         (
           usersAreFriends(request.auth.uid, receiverUid) ||
+          hasDmRoomBetween(request.auth.uid, receiverUid) ||
           inviteCoMembersOnGroup(gid, receiverUid) ||
           inviterMemberOfGroup(gid)
         );
@@ -317,7 +340,6 @@ service cloud.firestore {
       match /invites/{inviteId} {
         allow read: if isAuthenticated() && request.auth.uid == userId;
         allow create: if isAuthenticated() &&
-          inviteId == request.auth.uid + '_' + request.resource.data.groupId &&
           crossUserWriteInviteDoc(userId) &&
           request.resource.data.fromUid == request.auth.uid &&
           isValidRideInviteDoc(request.resource.data);
