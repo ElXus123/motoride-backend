@@ -3,7 +3,7 @@ import { Check } from 'lucide-react';
 import appLogo from '../../ICONO.png';
 
 /** Sube este valor cuando cambien las novedades para volver a mostrar el aviso una vez por dispositivo. */
-export const WHATS_NEW_VERSION = '2026.05.19';
+export const WHATS_NEW_VERSION = '2026.04.17';
 
 const STORAGE_KEY = 'motoride_whats_new_seen_version';
 
@@ -18,6 +18,41 @@ export type ChangelogEntry = {
 
 /** Orden visual: más recientes arriba; `updatedAt` descendente. */
 const CHANGELOG: ChangelogEntry[] = [
+  {
+    kind: 'novedad',
+    text: 'Bandeja (icono arriba): además de invitaciones, ves mensajes sin leer del chat de planificación de tus rutas programadas (como apuntado) y del chat privado con amigos. Al abrir el chat dejan de contarse hasta que llegue un mensaje nuevo. El contador del icono suma invitaciones + pendientes + mensajes.',
+    updatedAt: '2026-04-17T18:00:00',
+  },
+  {
+    kind: 'novedad',
+    text: 'Amigos: chat privado 1 a 1 (icono de mensaje en la lista y en el perfil del amigo). Requiere ser amigos en MotoRide; los mensajes están en Firestore (`privateChats`).',
+    updatedAt: '2026-04-17T17:45:00',
+  },
+  {
+    kind: 'arreglo',
+    text: 'Invitar a ruta: si Firebase decía que no éramos amigos pero ambos estáis en el mismo grupo, ahora las reglas también permiten el envío (co-miembros). Sigue haciendo falta amistad o estar en la misma ruta.',
+    updatedAt: '2026-04-17T17:30:00',
+  },
+  {
+    kind: 'arreglo',
+    text: 'Rutas programadas marcadas como privadas (`unlisted`) ya no aparecen en la lista de «rutas de amigos» del inicio; solo quien tenga código/enlace o sea miembro las gestiona como antes.',
+    updatedAt: '2026-04-17T17:15:00',
+  },
+  {
+    kind: 'novedad',
+    text: 'Mapa: la síntesis de voz avisa del riesgo de precipitación (banner de tiempo) y cuando te acercas a un radar fijo (~500 m). Textos de alerta de grupo «parado» / «avería» unificados con la nueva redacción.',
+    updatedAt: '2026-04-17T17:00:00',
+  },
+  {
+    kind: 'arreglo',
+    text: 'Chat de planificación: el envío de mensajes usa código de grupo normalizado y muestra error claro si falla; reglas de Firestore con margen de reloj más amplio para `createdAt`.',
+    updatedAt: '2026-04-17T16:45:00',
+  },
+  {
+    kind: 'arreglo',
+    text: 'Notificaciones FCM: con la app en primer plano muchos navegadores no muestran solas la notificación; ahora se repite con la API de notificaciones si hay permiso. Service worker de mensajería alineado con Firebase 12.',
+    updatedAt: '2026-04-17T16:30:00',
+  },
   {
     kind: 'novedad',
     text: 'Invitaciones: «Ignorar» en el popup solo quita la alerta; la invitación permanece en el buzón. Si la descartas desde el buzón, el invitador no puede volver a enviar esa misma ruta a tu usuario (registro `inviteRejections` en Firestore).',

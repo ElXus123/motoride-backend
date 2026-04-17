@@ -4,7 +4,8 @@ import { requestJson } from '../lib/network';
 
 export const useRoadData = (currentLocation: {lat: number, lng: number} | null) => {
   const [radars, setRadars] = useState<any[]>([]);
-  const [nearbyRadar, setNearbyRadar] = useState<{distance: number} | null>(null);
+  /** Distancia en metros al radar fijo más cercano (todos los devueltos por Overpass), o null si no hay datos. */
+  const [nearestRadarDistanceM, setNearestRadarDistanceM] = useState<number | null>(null);
   const lastFetchLoc = useRef<{lat: number, lng: number} | null>(null);
 
   useEffect(() => {
@@ -37,24 +38,15 @@ export const useRoadData = (currentLocation: {lat: number, lng: number} | null) 
         });
     }
 
-    // Check nearby radars (within 2km)
-    let closest = null;
     let minDistance = Infinity;
     for (const radar of radars) {
       const dist = getDistance(currentLocation.lat, currentLocation.lng, radar.lat, radar.lng);
-      if (dist < 2000 && dist < minDistance) {
-        minDistance = dist;
-        closest = radar;
-      }
+      if (dist < minDistance) minDistance = dist;
     }
 
-    if (closest) {
-      setNearbyRadar({ distance: Math.round(minDistance) });
-    } else {
-      setNearbyRadar(null);
-    }
+    setNearestRadarDistanceM(minDistance < Infinity ? Math.round(minDistance) : null);
 
   }, [currentLocation, radars]);
 
-  return { nearbyRadar, radars };
+  return { nearestRadarDistanceM, radars };
 };

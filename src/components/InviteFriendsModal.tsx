@@ -196,7 +196,7 @@ export default function InviteFriendsModal({
             variant: 'error',
             title: 'Permiso denegado',
             message:
-              'Firestore ha rechazado el envío. Comprueba que sois amigos en MotoRide (las reglas permiten la invitación si uno está en la lista del otro). Si sigue fallando, vuelve a iniciar sesión.',
+              'No se pudo enviar la invitación. Si estáis en la misma ruta como miembros debería permitirse; si no, hace falta ser amigos (al menos uno en la lista del otro). Prueba a cerrar sesión y volver a entrar, o que el otro te envíe una solicitud de amistad.',
           });
           return;
         }

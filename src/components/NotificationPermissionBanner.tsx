@@ -79,9 +79,9 @@ export default function NotificationPermissionBanner({ userUid }: { userUid?: st
         <div className="min-w-0 flex-1 pt-0.5">
           <p className="text-sm font-bold text-white">¿Activar avisos en el teléfono?</p>
           <p className="mt-0.5 text-xs leading-relaxed text-zinc-400">
-            Avisos en el dispositivo al invitarte a una ruta, al abrirse la ventana de 1 h antes de una salida programada y
-            solicitudes de amistad. Con la app cerrada hace falta push web (FCM): clave VAPID en el proyecto y funciones
-            desplegadas en Firebase.
+            Avisos al invitarte a una ruta, ventana ~1 h antes de una salida programada y solicitudes de amistad. En
+            Chrome y Edge el push con la app cerrada funciona con FCM (clave VAPID + Cloud Functions). En Safari de
+            iPhone suele hacer falta añadir MotoRide a la pantalla de inicio (PWA) para recibir push en segundo plano.
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
             <button

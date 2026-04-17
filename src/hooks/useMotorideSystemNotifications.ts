@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { collection, doc, limit, onSnapshot, query, where } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../firebase';
+import { db } from '../firebase';
 
 const ONE_H_MS = 60 * 60 * 1000;
 /** Tras el instante «falta 1 h», seguimos intentando unos minutos por si el navegador estaba suspendido. */
@@ -126,8 +126,7 @@ export function useMotorideSystemNotifications(userUid: string | undefined): voi
         }
       },
       (err) => {
-        console.error(err);
-        handleFirestoreError(err, OperationType.LIST, `users/${userUid}`);
+        console.error('useMotorideSystemNotifications user doc', err);
       }
     );
     return () => unsub();
@@ -168,8 +167,7 @@ export function useMotorideSystemNotifications(userUid: string | undefined): voi
         }
       },
       (err) => {
-        console.error(err);
-        handleFirestoreError(err, OperationType.LIST, `users/${userUid}/invites`);
+        console.error('useMotorideSystemNotifications invites', err);
       }
     );
     return () => unsub();
@@ -199,8 +197,7 @@ export function useMotorideSystemNotifications(userUid: string | undefined): voi
         }
       },
       (err) => {
-        console.error(err);
-        handleFirestoreError(err, OperationType.LIST, 'groups/scheduled');
+        console.error('useMotorideSystemNotifications scheduled groups', err);
       }
     );
 

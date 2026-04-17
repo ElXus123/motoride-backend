@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { collection, query, getDocs, doc, getDoc, updateDoc, writeBatch, arrayUnion, arrayRemove, onSnapshot, orderBy, limit, startAt, endAt, where } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { X, Search, UserPlus, UserMinus, User as UserIcon, Play, Check, Clock, Ban } from 'lucide-react';
+import { X, Search, UserPlus, UserMinus, User as UserIcon, Play, Check, Clock, Ban, MessageCircle } from 'lucide-react';
 import PremiumBadge from './PremiumBadge';
+import FriendDirectChatModal from './FriendDirectChatModal';
 import { formatRideCardSubtitle, formatRideCardTitle, rideHistoryPointsEarned } from '../lib/rideHistoryDisplay';
 
 export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () => void, onRepeatRoute: (route: string) => void }) {
@@ -16,6 +17,7 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
   const [selectedUser, setSelectedUser] = useState<any>(null);
   const [selectedUserHistory, setSelectedUserHistory] = useState<any[]>([]);
   const [historyBlockedMessage, setHistoryBlockedMessage] = useState<string | null>(null);
+  const [dmPeer, setDmPeer] = useState<{ uid: string; name: string } | null>(null);
 
   const friendsIds: string[] = userData?.friends || [];
   const incomingIds: string[] = userData?.friendRequestsIncoming || [];
@@ -221,6 +223,7 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
   };
 
   return (
+    <>
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
       onClick={onClose}
@@ -281,6 +284,22 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                   <p className="font-black text-xl text-white">{(selectedUser.totalLeftTurns || 0) + (selectedUser.totalRightTurns || 0)}</p>
                 </div>
               </div>
+
+              {friendsIds.includes(String(selectedUser.uid || selectedUser.id || '').trim()) ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setDmPeer({
+                      uid: String(selectedUser.uid || selectedUser.id || '').trim(),
+                      name: String(selectedUser.displayName || 'Amigo').slice(0, 80),
+                    })
+                  }
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl border border-orange-500/40 bg-orange-500/15 py-3 text-sm font-black text-orange-300 hover:bg-orange-500/25"
+                >
+                  <MessageCircle size={18} />
+                  Chat privado
+                </button>
+              ) : null}
 
               <div>
                 <h4 className="font-bold text-lg mb-4">Historial de Rutas</h4>
@@ -462,13 +481,30 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                             <p className="text-xs text-zinc-500">Nivel {friend.level || 1}</p>
                           </div>
                         </div>
-                        <button 
-                          onClick={() => removeFriend(fid)}
-                          className="p-2 text-zinc-600 hover:text-red-500 transition-colors shrink-0"
-                          title="Eliminar amigo"
-                        >
-                          <UserMinus size={18} />
-                        </button>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDmPeer({ uid: fid, name: String(friend.displayName || 'Amigo').slice(0, 80) });
+                            }}
+                            className="p-2 text-zinc-500 hover:text-orange-400 transition-colors"
+                            title="Chat privado"
+                          >
+                            <MessageCircle size={18} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void removeFriend(fid);
+                            }}
+                            className="p-2 text-zinc-600 hover:text-red-500 transition-colors"
+                            title="Eliminar amigo"
+                          >
+                            <UserMinus size={18} />
+                          </button>
+                        </div>
                       </div>
                     );
                     })}
@@ -484,5 +520,14 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
         </div>
       </div>
     </div>
+    {dmPeer ? (
+      <FriendDirectChatModal
+        open
+        onClose={() => setDmPeer(null)}
+        peerUid={dmPeer.uid}
+        peerDisplayName={dmPeer.name}
+      />
+    ) : null}
+    </>
   );
 }

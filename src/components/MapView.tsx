@@ -56,7 +56,11 @@ import { pickBestNominatimResult, sortNominatimResults } from '../lib/nominatimP
 import { prefetchAroundUser } from '../lib/mapTileCache';
 import { weatherWmoToLucide } from '../lib/weatherWmo';
 import socket from '../lib/socket';
-import { speakMotorideGroupAlert } from '../lib/motorideAlertSpeech';
+import {
+  speakMotorideGroupAlert,
+  speakMotoridePrecipitationRisk,
+  speakMotorideRadarNearby,
+} from '../lib/motorideAlertSpeech';
 import { useVoiceChat } from '../hooks/useVoiceChat';
 import PremiumBadge from './PremiumBadge';
 import InviteFriendsModal from './InviteFriendsModal';
@@ -1334,6 +1338,18 @@ export default function MapView({
     return () => window.clearTimeout(id);
   }, [precipitationBanner]);
 
+  const prevPrecipBannerRef = useRef(false);
+  useEffect(() => {
+    if (precipitationBanner && !prevPrecipBannerRef.current) {
+      try {
+        speakMotoridePrecipitationRisk();
+      } catch {
+        /* ignore */
+      }
+    }
+    prevPrecipBannerRef.current = precipitationBanner;
+  }, [precipitationBanner]);
+
   useEffect(() => {
     setPrecipitationBanner(false);
     lastPrecipBannerAtRef.current = 0;
@@ -1496,7 +1512,22 @@ export default function MapView({
       ? { lat: displayLocation.lat, lng: displayLocation.lng }
       : null);
 
-  const { nearbyRadar, radars } = useRoadData(currentLocation);
+  const { nearestRadarDistanceM, radars } = useRoadData(currentLocation);
+
+  const wasRadarWithin500Ref = useRef(false);
+  useEffect(() => {
+    const d = nearestRadarDistanceM;
+    const inside = d !== null && d <= 500;
+    if (inside && !wasRadarWithin500Ref.current) {
+      try {
+        speakMotorideRadarNearby(typeof d === 'number' ? d : 500);
+      } catch {
+        /* ignore */
+      }
+    }
+    wasRadarWithin500Ref.current = inside;
+  }, [nearestRadarDistanceM]);
+
   const [hostIsPremium, setHostIsPremium] = useState(false);
   useEffect(() => {
     const hostId = group?.createdBy;
@@ -3262,14 +3293,14 @@ export default function MapView({
     switch (type) {
       case 'Parado':
         return {
-          title: 'PARADO / MARGEN',
+          title: 'USUARIO HA PARADO',
           card: 'bg-yellow-400 border-yellow-700/60 text-zinc-900',
           badge: 'bg-yellow-900 text-yellow-50',
           sub: 'text-zinc-800',
         };
       case 'Averiado':
         return {
-          title: 'AVERÍA',
+          title: 'USUARIO HA TENIDO UNA AVERÍA',
           card: 'bg-red-600 border-red-400/60 text-white',
           badge: 'bg-red-950/90 text-red-50',
           sub: 'text-red-50/90',

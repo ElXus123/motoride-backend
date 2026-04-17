@@ -12,10 +12,11 @@ import {
   arrayUnion,
   setDoc,
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../firebase';
+import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppMessage } from '../contexts/AppMessageContext';
-import { X, Inbox, ChevronRight, Trash2, Loader2 } from 'lucide-react';
+import { X, Inbox, ChevronRight, Trash2, Loader2, MessageCircle } from 'lucide-react';
+import type { UnreadDmRow, UnreadPlanRow } from '../hooks/useMailboxChatUnread';
 import { motion, AnimatePresence } from 'motion/react';
 
 export type RideInviteDoc = {
@@ -31,9 +32,21 @@ type Props = {
   open: boolean;
   onClose: () => void;
   onJoinGroup: (groupId: string) => void;
+  unreadPlanChats?: UnreadPlanRow[];
+  unreadDmChats?: UnreadDmRow[];
+  onOpenPlanChat?: (groupId: string, groupName: string) => void;
+  onOpenDmChat?: (peerUid: string, peerLabel: string) => void;
 };
 
-export default function InvitesMailboxModal({ open, onClose, onJoinGroup }: Props) {
+export default function InvitesMailboxModal({
+  open,
+  onClose,
+  onJoinGroup,
+  unreadPlanChats = [],
+  unreadDmChats = [],
+  onOpenPlanChat,
+  onOpenDmChat,
+}: Props) {
   const { user } = useAuth();
   const showMessage = useAppMessage();
   const [items, setItems] = useState<RideInviteDoc[]>([]);
@@ -59,23 +72,35 @@ export default function InvitesMailboxModal({ open, onClose, onJoinGroup }: Prop
       (err) => {
         console.error(err);
         setLoading(false);
-        handleFirestoreError(err, OperationType.LIST, `users/${user.uid}/invites`);
+        showMessage({
+          variant: 'error',
+          title: 'Bandeja de invitaciones',
+          message: 'No se pudo cargar la lista. Comprueba la conexión o vuelve a entrar.',
+        });
       }
     );
     return () => unsub();
-  }, [open, user?.uid]);
+  }, [open, user?.uid, showMessage]);
 
   const removeInvite = async (inv: RideInviteDoc) => {
     if (!user?.uid) return;
     const inviteDocId = inv.id;
     const gid = String(inv.groupId || '').trim().toUpperCase();
     const from = String(inv.fromUid || '').trim();
+    /** Debe coincidir con `firestore.rules` (`rejId == inviterUid + '_' + groupId`). */
+    const canonicalRejectionId = from && gid.length === 6 ? `${from}_${gid}` : inviteDocId;
+
     if (gid.length !== 6 || !from) {
       setRemovingId(inviteDocId);
       try {
         await deleteDoc(doc(db, 'users', user.uid, 'invites', inviteDocId));
       } catch (e) {
-        handleFirestoreError(e, OperationType.DELETE, `users/${user.uid}/invites/${inviteDocId}`);
+        console.error(e);
+        showMessage({
+          variant: 'error',
+          title: 'No se pudo eliminar',
+          message: 'Comprueba conexión o inténtalo otra vez.',
+        });
       } finally {
         setRemovingId(null);
       }
@@ -83,18 +108,28 @@ export default function InvitesMailboxModal({ open, onClose, onJoinGroup }: Prop
     }
     setRemovingId(inviteDocId);
     try {
-      await setDoc(
-        doc(db, 'users', user.uid, 'inviteRejections', inviteDocId),
-        {
-          inviterUid: from,
-          groupId: gid,
-          rejectedAt: Date.now(),
-        },
-        { merge: true }
-      );
+      const rejRef = doc(db, 'users', user.uid, 'inviteRejections', canonicalRejectionId);
+      const existing = await getDoc(rejRef);
+      if (!existing.exists()) {
+        await setDoc(
+          rejRef,
+          {
+            inviterUid: from,
+            groupId: gid,
+            rejectedAt: Date.now(),
+          },
+          { merge: true }
+        );
+      }
       await deleteDoc(doc(db, 'users', user.uid, 'invites', inviteDocId));
     } catch (e) {
-      handleFirestoreError(e, OperationType.WRITE, `users/${user.uid}/inviteRejections/${inviteDocId}`);
+      console.error(e);
+      showMessage({
+        variant: 'error',
+        title: 'No se pudo descartar',
+        message:
+          'Si el problema continúa, comprueba la hora del dispositivo o vuelve a intentarlo. El organizador no podrá reenviar hasta que se guarde el rechazo.',
+      });
     } finally {
       setRemovingId(null);
     }
@@ -121,7 +156,8 @@ export default function InvitesMailboxModal({ open, onClose, onJoinGroup }: Prop
 
       await updateDoc(groupRef, { members: arrayUnion(user.uid) });
       await deleteDoc(doc(db, 'users', user.uid, 'invites', inv.id));
-      await deleteDoc(doc(db, 'users', user.uid, 'inviteRejections', inv.id)).catch(() => {});
+      const canonRejId = `${String(inv.fromUid || '').trim()}_${gid}`;
+      await deleteDoc(doc(db, 'users', user.uid, 'inviteRejections', canonRejId)).catch(() => {});
 
       const uref = doc(db, 'users', user.uid);
       const usnap = await getDoc(uref);
@@ -143,7 +179,12 @@ export default function InvitesMailboxModal({ open, onClose, onJoinGroup }: Prop
         onJoinGroup(gid);
       }
     } catch (e) {
-      handleFirestoreError(e, OperationType.WRITE, `groups/${gid}`);
+      console.error(e);
+      showMessage({
+        variant: 'error',
+        title: 'No se pudo unir',
+        message: 'Comprueba conexión, que la ruta siga activa o que no estés ya dentro del grupo.',
+      });
     } finally {
       setJoiningId(null);
     }
@@ -169,7 +210,7 @@ export default function InvitesMailboxModal({ open, onClose, onJoinGroup }: Prop
             <div className="p-4 border-b border-zinc-800 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2">
                 <Inbox className="text-orange-400" size={22} />
-                <h2 className="text-lg font-black text-white">Invitaciones</h2>
+                <h2 className="text-lg font-black text-white">Bandeja</h2>
               </div>
               <button
                 type="button"
@@ -180,17 +221,56 @@ export default function InvitesMailboxModal({ open, onClose, onJoinGroup }: Prop
                 <X size={20} />
               </button>
             </div>
-            <div className="overflow-y-auto flex-1 p-4 space-y-2">
-              {loading ? (
-                <div className="flex justify-center py-12 text-zinc-500">
-                  <Loader2 className="animate-spin" size={28} />
+            <div className="overflow-y-auto flex-1 p-4 space-y-4">
+              {(unreadPlanChats.length > 0 || unreadDmChats.length > 0) && (
+                <div className="space-y-2">
+                  <p className="text-[10px] font-black uppercase tracking-wider text-orange-500">Mensajes sin leer</p>
+                  {unreadPlanChats.map((row) => (
+                    <button
+                      key={`plan-${row.groupId}`}
+                      type="button"
+                      onClick={() => {
+                        onOpenPlanChat?.(row.groupId, row.groupName);
+                        onClose();
+                      }}
+                      className="w-full text-left rounded-2xl border border-sky-500/40 bg-sky-500/10 p-3 hover:bg-sky-500/20"
+                    >
+                      <p className="text-xs font-black text-sky-300">Chat plan · {row.groupName}</p>
+                      <p className="text-[10px] text-zinc-500 font-mono mt-0.5">{row.groupId}</p>
+                      <p className="text-xs text-zinc-300 mt-1 line-clamp-2">{row.preview || 'Nuevo mensaje'}</p>
+                    </button>
+                  ))}
+                  {unreadDmChats.map((row) => (
+                    <button
+                      key={`dm-${row.peerUid}`}
+                      type="button"
+                      onClick={() => {
+                        onOpenDmChat?.(row.peerUid, row.peerLabel);
+                        onClose();
+                      }}
+                      className="w-full text-left rounded-2xl border border-orange-500/35 bg-orange-500/10 p-3 hover:bg-orange-500/18 flex gap-2"
+                    >
+                      <MessageCircle size={18} className="shrink-0 text-orange-400 mt-0.5" />
+                      <div className="min-w-0">
+                        <p className="text-xs font-black text-orange-200">Chat · {row.peerLabel}</p>
+                        <p className="text-xs text-zinc-300 mt-1 line-clamp-2">{row.preview || 'Nuevo mensaje'}</p>
+                      </div>
+                    </button>
+                  ))}
                 </div>
-              ) : items.length === 0 ? (
-                <p className="text-sm text-zinc-500 text-center py-10">
-                  No hay invitaciones guardadas. Cuando un amigo te invite a una ruta, aparecerá aquí.
-                </p>
-              ) : (
-                items.map((inv) => (
+              )}
+              <div className="space-y-2">
+                <p className="text-[10px] font-black uppercase tracking-wider text-zinc-500">Invitaciones</p>
+                {loading ? (
+                  <div className="flex justify-center py-12 text-zinc-500">
+                    <Loader2 className="animate-spin" size={28} />
+                  </div>
+                ) : items.length === 0 ? (
+                  <p className="text-sm text-zinc-500 text-center py-6">
+                    No hay invitaciones. Cuando un amigo te invite a una ruta, aparecerá aquí.
+                  </p>
+                ) : (
+                  items.map((inv) => (
                   <div
                     key={inv.id}
                     className="bg-zinc-950 border border-zinc-800 rounded-2xl p-3 flex flex-col gap-2"
@@ -241,8 +321,9 @@ export default function InvitesMailboxModal({ open, onClose, onJoinGroup }: Prop
                       )}
                     </button>
                   </div>
-                ))
-              )}
+                  ))
+                )}
+              </div>
             </div>
           </motion.div>
         </motion.div>

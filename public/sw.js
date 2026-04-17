@@ -89,8 +89,8 @@ self.addEventListener('fetch', (event) => {
 // Firebase Cloud Messaging (notificaciones con la app en segundo plano o cerrada en navegadores compatibles).
 try {
   importScripts(
-    'https://www.gstatic.com/firebasejs/11.0.2/firebase-app-compat.js',
-    'https://www.gstatic.com/firebasejs/11.0.2/firebase-messaging-compat.js'
+    'https://www.gstatic.com/firebasejs/12.0.0/firebase-app-compat.js',
+    'https://www.gstatic.com/firebasejs/12.0.0/firebase-messaging-compat.js'
   );
   if (!firebase.apps || firebase.apps.length === 0) {
     firebase.initializeApp({

@@ -11,7 +11,7 @@ import { db, handleFirestoreError, OperationType } from '../firebase';
 import { syncUserPointsAndLevelFromServer } from '../lib/userPointsSync';
 import { formatScheduledRideDayOnlyEs } from '../lib/scheduledRouteShare';
 import { useMotorideSystemNotifications } from '../hooks/useMotorideSystemNotifications';
-import { registerWebPushFcm } from '../lib/fcmWeb';
+import { registerWebPushFcm, startForegroundFcmListeners, stopForegroundFcmListeners } from '../lib/fcmWeb';
 import NotificationPermissionBanner from './NotificationPermissionBanner';
 import { Calendar } from 'lucide-react';
 
@@ -101,6 +101,15 @@ export default function MainApp() {
   }, [user]);
 
   useMotorideSystemNotifications(user?.uid);
+
+  useEffect(() => {
+    if (!user?.uid) {
+      stopForegroundFcmListeners();
+      return;
+    }
+    startForegroundFcmListeners();
+    return () => stopForegroundFcmListeners();
+  }, [user?.uid]);
 
   useEffect(() => {
     if (!user?.uid) return;

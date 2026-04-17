@@ -53,6 +53,8 @@ import PremiumBadge from './PremiumBadge';
 import ScheduledRouteAttendees from './ScheduledRouteAttendees';
 import ScheduledRouteSoonOverlay from './ScheduledRouteSoonOverlay';
 import ScheduledRoutePlanChatModal from './ScheduledRoutePlanChatModal';
+import FriendDirectChatModal from './FriendDirectChatModal';
+import { useMailboxChatUnread } from '../hooks/useMailboxChatUnread';
 
 interface DashboardProps {
   onJoinGroup: (id: string) => void;
@@ -110,6 +112,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     null | { groupId: string; groupName: string; memberUids: string[]; scheduledTimestamp: number }
   >(null);
   const [planChatRoute, setPlanChatRoute] = useState<null | { id: string; name: string }>(null);
+  const [friendDmOpen, setFriendDmOpen] = useState<null | { uid: string; name: string }>(null);
   const [showPreviewModal, setShowPreviewModal] = useState<any>(null);
   const [showJoinCodeModal, setShowJoinCodeModal] = useState(false);
   const supportPopupRef = useRef<Window | null>(null);
@@ -274,6 +277,13 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   const [createMunis, setCreateMunis] = useState<string[]>([]);
   const [inviteInboxCount, setInviteInboxCount] = useState(0);
   const [showInvitesMailbox, setShowInvitesMailbox] = useState(false);
+  const { unreadPlans, unreadDms, messageBadgeCount } = useMailboxChatUnread(
+    user?.uid,
+    userData?.friends,
+    scheduledRoutes
+  );
+  const inboxBadgeTotal =
+    inviteInboxCount + (user?.rideInvitePending?.groupId ? 1 : 0) + messageBadgeCount;
   const [friendsPlannedRoutes, setFriendsPlannedRoutes] = useState<any[]>([]);
   const friendsRoutesChunkRef = useRef<Record<number, Record<string, any>>>({});
 
@@ -315,7 +325,12 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           const merged = Object.values(friendsRoutesChunkRef.current).flatMap((m) => Object.values(m));
           const now = Date.now();
           setFriendsPlannedRoutes(
-            merged.filter((r) => (r.scheduledTimestamp || 0) > now && r.code)
+            merged.filter(
+              (r) =>
+                (r.scheduledTimestamp || 0) > now &&
+                r.code &&
+                String(r.routeListing || 'public') !== 'unlisted'
+            )
           );
         },
         (error) => {
@@ -1056,12 +1071,12 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
         type="button"
         onClick={() => setShowInvitesMailbox(true)}
         className="relative flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center p-0 bg-zinc-900 border border-zinc-800 rounded-full hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-orange-400 shrink-0"
-        title="Invitaciones a rutas"
+        title="Bandeja: invitaciones y mensajes"
       >
         <Inbox size={18} className="sm:w-5 sm:h-5" />
-        {(inviteInboxCount > 0 || user?.rideInvitePending?.groupId) && (
+        {inboxBadgeTotal > 0 && (
           <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-orange-500 text-[10px] font-black text-white flex items-center justify-center border-2 border-zinc-950">
-            {inviteInboxCount > 0 ? (inviteInboxCount > 9 ? '9+' : inviteInboxCount) : '1'}
+            {inboxBadgeTotal > 9 ? '9+' : inboxBadgeTotal}
           </span>
         )}
       </button>
@@ -1566,7 +1581,23 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           setShowInvitesMailbox(false);
           onJoinGroup(code);
         }}
+        unreadPlanChats={unreadPlans}
+        unreadDmChats={unreadDms}
+        onOpenPlanChat={(gid, name) => {
+          setPlanChatRoute({ id: gid.trim().toUpperCase(), name });
+        }}
+        onOpenDmChat={(uid, label) => {
+          setFriendDmOpen({ uid: uid.trim(), name: label });
+        }}
       />
+      {friendDmOpen ? (
+        <FriendDirectChatModal
+          open
+          onClose={() => setFriendDmOpen(null)}
+          peerUid={friendDmOpen.uid}
+          peerDisplayName={friendDmOpen.name}
+        />
+      ) : null}
       <ScheduledRouteSoonOverlay
         open={scheduledSoonRoute !== null}
         routeName={scheduledSoonRoute?.name ?? ''}

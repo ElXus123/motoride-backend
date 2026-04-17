@@ -1,4 +1,4 @@
-import { deleteToken, getMessaging, getToken, isSupported } from 'firebase/messaging';
+import { deleteToken, getMessaging, getToken, isSupported, onMessage } from 'firebase/messaging';
 import { collection, deleteDoc, doc, getDocs, setDoc } from 'firebase/firestore';
 import { app, auth, db } from '../firebase';
 
@@ -60,6 +60,50 @@ export async function registerWebPushFcm(userUid: string): Promise<boolean> {
 }
 
 /** Elimina tokens en Firestore y revoca el token local de FCM (p. ej. al cerrar sesión). */
+let foregroundUnsubscribe: (() => void) | null = null;
+
+/**
+ * Con la app en primer plano, FCM no muestra sola la notificación del sistema en muchos navegadores;
+ * repetimos el aviso con la Web Notifications API si hay permiso.
+ */
+export function startForegroundFcmListeners(): void {
+  if (typeof window === 'undefined') return;
+  void (async () => {
+    try {
+      foregroundUnsubscribe?.();
+      foregroundUnsubscribe = null;
+      if (!(await isSupported())) return;
+      const messaging = getMessaging(app);
+      foregroundUnsubscribe = onMessage(messaging, (payload) => {
+        if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+        const title =
+          payload.notification?.title || (typeof payload.data?.title === 'string' ? payload.data.title : '') || 'MotoRide';
+        const body =
+          payload.notification?.body || (typeof payload.data?.body === 'string' ? payload.data.body : '') || '';
+        const tag = typeof payload.data?.tag === 'string' ? payload.data.tag : 'motoride';
+        const origin = typeof window.location?.origin === 'string' ? window.location.origin : '';
+        const icon = origin ? `${origin}/icon-192.png` : undefined;
+        try {
+          void new Notification(title, { body, tag, icon, lang: 'es' });
+        } catch {
+          /* ignore */
+        }
+      });
+    } catch (e) {
+      console.warn('startForegroundFcmListeners:', e);
+    }
+  })();
+}
+
+export function stopForegroundFcmListeners(): void {
+  try {
+    foregroundUnsubscribe?.();
+  } catch {
+    /* ignore */
+  }
+  foregroundUnsubscribe = null;
+}
+
 export async function removeWebPushForCurrentUser(): Promise<void> {
   const uid = auth.currentUser?.uid;
   if (!uid || typeof window === 'undefined') return;
