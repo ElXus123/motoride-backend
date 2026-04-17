@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { doc, onSnapshot, getDoc, updateDoc, arrayUnion, setDoc } from 'firebase/firestore';
+import { doc, onSnapshot, getDoc, updateDoc, arrayUnion, setDoc, writeBatch } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppMessage } from '../contexts/AppMessageContext';
@@ -108,9 +108,9 @@ export default function InviteFriendsModal({
       routeCode = groupSnap.id;
       const rawMembers = (groupSnap.data() as { members?: unknown } | undefined)?.members;
       const memberArr: string[] = Array.isArray(rawMembers)
-        ? rawMembers.map((x) => String(x)).filter(Boolean)
+        ? rawMembers.map((x) => String(x).trim()).filter(Boolean)
         : [];
-      if (!memberArr.includes(user.uid)) {
+      if (!memberArr.includes(String(user.uid).trim())) {
         showMessage({
           variant: 'error',
           title: 'Invitación',
@@ -159,20 +159,18 @@ export default function InviteFriendsModal({
         sentAt: Date.now(),
       };
       const targetRef = doc(db, 'users', canonUid);
-      await updateDoc(targetRef, {
-        rideInvitePending: invitePayload,
-      });
-      await setDoc(
-        doc(db, 'users', canonUid, 'invites', inviteDocId),
-        {
-          fromUid: user.uid,
-          groupId: routeCode,
-          groupName: safeName,
-          sentAt: Date.now(),
-          kind: inviteKind,
-        },
-        { merge: true }
-      );
+      const inviteRef = doc(db, 'users', canonUid, 'invites', inviteDocId);
+      const mailboxPayload = {
+        fromUid: user.uid,
+        groupId: routeCode,
+        groupName: safeName,
+        sentAt: Date.now(),
+        kind: inviteKind,
+      };
+      const batch = writeBatch(db);
+      batch.update(targetRef, { rideInvitePending: invitePayload });
+      batch.set(inviteRef, mailboxPayload, { merge: true });
+      await batch.commit();
       setSentIds((s) => ({ ...s, [targetUid]: Date.now() }));
     } catch (e: unknown) {
       const code = typeof e === 'object' && e && 'code' in e ? String((e as { code: string }).code) : '';
@@ -200,30 +198,36 @@ export default function InviteFriendsModal({
             });
             return;
           }
-          const myData = mySnap.data() as any;
-          const myFriends = Array.isArray(myData?.friends) ? myData.friends.map((x: unknown) => String(x)) : [];
+          const myData = mySnap.data() as Record<string, unknown>;
+          const myFriends = Array.isArray(myData?.friends)
+            ? myData.friends.map((x: unknown) => String(x).trim()).filter(Boolean)
+            : [];
           if (!myFriends.includes(canonUid)) {
-            await updateDoc(myRef, { friends: arrayUnion(canonUid) });
+            try {
+              await updateDoc(myRef, { friends: arrayUnion(canonUid) });
+            } catch (syncErr: unknown) {
+              console.warn('Invite: no se pudo sincronizar tu lista friends; se intenta la invitación igual.', syncErr);
+            }
           }
-          await updateDoc(doc(db, 'users', canonUid), {
-            rideInvitePending: {
-              fromUid: user.uid,
-              groupId: routeCode,
-              groupName: safeName,
-              sentAt: Date.now(),
-            },
-          });
-          await setDoc(
-            doc(db, 'users', canonUid, 'invites', inviteDocIdRetry),
-            {
-              fromUid: user.uid,
-              groupId: routeCode,
-              groupName: safeName,
-              sentAt: Date.now(),
-              kind: inviteKind,
-            },
-            { merge: true }
-          );
+          const retryTarget = doc(db, 'users', canonUid);
+          const retryInviteRef = doc(db, 'users', canonUid, 'invites', inviteDocIdRetry);
+          const pendingPayload = {
+            fromUid: user.uid,
+            groupId: routeCode,
+            groupName: safeName,
+            sentAt: Date.now(),
+          };
+          const retryMailbox = {
+            fromUid: user.uid,
+            groupId: routeCode,
+            groupName: safeName,
+            sentAt: Date.now(),
+            kind: inviteKind,
+          };
+          const retryBatch = writeBatch(db);
+          retryBatch.update(retryTarget, { rideInvitePending: pendingPayload });
+          retryBatch.set(retryInviteRef, retryMailbox, { merge: true });
+          await retryBatch.commit();
           setSentIds((s) => ({ ...s, [targetUid]: Date.now() }));
           return;
         } catch (retryErr: unknown) {

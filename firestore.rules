@@ -220,20 +220,16 @@ service cloud.firestore {
     }
 
     function usersAreFriends(uidA, uidB) {
-      let da = get(/databases/$(database)/documents/users/$(uidA)).data;
-      let db = get(/databases/$(database)/documents/users/$(uidB)).data;
-      let fa = friendsList(da);
-      let fb = friendsList(db);
-      return uidB in fa || uidA in fb;
+      return uidA is string && uidB is string &&
+        exists(/databases/$(database)/documents/users/$(uidA)) &&
+        exists(/databases/$(database)/documents/users/$(uidB)) &&
+        (
+          uidB in friendsList(get(/databases/$(database)/documents/users/$(uidA)).data) ||
+          uidA in friendsList(get(/databases/$(database)/documents/users/$(uidB)).data)
+        );
     }
 
     function crossUserSetRideInviteOnFriend(friendId) {
-      let me = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-      let myFriends = ('friends' in me && me.friends is list) ? me.friends : [];
-      let them = get(/databases/$(database)/documents/users/$(friendId)).data;
-      let theirFriends = ('friends' in them && them.friends is list) ? them.friends : [];
-      let iHaveThem = friendId in myFriends;
-      let theyHaveMe = request.auth.uid in theirFriends;
       return request.auth.uid != friendId &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rideInvitePending']) &&
         request.resource.data.rideInvitePending is map &&
@@ -244,7 +240,7 @@ service cloud.firestore {
         request.resource.data.rideInvitePending.groupName.size() <= 120 &&
         request.resource.data.rideInvitePending.sentAt is number &&
         (
-          (iHaveThem || theyHaveMe) ||
+          usersAreFriends(request.auth.uid, friendId) ||
           inviteCoMembersOnGroup(request.resource.data.rideInvitePending.groupId, friendId) ||
           inviterMemberOfGroup(request.resource.data.rideInvitePending.groupId)
         );
@@ -260,15 +256,13 @@ service cloud.firestore {
     }
 
     function crossUserWriteInviteDoc(receiverUid) {
-      let me = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-      let myFriends = friendsList(me);
-      let them = get(/databases/$(database)/documents/users/$(receiverUid)).data;
-      let theirFriends = friendsList(them);
-      let iHaveThem = receiverUid in myFriends;
-      let theyHaveMe = request.auth.uid in theirFriends;
       let gid = request.resource.data.groupId;
       return request.auth.uid != receiverUid &&
-        (iHaveThem || theyHaveMe || inviteCoMembersOnGroup(gid, receiverUid) || inviterMemberOfGroup(gid));
+        (
+          usersAreFriends(request.auth.uid, receiverUid) ||
+          inviteCoMembersOnGroup(gid, receiverUid) ||
+          inviterMemberOfGroup(gid)
+        );
     }
 
     function isGroupMember(groupId) {
