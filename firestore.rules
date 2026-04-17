@@ -202,6 +202,14 @@ service cloud.firestore {
         otherUid in get(/databases/$(database)/documents/groups/$(groupId)).data.members;
     }
 
+    /** Quien ya es miembro del grupo puede invitar a otros a ese código (la UI solo lista amigos). */
+    function inviterMemberOfGroup(gid) {
+      return gid is string && gid.size() == 6 &&
+        exists(/databases/$(database)/documents/groups/$(gid)) &&
+        get(/databases/$(database)/documents/groups/$(gid)).data.members is list &&
+        request.auth.uid in get(/databases/$(database)/documents/groups/$(gid)).data.members;
+    }
+
     function directChatIdMatchesMembers(chatId, members) {
       return members is list && members.size() == 2 &&
         members[0] is string && members[1] is string &&
@@ -237,7 +245,8 @@ service cloud.firestore {
         request.resource.data.rideInvitePending.sentAt is number &&
         (
           (iHaveThem || theyHaveMe) ||
-          inviteCoMembersOnGroup(request.resource.data.rideInvitePending.groupId, friendId)
+          inviteCoMembersOnGroup(request.resource.data.rideInvitePending.groupId, friendId) ||
+          inviterMemberOfGroup(request.resource.data.rideInvitePending.groupId)
         );
     }
 
@@ -259,7 +268,7 @@ service cloud.firestore {
       let theyHaveMe = request.auth.uid in theirFriends;
       let gid = request.resource.data.groupId;
       return request.auth.uid != receiverUid &&
-        (iHaveThem || theyHaveMe || inviteCoMembersOnGroup(gid, receiverUid));
+        (iHaveThem || theyHaveMe || inviteCoMembersOnGroup(gid, receiverUid) || inviterMemberOfGroup(gid));
     }
 
     function isGroupMember(groupId) {
