@@ -3,7 +3,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/
 import { getFirestore, doc, getDocFromCache, getDocFromServer } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
-const app = initializeApp(firebaseConfig);
+export const app = initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
 // @ts-ignore - firestoreDatabaseId might be missing in some configs
@@ -34,6 +34,12 @@ export const signInWithGoogle = async () => {
 };
 
 export const logOut = async () => {
+  try {
+    const { removeWebPushForCurrentUser } = await import('./lib/fcmWeb');
+    await removeWebPushForCurrentUser();
+  } catch {
+    /* ignore */
+  }
   try {
     await signOut(auth);
   } catch (error) {

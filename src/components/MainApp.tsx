@@ -11,6 +11,7 @@ import { db, handleFirestoreError, OperationType } from '../firebase';
 import { syncUserPointsAndLevelFromServer } from '../lib/userPointsSync';
 import { formatScheduledRideDayOnlyEs } from '../lib/scheduledRouteShare';
 import { useMotorideSystemNotifications } from '../hooks/useMotorideSystemNotifications';
+import { registerWebPushFcm } from '../lib/fcmWeb';
 import NotificationPermissionBanner from './NotificationPermissionBanner';
 import { Calendar } from 'lucide-react';
 
@@ -101,6 +102,15 @@ export default function MainApp() {
 
   useMotorideSystemNotifications(user?.uid);
 
+  useEffect(() => {
+    if (!user?.uid) return;
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    const t = window.setTimeout(() => {
+      void registerWebPushFcm(user.uid);
+    }, 2500);
+    return () => window.clearTimeout(t);
+  }, [user?.uid]);
+
   const acceptScheduledRsvp = async () => {
     if (!user?.uid || !scheduledJoinPrompt || scheduledJoinPrompt.variant !== 'confirm') return;
     setRsvpBusy(true);
@@ -112,7 +122,7 @@ export default function MainApp() {
         variant: 'success',
         title: 'Apuntado',
         message:
-          'Quedas en la lista de la ruta. La verás en «Mis próximas rutas»; desde 1 h antes de la hora podrás entrar al mapa y al chat.',
+          'Quedas en la lista de la ruta. La verás en «Mis próximas rutas»; usa «Chat» para acordar con el grupo. Desde 1 h antes podrás entrar al mapa y al chat de voz.',
       });
       setScheduledJoinPrompt(null);
     } catch (e) {
@@ -193,7 +203,8 @@ export default function MainApp() {
       <PendingRideInviteOverlay onJoinGroup={(id) => setActiveGroupId(id)} activeGroupId={activeGroupId} />
     ) : null;
 
-  const notificationBanner = user && !autoJoining ? <NotificationPermissionBanner /> : null;
+  const notificationBanner =
+    user && !autoJoining ? <NotificationPermissionBanner userUid={user.uid} /> : null;
 
   if (autoJoining) {
     return (

@@ -9,6 +9,14 @@
       ]
     },
     {
+      "collectionGroup": "groups",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isScheduled", "order": "ASCENDING" },
+        { "fieldPath": "scheduledTimestamp", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "rideHistory",
       "queryScope": "COLLECTION",
       "fields": [

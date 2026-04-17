@@ -10,6 +10,7 @@ import {
   limit,
   updateDoc,
   arrayUnion,
+  setDoc,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
@@ -64,13 +65,36 @@ export default function InvitesMailboxModal({ open, onClose, onJoinGroup }: Prop
     return () => unsub();
   }, [open, user?.uid]);
 
-  const removeInvite = async (inviteDocId: string) => {
+  const removeInvite = async (inv: RideInviteDoc) => {
     if (!user?.uid) return;
+    const inviteDocId = inv.id;
+    const gid = String(inv.groupId || '').trim().toUpperCase();
+    const from = String(inv.fromUid || '').trim();
+    if (gid.length !== 6 || !from) {
+      setRemovingId(inviteDocId);
+      try {
+        await deleteDoc(doc(db, 'users', user.uid, 'invites', inviteDocId));
+      } catch (e) {
+        handleFirestoreError(e, OperationType.DELETE, `users/${user.uid}/invites/${inviteDocId}`);
+      } finally {
+        setRemovingId(null);
+      }
+      return;
+    }
     setRemovingId(inviteDocId);
     try {
+      await setDoc(
+        doc(db, 'users', user.uid, 'inviteRejections', inviteDocId),
+        {
+          inviterUid: from,
+          groupId: gid,
+          rejectedAt: Date.now(),
+        },
+        { merge: true }
+      );
       await deleteDoc(doc(db, 'users', user.uid, 'invites', inviteDocId));
     } catch (e) {
-      handleFirestoreError(e, OperationType.DELETE, `users/${user.uid}/invites/${inviteDocId}`);
+      handleFirestoreError(e, OperationType.WRITE, `users/${user.uid}/inviteRejections/${inviteDocId}`);
     } finally {
       setRemovingId(null);
     }
@@ -97,6 +121,7 @@ export default function InvitesMailboxModal({ open, onClose, onJoinGroup }: Prop
 
       await updateDoc(groupRef, { members: arrayUnion(user.uid) });
       await deleteDoc(doc(db, 'users', user.uid, 'invites', inv.id));
+      await deleteDoc(doc(db, 'users', user.uid, 'inviteRejections', inv.id)).catch(() => {});
 
       const uref = doc(db, 'users', user.uid);
       const usnap = await getDoc(uref);
@@ -189,7 +214,7 @@ export default function InvitesMailboxModal({ open, onClose, onJoinGroup }: Prop
                       <button
                         type="button"
                         disabled={removingId === inv.id}
-                        onClick={() => void removeInvite(inv.id)}
+                        onClick={() => void removeInvite(inv)}
                         className="shrink-0 p-2 text-zinc-500 hover:text-red-400"
                         title="Descartar"
                       >

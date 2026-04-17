@@ -56,6 +56,7 @@ import { pickBestNominatimResult, sortNominatimResults } from '../lib/nominatimP
 import { prefetchAroundUser } from '../lib/mapTileCache';
 import { weatherWmoToLucide } from '../lib/weatherWmo';
 import socket from '../lib/socket';
+import { speakMotorideGroupAlert } from '../lib/motorideAlertSpeech';
 import { useVoiceChat } from '../hooks/useVoiceChat';
 import PremiumBadge from './PremiumBadge';
 import InviteFriendsModal from './InviteFriendsModal';
@@ -1615,6 +1616,17 @@ export default function MapView({
       setTimeout(() => {
         setLocations((prev) => prev.map((l) => (l.uid === data.uid ? { ...l, alert: null } : l)));
       }, 30000);
+
+      if (data.uid !== user?.uid) {
+        speakMotorideGroupAlert(String(data.type || ''), String(data.displayName || 'Motero'));
+        try {
+          if (data.type === 'Caída' && typeof navigator !== 'undefined' && navigator.vibrate) {
+            navigator.vibrate([200, 100, 200, 100, 400]);
+          }
+        } catch {
+          /* ignore */
+        }
+      }
     };
 
     socket.on('location-updated', handleLocationUpdate);
@@ -1665,7 +1677,7 @@ export default function MapView({
       socket.off('alert-triggered', handleAlertTriggered);
       unsubs.forEach(u => u());
     };
-  }, [group?.members]);
+  }, [group?.members, user?.uid]);
 
   useEffect(() => {
     if (isHost) return;
@@ -3025,6 +3037,68 @@ export default function MapView({
 
     setTimeout(() => setAlertType(null), 30000);
   };
+
+  /** Caída automática: marcha en curso, ~0 km/h e inclinación ≥ 60° sostenida 3 s. */
+  useEffect(() => {
+    if (!rideActive || !groupId || groupId === 'REPEATED' || !user?.uid) return;
+    const SAMPLE_MS = 200;
+    const HOLD_MS = 3000;
+    let accumMs = 0;
+    let lastSample = Date.now();
+    const iv = window.setInterval(() => {
+      try {
+        const now = Date.now();
+        const dt = Math.min(SAMPLE_MS * 2, Math.max(0, now - lastSample));
+        lastSample = now;
+        if (alertType === 'Caída') {
+          accumMs = 0;
+          return;
+        }
+        const speedKmh = (speed ?? 0) * 3.6;
+        const nearlyStopped = speedKmh < 1;
+        const steepLean = Math.abs(leanAngle) >= 60;
+        if (nearlyStopped && steepLean) {
+          accumMs += dt;
+          if (accumMs >= HOLD_MS) {
+            accumMs = 0;
+            setAlertType('Caída');
+            setShowAlertMenu(false);
+            setShowSettings(false);
+            if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(120);
+            socket.emit('trigger-alert', {
+              groupId,
+              uid: user.uid,
+              displayName: displayNameToUse,
+              type: 'Caída',
+              ...(currentLocation &&
+              typeof currentLocation.lat === 'number' &&
+              typeof currentLocation.lng === 'number'
+                ? { lat: currentLocation.lat, lng: currentLocation.lng }
+                : {}),
+            });
+            window.setTimeout(() => setAlertType(null), 30000);
+          }
+        } else {
+          accumMs = 0;
+        }
+      } catch {
+        /* ignore */
+      }
+    }, SAMPLE_MS);
+    return () => {
+      window.clearInterval(iv);
+    };
+  }, [
+    rideActive,
+    groupId,
+    user?.uid,
+    speed,
+    leanAngle,
+    alertType,
+    displayNameToUse,
+    currentLocation?.lat,
+    currentLocation?.lng,
+  ]);
 
   const currentSpeedKmh = speed ? Math.round(speed * 3.6) : 0;
   /** Sin redondear: zoom dinámico suave según velocidad real. */

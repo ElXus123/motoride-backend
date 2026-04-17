@@ -231,6 +231,12 @@ service cloud.firestore {
       return request.auth.uid != receiverUid && (iHaveThem || theyHaveMe);
     }
 
+    function isGroupMember(groupId) {
+      return exists(/databases/$(database)/documents/groups/$(groupId)) &&
+        get(/databases/$(database)/documents/groups/$(groupId)).data.members is list &&
+        request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.members;
+    }
+
     match /users/{userId} {
       allow read: if isAuthenticated();
       allow create: if isOwner(userId) && isValidUser(request.resource.data) &&
@@ -271,6 +277,46 @@ service cloud.firestore {
           isValidRideInviteDoc(request.resource.data);
         allow delete: if isAuthenticated() && request.auth.uid == userId;
       }
+
+      /** Rechazo definitivo desde buzón: el invitador no puede reenviar para esa ruta. */
+      match /inviteRejections/{rejId} {
+        function inviteRejectionIdMatches(data) {
+          return data.inviterUid is string &&
+            data.inviterUid.size() > 4 &&
+            data.groupId is string &&
+            data.groupId.size() == 6 &&
+            rejId == data.inviterUid + '_' + data.groupId;
+        }
+        allow read: if isAuthenticated() && (
+          request.auth.uid == userId ||
+          (
+            exists(/databases/$(database)/documents/users/$(userId)/inviteRejections/$(rejId)) &&
+            get(/databases/$(database)/documents/users/$(userId)/inviteRejections/$(rejId)).data.inviterUid == request.auth.uid
+          )
+        );
+        allow create: if isOwner(userId) &&
+          request.resource.data.keys().hasAll(['inviterUid', 'groupId', 'rejectedAt']) &&
+          request.resource.data.rejectedAt is number &&
+          request.resource.data.rejectedAt > request.time.toMillis() - 600000 &&
+          request.resource.data.rejectedAt < request.time.toMillis() + 600000 &&
+          inviteRejectionIdMatches(request.resource.data);
+        allow delete: if isOwner(userId);
+      }
+
+      match /fcmTokens/{tokenId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId) &&
+          request.resource.data.keys().hasAll(['token', 'createdAt']) &&
+          request.resource.data.token is string &&
+          request.resource.data.token.size() >= 80 &&
+          request.resource.data.token.size() <= 2048 &&
+          request.resource.data.createdAt is number &&
+          request.resource.data.createdAt > request.time.toMillis() - 86400000 &&
+          request.resource.data.createdAt < request.time.toMillis() + 86400000 &&
+          (!('ua' in request.resource.data) ||
+            (request.resource.data.ua is string && request.resource.data.ua.size() <= 300));
+        allow delete: if isOwner(userId);
+      }
     }
 
     match /premiumCandidates/{docId} {
@@ -308,6 +354,23 @@ service cloud.firestore {
          resource.data.createdBy != request.auth.uid)
       );
       allow delete: if (isAuthenticated() && resource.data.createdBy == request.auth.uid) || isAdmin();
+
+      match /planMessages/{msgId} {
+        allow read: if isAuthenticated() && isGroupMember(groupId);
+        allow create: if isAuthenticated() && isGroupMember(groupId) &&
+          request.resource.data.keys().hasAll(['text', 'uid', 'displayName', 'createdAt']) &&
+          request.resource.data.uid == request.auth.uid &&
+          request.resource.data.text is string &&
+          request.resource.data.text.size() > 0 &&
+          request.resource.data.text.size() <= 800 &&
+          request.resource.data.displayName is string &&
+          request.resource.data.displayName.size() > 0 &&
+          request.resource.data.displayName.size() <= 80 &&
+          request.resource.data.createdAt is number &&
+          request.resource.data.createdAt > request.time.toMillis() - 300000 &&
+          request.resource.data.createdAt < request.time.toMillis() + 300000;
+        allow update, delete: if false;
+      }
     }
 
     match /locations/{userId} {

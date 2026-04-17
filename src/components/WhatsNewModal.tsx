@@ -3,7 +3,7 @@ import { Check } from 'lucide-react';
 import appLogo from '../../ICONO.png';
 
 /** Sube este valor cuando cambien las novedades para volver a mostrar el aviso una vez por dispositivo. */
-export const WHATS_NEW_VERSION = '2026.05.17';
+export const WHATS_NEW_VERSION = '2026.05.19';
 
 const STORAGE_KEY = 'motoride_whats_new_seen_version';
 
@@ -19,14 +19,29 @@ export type ChangelogEntry = {
 /** Orden visual: más recientes arriba; `updatedAt` descendente. */
 const CHANGELOG: ChangelogEntry[] = [
   {
-    kind: 'arreglo',
-    text: 'Mapa con el rumbo arriba en marcha: corregidos los huecos grises en las esquinas al girar el mapa; la capa se escala para cubrir siempre el marco de la pantalla.',
-    updatedAt: '2026-05-17T12:00:00',
+    kind: 'novedad',
+    text: 'Invitaciones: «Ignorar» en el popup solo quita la alerta; la invitación permanece en el buzón. Si la descartas desde el buzón, el invitador no puede volver a enviar esa misma ruta a tu usuario (registro `inviteRejections` en Firestore).',
+    updatedAt: '2026-05-19T14:00:00',
+  },
+  {
+    kind: 'novedad',
+    text: 'Caída y alertas de grupo por voz: con la marcha grabada en curso, si casi no hay velocidad y la inclinación es ≥ 60° durante ~3 s, se notifica caída al grupo. Los compañeros oyen en español (síntesis del navegador) caída, parado, avería, repostar, peligro, accidente y policía; no para reconexión de voz ni mensajes del sistema.',
+    updatedAt: '2026-05-19T13:45:00',
+  },
+  {
+    kind: 'novedad',
+    text: 'Rutas programadas: chat de texto «Chat planificación» para apuntados (acordar hora, punto de encuentro, etc.). Los mensajes viven en el grupo en Firestore.',
+    updatedAt: '2026-05-18T14:00:00',
+  },
+  {
+    kind: 'novedad',
+    text: 'Notificaciones push (FCM) con la app cerrada o en segundo plano: registro del token al aceptar permisos, service worker actualizado y carpeta `functions/` con Cloud Functions (invitación en bandeja y aviso ~1 h antes de la salida a miembros). Requiere clave VAPID (`VITE_FIREBASE_VAPID_KEY`), desplegar funciones e índice Firestore nuevo.',
+    updatedAt: '2026-05-18T13:50:00',
   },
   {
     kind: 'arreglo',
-    text: 'Desactivada la detección automática de «caída» que podía disparar un aviso al inclinar mucho el móvil estando casi parado; el resto de alertas manuales del menú no cambia.',
-    updatedAt: '2026-05-17T11:55:00',
+    text: 'Mapa con el rumbo arriba en marcha: corregidos los huecos grises en las esquinas al girar el mapa; la capa se escala para cubrir siempre el marco de la pantalla.',
+    updatedAt: '2026-05-17T12:00:00',
   },
   {
     kind: 'novedad',

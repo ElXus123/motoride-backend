@@ -1,5 +1,6 @@
 import { useCallback, useState, type ReactElement } from 'react';
 import { Bell, X } from 'lucide-react';
+import { registerWebPushFcm } from '../lib/fcmWeb';
 
 const SNOOZE_KEY = 'motoride_notif_prompt_snooze_until';
 const SNOOZE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -28,9 +29,9 @@ function writeSnoozeUntil(until: number): void {
 
 /**
  * Barra fija: pide permiso de notificaciones con gesto de usuario (necesario en muchos móviles).
- * Las invitaciones a ruta usan la Web Notification API vía `useMotorideSystemNotifications`.
+ * Con permiso concedido también se registra FCM web (push en segundo plano si despliegas Cloud Functions y VAPID).
  */
-export default function NotificationPermissionBanner(): ReactElement | null {
+export default function NotificationPermissionBanner({ userUid }: { userUid?: string }): ReactElement | null {
   const [snoozeUntil, setSnoozeUntil] = useState(() => readSnoozeUntil());
   const [busy, setBusy] = useState(false);
 
@@ -48,13 +49,16 @@ export default function NotificationPermissionBanner(): ReactElement | null {
     if (!notificationsSupported() || busy) return;
     setBusy(true);
     try {
-      await globalThis.Notification.requestPermission();
+      const p = await globalThis.Notification.requestPermission();
+      if (p === 'granted' && userUid) {
+        void registerWebPushFcm(userUid);
+      }
     } catch {
       /* ignore */
     } finally {
       setBusy(false);
     }
-  }, [busy]);
+  }, [busy, userUid]);
 
   const onClose = useCallback(() => {
     onLater();
@@ -75,8 +79,9 @@ export default function NotificationPermissionBanner(): ReactElement | null {
         <div className="min-w-0 flex-1 pt-0.5">
           <p className="text-sm font-bold text-white">¿Activar avisos en el teléfono?</p>
           <p className="mt-0.5 text-xs leading-relaxed text-zinc-400">
-            Así te avisamos cuando te inviten a una ruta o tengas solicitudes de amistad, aunque MotoRide esté en segundo
-            plano (según el navegador o si instalaste la app).
+            Avisos en el dispositivo al invitarte a una ruta, al abrirse la ventana de 1 h antes de una salida programada y
+            solicitudes de amistad. Con la app cerrada hace falta push web (FCM): clave VAPID en el proyecto y funciones
+            desplegadas en Firebase.
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
             <button

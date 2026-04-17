@@ -106,6 +106,17 @@ export default function InviteFriendsModal({
         return;
       }
       const canonUid = targetSnap.id;
+      const inviteDocId = `${user.uid}_${gid}`;
+      const rejectionSnap = await getDoc(doc(db, 'users', canonUid, 'inviteRejections', inviteDocId));
+      if (rejectionSnap.exists()) {
+        showMessage({
+          variant: 'info',
+          title: 'Invitación',
+          message:
+            'Esta persona rechazó esta invitación desde el buzón. No puedes volver a enviarla para esta ruta.',
+        });
+        return;
+      }
       const invitePayload = {
         fromUid: user.uid,
         groupId: gid,
@@ -117,7 +128,7 @@ export default function InviteFriendsModal({
         rideInvitePending: invitePayload,
       });
       await setDoc(
-        doc(db, 'users', canonUid, 'invites', `${user.uid}_${gid}`),
+        doc(db, 'users', canonUid, 'invites', inviteDocId),
         {
           fromUid: user.uid,
           groupId: gid,
@@ -143,6 +154,17 @@ export default function InviteFriendsModal({
             return;
           }
           const canonUid = targetSnap.id;
+          const inviteDocIdRetry = `${user.uid}_${gid}`;
+          const rejectionRetry = await getDoc(doc(db, 'users', canonUid, 'inviteRejections', inviteDocIdRetry));
+          if (rejectionRetry.exists()) {
+            showMessage({
+              variant: 'info',
+              title: 'Invitación',
+              message:
+                'Esta persona rechazó esta invitación desde el buzón. No puedes volver a enviarla para esta ruta.',
+            });
+            return;
+          }
           const myData = mySnap.data() as any;
           const myFriends = Array.isArray(myData?.friends) ? myData.friends.map((x: unknown) => String(x)) : [];
           if (!myFriends.includes(canonUid)) {
@@ -157,7 +179,7 @@ export default function InviteFriendsModal({
             },
           });
           await setDoc(
-            doc(db, 'users', canonUid, 'invites', `${user.uid}_${gid}`),
+            doc(db, 'users', canonUid, 'invites', inviteDocIdRetry),
             {
               fromUid: user.uid,
               groupId: gid,

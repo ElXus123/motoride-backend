@@ -1,5 +1,5 @@
 MotoRide — registro de contexto / cambios recientes
-Ultima actualizacion: 2026-05-01 (perfil: borrar ruta solo en modal de resumen)
+Ultima actualizacion: 2026-05-19 (caída+voz en grupo; invitaciones buzón/bloqueo; novedades 2026.05.19)
 
 === Contacto y soporte ===
 - Correo publico de contacto: motorideapp1@gmail.com
@@ -382,3 +382,9 @@ Fecha: 2026-04-14
 === BLOQUE 35 — ADMIN: PUNTOS Y NIVEL POR USUARIO ===
 - `src/components/AdminPointsPanel.tsx`: sección «Nivel y puntos»; búsqueda de usuario, modal para editar `points` y `level`; botones para alinear nivel↔puntos (1000 pts por nivel).
 - `firestore.rules`: el admin puede actualizar solo `points` y `level` en `users/{userId}` (rangos acotados) además de `isPremium`.
+
+=== BLOQUE 37 — CAÍDA (MARCHA + 0 KM/H + 60° 3 S), VOZ EN ALERTAS DE GRUPO, INVITACIONES ===
+- **Detector de caída:** `src/components/MapView.tsx` — solo con `rideActive` (grabación sin pausa); velocidad menor que 1 km/h; |inclinación| ≥ 60° mantenida ~3 s (intervalo 200 ms); emite `trigger-alert` tipo `Caída` como el menú manual.
+- **Voz para compañeros:** `src/lib/motorideAlertSpeech.ts` — `speakMotorideGroupAlert` con Web Speech API (`es-ES`) al recibir `alert-triggered` si el aviso no es del propio usuario; tipos: Caída, Parado, Averiado, Repostar/Repostando, Peligro, Accidente, Policía. No aplica a reconexión de voz ni mensajes del sistema. Caída ajena: vibración larga en el receptor.
+- **Invitaciones:** `PendingRideInviteOverlay.tsx` — «Ignorar» solo borra `rideInvitePending`; asegura copia en `users/{uid}/invites` si faltaba; no borra el buzón. `InvitesMailboxModal.tsx` — papelera escribe `users/{uid}/inviteRejections/{inviterUid_codigo6}` y borra el invite; al unirse desde buzón se borra también el rechazo. `InviteFriendsModal.tsx` — antes de enviar comprueba `inviteRejections` y bloquea reenvío. `firestore.rules` — subcolección `inviteRejections` con id = `inviterUid + '_' + groupId`.
+- **Novedades:** `src/components/WhatsNewModal.tsx` — `WHATS_NEW_VERSION` `2026.05.19` y entradas de changelog alineadas con lo anterior.

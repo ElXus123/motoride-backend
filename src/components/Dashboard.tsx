@@ -23,7 +23,7 @@ import { getDistance } from '../lib/geoUtils';
 import { calculateLevel, formatDurationHoursMinutes } from '../lib/utils';
 import { requestJson } from '../lib/network';
 import { LEAFLET_LIGHT_ERROR_TILE } from '../lib/leafletTiles';
-import { Users, Plus, LogOut, User as UserIcon, Activity, Trash2, Calendar, MapPin, Search, Clock, ChevronRight, Upload, X, Map as MapIcon, HeartHandshake, CircleDollarSign, Shield, CheckCircle2, AlertCircle, Mail, Share2, Copy, Check, Loader2, Globe, Lock, Inbox, UserPlus, ListOrdered, FileText } from 'lucide-react';
+import { Users, Plus, LogOut, User as UserIcon, Activity, Trash2, Calendar, MapPin, Search, Clock, ChevronRight, Upload, X, Map as MapIcon, HeartHandshake, CircleDollarSign, Shield, CheckCircle2, AlertCircle, Mail, Share2, Copy, Check, Loader2, Globe, Lock, Inbox, UserPlus, ListOrdered, FileText, MessageCircle } from 'lucide-react';
 import { copyTextToClipboard, getSupportMailtoHref } from '../lib/clientInfo';
 import { buildScheduledInviteSharePayload, formatScheduledRideDayOnlyEs } from '../lib/scheduledRouteShare';
 import { generateGroupCode } from '../lib/groupCode';
@@ -52,6 +52,7 @@ import InviteFriendsModal from './InviteFriendsModal';
 import PremiumBadge from './PremiumBadge';
 import ScheduledRouteAttendees from './ScheduledRouteAttendees';
 import ScheduledRouteSoonOverlay from './ScheduledRouteSoonOverlay';
+import ScheduledRoutePlanChatModal from './ScheduledRoutePlanChatModal';
 
 interface DashboardProps {
   onJoinGroup: (id: string) => void;
@@ -108,6 +109,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   const [scheduledInviteModal, setScheduledInviteModal] = useState<
     null | { groupId: string; groupName: string; memberUids: string[]; scheduledTimestamp: number }
   >(null);
+  const [planChatRoute, setPlanChatRoute] = useState<null | { id: string; name: string }>(null);
   const [showPreviewModal, setShowPreviewModal] = useState<any>(null);
   const [showJoinCodeModal, setShowJoinCodeModal] = useState(false);
   const supportPopupRef = useRef<Window | null>(null);
@@ -1157,7 +1159,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                 Explorar rutas planificadas
               </h2>
               <p className="text-[11px] text-zinc-500 mt-1 max-w-xl">
-                Las rutas <span className="text-zinc-400">solo amigos</span> o <span className="text-zinc-400">privadas</span> solo las ves tú y quien corresponda; el resto usa código o enlace para unirse. Mapa y chat de voz: desde{' '}
+                Las rutas <span className="text-zinc-400">solo amigos</span> o <span className="text-zinc-400">privadas</span> solo las ves tú y quien corresponda; el resto usa código o enlace para unirse. Si estás apuntado, usa <span className="text-zinc-400">Chat planificación</span> para acordar detalles. Mapa y chat de voz en vivo: desde{' '}
                 <span className="text-zinc-400">1 h antes</span> de la hora.
               </p>
               {exploreFromGpsHint && (
@@ -1261,6 +1263,16 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                         );
                       })()}
                     </div>
+                    {route.members?.includes(user?.uid) ? (
+                      <button
+                        type="button"
+                        onClick={() => setPlanChatRoute({ id: route.id, name: String(route.name || 'Ruta') })}
+                        className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 py-2 text-xs font-bold text-emerald-200 transition-colors hover:bg-emerald-500/20"
+                      >
+                        <MessageCircle size={14} className="shrink-0" />
+                        Chat planificación
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => bumpAttendeesList(route.members)}
@@ -1289,7 +1301,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
             Rutas de amigos
           </h2>
           <p className="text-[10px] text-zinc-500 mb-4 leading-relaxed">
-            Apunta y revisa la ruta en vista previa. El mapa, participantes y chat de voz se abren desde{' '}
+            Apunta y revisa la ruta en vista previa. Los apuntados pueden usar <span className="text-zinc-400">Chat planificación</span> para acordar. El mapa, participantes y chat de voz en vivo se abren desde{' '}
             <span className="text-zinc-400">1 hora antes</span> de la hora programada.
           </p>
           {friendsPlannedRoutes.length > 0 ? (
@@ -1368,6 +1380,16 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                               : 'Apuntarse'}
                       </button>
                     </div>
+                    {isJoined ? (
+                      <button
+                        type="button"
+                        onClick={() => setPlanChatRoute({ id: route.id, name: String(route.name || 'Ruta') })}
+                        className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 py-2 text-xs font-bold text-emerald-200 transition-colors hover:bg-emerald-500/20"
+                      >
+                        <MessageCircle size={14} className="shrink-0" />
+                        Chat planificación
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => bumpAttendeesList(route.members)}
@@ -1488,6 +1510,14 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                             Invitar
                           </button>
                         )}
+                        <button
+                          type="button"
+                          onClick={() => setPlanChatRoute({ id: route.id, name: String(route.name || 'Ruta') })}
+                          className="flex min-w-[calc(50%-0.25rem)] flex-1 items-center justify-center gap-1 rounded-lg border border-emerald-500/35 bg-emerald-500/10 py-1.5 text-[10px] font-bold text-emerald-200 hover:bg-emerald-500/20"
+                        >
+                          <MessageCircle size={12} />
+                          Chat
+                        </button>
                         {!canEnterSession && route.createdBy !== user?.uid && (
                           <button
                             type="button"
@@ -1578,6 +1608,14 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           memberUids={scheduledInviteModal.memberUids}
           inviteKind="scheduled_ride"
           scheduledTimestamp={scheduledInviteModal.scheduledTimestamp}
+        />
+      )}
+      {planChatRoute && (
+        <ScheduledRoutePlanChatModal
+          open
+          onClose={() => setPlanChatRoute(null)}
+          groupId={planChatRoute.id}
+          groupName={planChatRoute.name}
         />
       )}
 

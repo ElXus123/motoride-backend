@@ -85,3 +85,54 @@ self.addEventListener('fetch', (event) => {
     );
   }
 });
+
+// Firebase Cloud Messaging (notificaciones con la app en segundo plano o cerrada en navegadores compatibles).
+try {
+  importScripts(
+    'https://www.gstatic.com/firebasejs/11.0.2/firebase-app-compat.js',
+    'https://www.gstatic.com/firebasejs/11.0.2/firebase-messaging-compat.js'
+  );
+  if (!firebase.apps || firebase.apps.length === 0) {
+    firebase.initializeApp({
+      apiKey: 'AIzaSyBhUECw8bsPJV-dXcKwYrcZv52vmZMjUSE',
+      authDomain: 'motoapp-3e6c6.firebaseapp.com',
+      projectId: 'motoapp-3e6c6',
+      storageBucket: 'motoapp-3e6c6.firebasestorage.app',
+      messagingSenderId: '769937663281',
+      appId: '1:769937663281:web:37c5c4f97b08dd7400fc10',
+    });
+  }
+  const messaging = firebase.messaging();
+  messaging.onBackgroundMessage((payload) => {
+    const title =
+      (payload.notification && payload.notification.title) || (payload.data && payload.data.title) || 'MotoRide';
+    const body =
+      (payload.notification && payload.notification.body) || (payload.data && payload.data.body) || '';
+    const url =
+      (payload.fcmOptions && payload.fcmOptions.link) ||
+      (payload.data && payload.data.url) ||
+      self.location.origin + '/';
+    return self.registration.showNotification(title, {
+      body,
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      data: { url },
+      tag: (payload.data && payload.data.tag) || 'motoride',
+    });
+  });
+  self.addEventListener('notificationclick', (event) => {
+    event.notification.close();
+    const url =
+      (event.notification && event.notification.data && event.notification.data.url) || self.location.origin + '/';
+    event.waitUntil(
+      self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+        for (const c of clientList) {
+          if (c.url && 'focus' in c) return c.focus();
+        }
+        if (self.clients.openWindow) return self.clients.openWindow(url);
+      })
+    );
+  });
+} catch (e) {
+  console.warn('[sw] FCM init skipped:', e);
+}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { doc, getDoc, updateDoc, deleteDoc, deleteField, arrayUnion } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, deleteDoc, deleteField, arrayUnion, setDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppMessage } from '../contexts/AppMessageContext';
@@ -18,17 +18,39 @@ type Props = {
   activeGroupId: string | null;
 };
 
-/** Borra `rideInvitePending` y, si existe, la entrada en `users/{uid}/invites`. */
-async function clearPendingInviteForUser(
-  userUid: string,
-  pending: Pending,
-  groupIdUpper: string
-) {
+/** Solo quita el popup global; la invitación sigue en el buzón. */
+async function clearRideInvitePendingOnly(userUid: string) {
+  await updateDoc(doc(db, 'users', userUid), { rideInvitePending: deleteField() });
+}
+
+/** Tras unirse o si la ruta ya no existe: quita pendiente y la entrada del buzón. */
+async function clearPendingInviteForUser(userUid: string, pending: Pending, groupIdUpper: string) {
   await updateDoc(doc(db, 'users', userUid), { rideInvitePending: deleteField() });
   const from = String(pending.fromUid || '').trim();
   if (from) {
     const inviteDocId = `${from}_${groupIdUpper}`;
     await deleteDoc(doc(db, 'users', userUid, 'invites', inviteDocId)).catch(() => {});
+    await deleteDoc(doc(db, 'users', userUid, 'inviteRejections', inviteDocId)).catch(() => {});
+  }
+}
+
+/** Ignorar popup: asegura copia en buzón por si solo había `rideInvitePending`. */
+async function ensureInviteMailboxCopy(userUid: string, pending: Pending, groupIdUpper: string) {
+  const from = String(pending.fromUid || '').trim();
+  if (!from || groupIdUpper.length !== 6) return;
+  const inviteDocId = `${from}_${groupIdUpper}`;
+  try {
+    const ref = doc(db, 'users', userUid, 'invites', inviteDocId);
+    const snap = await getDoc(ref);
+    if (snap.exists()) return;
+    await setDoc(ref, {
+      fromUid: from,
+      groupId: groupIdUpper,
+      groupName: String(pending.groupName || 'Ruta').trim().slice(0, 120) || 'Ruta',
+      sentAt: Number(pending.sentAt) || Date.now(),
+    });
+  } catch {
+    /* ignore */
   }
 }
 
@@ -63,7 +85,7 @@ export default function PendingRideInviteOverlay({ onJoinGroup, activeGroupId }:
     const gid = pending?.groupId ? String(pending.groupId).toUpperCase().trim() : '';
     if (!gid || gid.length !== 6 || !activeGroupId || !user?.uid || !pending) return;
     if (gid !== activeGroupId.toUpperCase().trim()) return;
-    void clearPendingInviteForUser(user.uid, pending, gid).catch(() => {});
+    void clearRideInvitePendingOnly(user.uid).catch(() => {});
   }, [pending, activeGroupId, user?.uid]);
 
   if (!user || !pending?.groupId) return null;
@@ -73,7 +95,8 @@ export default function PendingRideInviteOverlay({ onJoinGroup, activeGroupId }:
 
   const dismiss = async () => {
     try {
-      await clearPendingInviteForUser(user.uid, pending, gid);
+      await ensureInviteMailboxCopy(user.uid, pending, gid);
+      await clearRideInvitePendingOnly(user.uid);
     } catch (e) {
       handleFirestoreError(e, OperationType.UPDATE, `users/${user.uid}`);
     }
