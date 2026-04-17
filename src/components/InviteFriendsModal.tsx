@@ -9,6 +9,103 @@ import { motion, AnimatePresence } from 'motion/react';
 import PremiumBadge from './PremiumBadge';
 import { copyTextToClipboard } from '../lib/clientInfo';
 import { buildScheduledInviteSharePayload } from '../lib/scheduledRouteShare';
+import { tryDirectChatFirestoreId } from '../lib/directChatId';
+
+function pickFirebaseErr(err: unknown): { code: string; message: string } {
+  if (err !== null && typeof err === 'object' && 'code' in err) {
+    const code = String((err as { code?: unknown }).code ?? '');
+    const msg = (err as { message?: unknown }).message;
+    const message = typeof msg === 'string' ? msg : '';
+    return { code, message: message || String(err) };
+  }
+  return { code: '', message: typeof err === 'string' ? err : String(err) };
+}
+
+function strUidList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((x) => String(x).trim()).filter(Boolean);
+}
+
+/**
+ * Pistas para reglas Firestore `rideInviteSocialOk` / `crossUserRideInviteUserDiffOk`
+ * (lectura de `privateChats` puede devolver permission-denied si las reglas de DM lo exigen).
+ */
+async function fetchInviteDiagnostics(
+  inviterUid: string,
+  receiverUid: string,
+  routeCode: string,
+): Promise<Record<string, unknown>> {
+  const inviteDocId = `${inviterUid}_${routeCode}`;
+  const paths = {
+    group: `groups/${routeCode}`,
+    inviter: `users/${inviterUid}`,
+    receiver: `users/${receiverUid}`,
+    pendingField: `users/${receiverUid}.rideInvitePending`,
+    mailboxDoc: `users/${receiverUid}/invites/${inviteDocId}`,
+  };
+
+  const [groupSnap, inviterSnap, receiverSnap] = await Promise.all([
+    getDoc(doc(db, 'groups', routeCode)),
+    getDoc(doc(db, 'users', inviterUid)),
+    getDoc(doc(db, 'users', receiverUid)),
+  ]);
+
+  const rawMembers = groupSnap.exists() ? (groupSnap.data() as { members?: unknown })?.members : undefined;
+  const membersArr = strUidList(rawMembers);
+  const groupCodeField =
+    groupSnap.exists() && typeof (groupSnap.data() as { code?: unknown })?.code === 'string'
+      ? String((groupSnap.data() as { code: string }).code)
+      : null;
+
+  const inviterData = inviterSnap.exists() ? inviterSnap.data() : null;
+  const receiverData = receiverSnap.exists() ? receiverSnap.data() : null;
+
+  const dmId = tryDirectChatFirestoreId(inviterUid, receiverUid) || '';
+  let dmReadable: 'missing' | 'ok' | 'denied' | 'error' | 'no_chat_id' = dmId ? 'missing' : 'no_chat_id';
+  let dmMembers: string[] = [];
+  let dmReadError: { code: string; message: string } | null = null;
+  if (dmId) {
+    try {
+      const dmSnap = await getDoc(doc(db, 'privateChats', dmId));
+      if (!dmSnap.exists()) dmReadable = 'missing';
+      else {
+        dmReadable = 'ok';
+        dmMembers = strUidList((dmSnap.data() as { members?: unknown } | undefined)?.members);
+      }
+    } catch (de: unknown) {
+      dmReadError = pickFirebaseErr(de);
+      dmReadable = dmReadError.code === 'permission-denied' ? 'denied' : 'error';
+    }
+  }
+
+  return {
+    paths,
+    routeCode,
+    inviteDocId,
+    groupExists: groupSnap.exists(),
+    groupDocId: groupSnap.exists() ? groupSnap.id : null,
+    groupCodeField,
+    groupDocIdMatchesRouteCode: groupSnap.exists() ? groupSnap.id === routeCode : false,
+    membersCount: membersArr.length,
+    inviterInGroupMembers: membersArr.includes(inviterUid),
+    receiverInGroupMembers: membersArr.includes(receiverUid),
+    membersPreview: membersArr.slice(0, 12),
+    inviterFriendsHasReceiver: strUidList(inviterData?.friends).includes(receiverUid),
+    receiverFriendsHasInviter: strUidList(receiverData?.friends).includes(inviterUid),
+    inviterIncomingHasReceiver: strUidList(inviterData?.friendRequestsIncoming).includes(receiverUid),
+    receiverIncomingHasInviter: strUidList(receiverData?.friendRequestsIncoming).includes(inviterUid),
+    inviterOutgoingHasReceiver: strUidList(inviterData?.friendRequestsOutgoing).includes(receiverUid),
+    receiverOutgoingHasInviter: strUidList(receiverData?.friendRequestsOutgoing).includes(inviterUid),
+    dmChatId: dmId || null,
+    dmDocReadable: dmReadable,
+    dmReadError,
+    dmMembersPreview: dmMembers.slice(0, 4),
+    dmBothUidsInDmMembers:
+      dmMembers.length > 0 ? dmMembers.includes(inviterUid) && dmMembers.includes(receiverUid) : false,
+    inviterUserExists: inviterSnap.exists(),
+    receiverUserExists: receiverSnap.exists(),
+  };
+}
 
 type Props = {
   open: boolean;
@@ -172,13 +269,45 @@ export default function InviteFriendsModal({
         try {
           await updateDoc(targetRef, { rideInvitePending: invitePayload });
         } catch (step1: unknown) {
-          console.error('[invite] paso 1 updateDoc users/*/rideInvitePending', step1);
+          let diag: Record<string, unknown> = {};
+          try {
+            diag = await fetchInviteDiagnostics(user.uid, canonUid, routeCode);
+          } catch (dx: unknown) {
+            diag = { fetchInviteDiagnosticsFailed: pickFirebaseErr(dx) };
+          }
+          console.error('[invite] paso 1 updateDoc rideInvitePending', {
+            phase: 'initial_firestore',
+            step: 1,
+            error: pickFirebaseErr(step1),
+            inviterUid: user.uid,
+            receiverUid: canonUid,
+            routeCode,
+            inviteDocId,
+            inviteKind,
+            diag,
+          });
           throw step1;
         }
         try {
           await setDoc(inviteRef, mailboxPayload, { merge: true });
         } catch (step2: unknown) {
-          console.error('[invite] paso 2 setDoc users/*/invites/*', step2);
+          let diag: Record<string, unknown> = {};
+          try {
+            diag = await fetchInviteDiagnostics(user.uid, canonUid, routeCode);
+          } catch (dx: unknown) {
+            diag = { fetchInviteDiagnosticsFailed: pickFirebaseErr(dx) };
+          }
+          console.error('[invite] paso 2 setDoc invites mailbox', {
+            phase: 'initial_firestore',
+            step: 2,
+            error: pickFirebaseErr(step2),
+            inviterUid: user.uid,
+            receiverUid: canonUid,
+            routeCode,
+            inviteDocId,
+            inviteKind,
+            diag,
+          });
           throw step2;
         }
       };
@@ -194,9 +323,30 @@ export default function InviteFriendsModal({
       } catch (cloudErr: unknown) {
         const fe = cloudErr as { code?: string; message?: string };
         if (fe?.code === 'functions/not-found') {
-          console.warn('[invite] sendRideInvite no desplegada; fallback Firestore.');
+          console.warn('[invite] sendRideInvite no desplegada; fallback Firestore.', {
+            inviterUid: user.uid,
+            receiverUid: canonUid,
+            routeCode,
+            inviteDocId,
+            inviteKind,
+          });
           await sendViaFirestore();
         } else {
+          let diag: Record<string, unknown> = {};
+          try {
+            diag = await fetchInviteDiagnostics(user.uid, canonUid, routeCode);
+          } catch (dx: unknown) {
+            diag = { fetchInviteDiagnosticsFailed: pickFirebaseErr(dx) };
+          }
+          console.error('[invite] Callable sendRideInvite error (no fallback)', {
+            error: pickFirebaseErr(cloudErr),
+            inviterUid: user.uid,
+            receiverUid: canonUid,
+            routeCode,
+            inviteDocId,
+            inviteKind,
+            diag,
+          });
           throw cloudErr;
         }
       }
@@ -221,7 +371,16 @@ export default function InviteFriendsModal({
         return;
       }
       if (code === 'permission-denied') {
+        /** Alcance compartido con `catch`: el `try` no expone `const` al `catch`. */
+        let retryCanonUid = '';
         try {
+          console.warn('[invite] permission-denied en primer intento; entrando en reintento', {
+            firstPassError: pickFirebaseErr(e),
+            inviterUid: user.uid,
+            targetUidInput: targetUid,
+            routeCode,
+            inviteKind,
+          });
           const myRef = doc(db, 'users', user.uid);
           const [mySnap, targetSnap] = await Promise.all([getDoc(myRef), getDoc(doc(db, 'users', targetUid))]);
           if (!mySnap.exists() || !targetSnap.exists()) {
@@ -232,9 +391,9 @@ export default function InviteFriendsModal({
             });
             return;
           }
-          const canonUid = targetSnap.id;
+          retryCanonUid = targetSnap.id;
           const inviteDocIdRetry = `${user.uid}_${routeCode}`;
-          const rejectionRetry = await getDoc(doc(db, 'users', canonUid, 'inviteRejections', inviteDocIdRetry));
+          const rejectionRetry = await getDoc(doc(db, 'users', retryCanonUid, 'inviteRejections', inviteDocIdRetry));
           if (rejectionRetry.exists()) {
             showMessage({
               variant: 'info',
@@ -248,15 +407,15 @@ export default function InviteFriendsModal({
           const myFriends = Array.isArray(myData?.friends)
             ? myData.friends.map((x: unknown) => String(x).trim()).filter(Boolean)
             : [];
-          if (!myFriends.includes(canonUid)) {
+          if (!myFriends.includes(retryCanonUid)) {
             try {
-              await updateDoc(myRef, { friends: arrayUnion(canonUid) });
+              await updateDoc(myRef, { friends: arrayUnion(retryCanonUid) });
             } catch (syncErr: unknown) {
               console.warn('Invite: no se pudo sincronizar tu lista friends; se intenta la invitación igual.', syncErr);
             }
           }
-          const retryTarget = doc(db, 'users', canonUid);
-          const retryInviteRef = doc(db, 'users', canonUid, 'invites', inviteDocIdRetry);
+          const retryTarget = doc(db, 'users', retryCanonUid);
+          const retryInviteRef = doc(db, 'users', retryCanonUid, 'invites', inviteDocIdRetry);
           const pendingPayload = {
             fromUid: user.uid,
             groupId: routeCode,
@@ -270,24 +429,73 @@ export default function InviteFriendsModal({
             sentAt: Date.now(),
             kind: inviteKind,
           };
+          let diagBeforeRetry: Record<string, unknown> = {};
+          try {
+            diagBeforeRetry = await fetchInviteDiagnostics(user.uid, retryCanonUid, routeCode);
+          } catch (dx: unknown) {
+            diagBeforeRetry = { fetchInviteDiagnosticsFailed: pickFirebaseErr(dx) };
+          }
+          console.warn('[invite] contexto antes del reintento Firestore/Callable', {
+            inviterUid: user.uid,
+            receiverUid: retryCanonUid,
+            targetUidInput: targetUid,
+            routeCode,
+            inviteDocIdRetry: inviteDocIdRetry,
+            inviteKind,
+            myFriendsIncludesReceiver: myFriends.includes(retryCanonUid),
+            diag: diagBeforeRetry,
+          });
+
           const sendRetryViaFirestore = async () => {
             try {
               await updateDoc(retryTarget, { rideInvitePending: pendingPayload });
             } catch (rs1: unknown) {
-              console.error('[invite retry] paso 1 updateDoc rideInvitePending', rs1);
+              let diag: Record<string, unknown> = {};
+              try {
+                diag = await fetchInviteDiagnostics(user.uid, retryCanonUid, routeCode);
+              } catch (dx: unknown) {
+                diag = { fetchInviteDiagnosticsFailed: pickFirebaseErr(dx) };
+              }
+              console.error('[invite] retry paso 1 updateDoc rideInvitePending', {
+                phase: 'retry_firestore',
+                step: 1,
+                error: pickFirebaseErr(rs1),
+                inviterUid: user.uid,
+                receiverUid: retryCanonUid,
+                routeCode,
+                inviteDocId: inviteDocIdRetry,
+                inviteKind,
+                diag,
+              });
               throw rs1;
             }
             try {
               await setDoc(retryInviteRef, retryMailbox, { merge: true });
             } catch (rs2: unknown) {
-              console.error('[invite retry] paso 2 setDoc invites', rs2);
+              let diag: Record<string, unknown> = {};
+              try {
+                diag = await fetchInviteDiagnostics(user.uid, retryCanonUid, routeCode);
+              } catch (dx: unknown) {
+                diag = { fetchInviteDiagnosticsFailed: pickFirebaseErr(dx) };
+              }
+              console.error('[invite] retry paso 2 setDoc invites', {
+                phase: 'retry_firestore',
+                step: 2,
+                error: pickFirebaseErr(rs2),
+                inviterUid: user.uid,
+                receiverUid: retryCanonUid,
+                routeCode,
+                inviteDocId: inviteDocIdRetry,
+                inviteKind,
+                diag,
+              });
               throw rs2;
             }
           };
           try {
             const sendRideInvite = httpsCallable(motorideFunctions, 'sendRideInvite');
             await sendRideInvite({
-              toUid: canonUid,
+              toUid: retryCanonUid,
               groupId: routeCode,
               groupName: safeName,
               inviteKind,
@@ -295,15 +503,54 @@ export default function InviteFriendsModal({
           } catch (ce: unknown) {
             const c = (ce as { code?: string })?.code || '';
             if (c === 'functions/not-found') {
+              console.warn('[invite] retry: Callable not-found; Firestore directo.', {
+                inviterUid: user.uid,
+                receiverUid: retryCanonUid,
+                routeCode,
+                inviteDocId: inviteDocIdRetry,
+              });
               await sendRetryViaFirestore();
             } else {
+              let diag: Record<string, unknown> = {};
+              try {
+                diag = await fetchInviteDiagnostics(user.uid, retryCanonUid, routeCode);
+              } catch (dx: unknown) {
+                diag = { fetchInviteDiagnosticsFailed: pickFirebaseErr(dx) };
+              }
+              console.error('[invite] retry Callable sendRideInvite error (no es not-found)', {
+                error: pickFirebaseErr(ce),
+                inviterUid: user.uid,
+                receiverUid: retryCanonUid,
+                routeCode,
+                inviteDocId: inviteDocIdRetry,
+                inviteKind,
+                diag,
+              });
               throw ce;
             }
           }
           setSentIds((s) => ({ ...s, [targetUid]: Date.now() }));
           return;
         } catch (retryErr: unknown) {
-          console.error('Invite retry failed', retryErr);
+          const receiverForDiag = retryCanonUid || targetUid;
+          let diagFinal: Record<string, unknown> = {};
+          try {
+            diagFinal = await fetchInviteDiagnostics(user.uid, receiverForDiag, routeCode);
+          } catch (dx: unknown) {
+            diagFinal = { fetchInviteDiagnosticsFailed: pickFirebaseErr(dx) };
+          }
+          console.error('[invite] Invite retry failed (resumen)', {
+            error: pickFirebaseErr(retryErr),
+            inviterUid: user.uid,
+            receiverUid: receiverForDiag,
+            targetUidInput: targetUid,
+            routeCode,
+            inviteDocId: `${user.uid}_${routeCode}`,
+            inviteKind,
+            groupIdProp: groupId,
+            safeNameLen: safeName.length,
+            diag: diagFinal,
+          });
           const detail =
             retryErr instanceof Error
               ? retryErr.message
