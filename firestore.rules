@@ -255,6 +255,30 @@ service cloud.firestore {
         );
     }
 
+    /**
+     * Solicitud de amistad pendiente (listas que la app mantiene con arrayUnion de uids).
+     * Cubre casos donde aún no hay entrada mutua en `friends` pero sí vínculo en solicitudes.
+     */
+    function pendingFriendshipAllowsInvite(uidA, uidB) {
+      return uidA is string && uidB is string &&
+        exists(/databases/$(database)/documents/users/$(uidA)) &&
+        exists(/databases/$(database)/documents/users/$(uidB)) &&
+        (
+          uidB in friendIncomingList(get(/databases/$(database)/documents/users/$(uidA)).data) ||
+          uidA in friendIncomingList(get(/databases/$(database)/documents/users/$(uidB)).data) ||
+          uidB in friendOutgoingList(get(/databases/$(database)/documents/users/$(uidA)).data) ||
+          uidA in friendOutgoingList(get(/databases/$(database)/documents/users/$(uidB)).data)
+        );
+    }
+
+    function rideInviteSocialOk(inviterUid, receiverUid, groupId) {
+      return usersAreFriends(inviterUid, receiverUid) ||
+        hasDmRoomBetween(inviterUid, receiverUid) ||
+        pendingFriendshipAllowsInvite(inviterUid, receiverUid) ||
+        inviteCoMembersOnGroup(groupId, receiverUid) ||
+        inviterMemberOfGroup(groupId);
+    }
+
     function crossUserRideInviteForbiddenTopLevel() {
       return [
         'friends', 'friendRequestsIncoming', 'friendRequestsOutgoing',
@@ -279,12 +303,7 @@ service cloud.firestore {
         request.resource.data.rideInvitePending.groupName is string &&
         request.resource.data.rideInvitePending.groupName.size() <= 120 &&
         validRideInviteSentAt(request.resource.data.rideInvitePending.sentAt) &&
-        (
-          usersAreFriends(request.auth.uid, friendId) ||
-          hasDmRoomBetween(request.auth.uid, friendId) ||
-          inviteCoMembersOnGroup(request.resource.data.rideInvitePending.groupId, friendId) ||
-          inviterMemberOfGroup(request.resource.data.rideInvitePending.groupId)
-        );
+        rideInviteSocialOk(request.auth.uid, friendId, request.resource.data.rideInvitePending.groupId);
     }
 
     function isValidRideInviteDoc(data) {
@@ -299,12 +318,7 @@ service cloud.firestore {
     function crossUserWriteInviteDoc(receiverUid) {
       let gid = request.resource.data.groupId;
       return request.auth.uid != receiverUid &&
-        (
-          usersAreFriends(request.auth.uid, receiverUid) ||
-          hasDmRoomBetween(request.auth.uid, receiverUid) ||
-          inviteCoMembersOnGroup(gid, receiverUid) ||
-          inviterMemberOfGroup(gid)
-        );
+        rideInviteSocialOk(request.auth.uid, receiverUid, gid);
     }
 
     function isGroupMember(groupId) {

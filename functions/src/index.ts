@@ -23,7 +23,12 @@ function normalizeFriends(f: unknown): string[] {
   return f.map((x) => String(x).trim()).filter(Boolean);
 }
 
-/** Lista de amigos o sala DM ya existente (mismo criterio que la app en `lib/directChatId.ts`). */
+function normalizeIncoming(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v.map((x) => String(x).trim()).filter(Boolean);
+}
+
+/** Lista de amigos, solicitudes o sala DM ya existente (alineado con reglas Firestore `rideInviteSocialOk`). */
 async function usersShareFriendshipOrDm(uidA: string, uidB: string): Promise<boolean> {
   if (!uidA || !uidB || uidA === uidB) return false;
   const [lo, hi] = uidA < uidB ? [uidA, uidB] : [uidB, uidA];
@@ -33,13 +38,26 @@ async function usersShareFriendshipOrDm(uidA: string, uidB: string): Promise<boo
     const mem = normalizeMembers(dm.data()?.members);
     if (mem.includes(uidA) && mem.includes(uidB)) return true;
   }
+
   const [ua, ub] = await Promise.all([
     db.collection('users').doc(uidA).get(),
     db.collection('users').doc(uidB).get(),
   ]);
-  const fa = normalizeFriends(ua.data()?.friends);
-  const fb = normalizeFriends(ub.data()?.friends);
-  return fa.includes(uidB) || fb.includes(uidA);
+  const da = ua.data();
+  const dataB = ub.data();
+  const fa = normalizeFriends(da?.friends);
+  const fb = normalizeFriends(dataB?.friends);
+  if (fa.includes(uidB) || fb.includes(uidA)) return true;
+  const incA = normalizeIncoming(da?.friendRequestsIncoming);
+  const incB = normalizeIncoming(dataB?.friendRequestsIncoming);
+  const outA = normalizeIncoming(da?.friendRequestsOutgoing);
+  const outB = normalizeIncoming(dataB?.friendRequestsOutgoing);
+  return (
+    incA.includes(uidB) ||
+    incB.includes(uidA) ||
+    outA.includes(uidB) ||
+    outB.includes(uidA)
+  );
 }
 
 async function sendMulticastToUser(
