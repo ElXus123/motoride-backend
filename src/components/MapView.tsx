@@ -34,11 +34,7 @@ import { useLeanAngle, type LeanCalibrationProfile } from '../hooks/useLeanAngle
 import { useNavigation } from '../hooks/useNavigation';
 import { useNavigationHeading } from '../hooks/useNavigationHeading';
 import { getLineCoordinates, snapPointToRouteDetailed } from '../lib/navigationPose';
-import {
-  anyPrecipitationRiskAtPoints,
-  dedupeNearbyPoints,
-  samplePolylineByDistance,
-} from '../lib/precipitationRisk';
+import { anyPrecipitationRiskAtPoints } from '../lib/precipitationRisk';
 import {
   DEFAULT_PREMIUM_GPS_POLICY,
   normalizePremiumGpsPolicy,
@@ -46,7 +42,7 @@ import {
 } from '../lib/premiumGpsConfig';
 import { useRoadData } from '../hooks/useRoadData';
 import { parseGPX, parseRouteData } from '../lib/gpx';
-import { getDistance, offsetByMeters } from '../lib/geoUtils';
+import { getDistance } from '../lib/geoUtils';
 import { requestJson } from '../lib/network';
 import { getActivePointsConfig } from '../lib/pointsConfig';
 import { fetchRainViewerTileUrl } from '../lib/rainviewer';
@@ -1354,33 +1350,32 @@ export default function MapView({
     lastPrecipBannerAtRef.current = 0;
   }, [groupId]);
 
+  const lastPrecipLocation = useRef<{ lat: number; lng: number }>({ lat: 0, lng: 0 });
+
   useEffect(() => {
     if (!isOnline || !currentLocation) return;
     let cancelled = false;
     const COOLDOWN_MS = 10 * 60 * 1000;
-    const INTERVAL_MS = 4 * 60 * 1000;
+    // Revisión cada 30s para captar cambios rápidos de precipitación
+    const INTERVAL_MS = 30000;
 
-    const run = async () => {
+    // Revisión periódica cada 30s
+    const periodicCheck = () => {
       if (cancelled) return;
-      if (premiumGpsPolicy.precipAlertsPremiumOnly && !selfPremium) return;
       if (Date.now() - lastPrecipBannerAtRef.current < COOLDOWN_MS) return;
-      const lat = currentLocation.lat;
-      const lng = currentLocation.lng;
-      const pts: { lat: number; lng: number }[] = [{ lat, lng }];
-      for (const deg of [0, 90, 180, 270] as const) {
-        pts.push(offsetByMeters(lat, lng, deg, 10000));
+      // Solo revisar si el usuario se ha movido un mínimo (evita spam si está parado)
+      const movedEnough = Math.abs(currentLocation.lat - lastPrecipLocation.current.lat) > 0.0005 ||
+                          Math.abs(currentLocation.lng - lastPrecipLocation.current.lng) > 0.0005;
+      if (!movedEnough && precipPoints.length > 0) return;
+
+      if (precipPoints.length > 0) {
+        checkPrecipitation();
       }
-      const routeGeo = effectiveRouteForNav;
-      if (routeGeo) {
-        const coords = getLineCoordinates(routeGeo);
-        if (coords.length >= 2) {
-          samplePolylineByDistance(coords, 4).forEach((p) => pts.push(p));
-        }
-      }
-      const unique = dedupeNearbyPoints(pts);
-      if (unique.length === 0) return;
+    };
+
+    const checkPrecipitation = async () => {
       try {
-        const risk = await anyPrecipitationRiskAtPoints(unique);
+        const risk = await anyPrecipitationRiskAtPoints(precipPoints, 3);
         if (cancelled || !risk) return;
         lastPrecipBannerAtRef.current = Date.now();
         setPrecipitationBanner(true);
@@ -1390,11 +1385,14 @@ export default function MapView({
       }
     };
 
-    const boot = window.setTimeout(() => void run(), 22000);
-    const interval = window.setInterval(() => void run(), INTERVAL_MS);
+    // Guardar última posición para detectar movimiento
+    lastPrecipLocation.current = { lat: currentLocation.lat || 0, lng: currentLocation.lng || 0 };
+
+    // Revisión inmediata + periódica
+    immediateCheck();
+    const interval = window.setInterval(() => periodicCheck(), INTERVAL_MS);
     return () => {
       cancelled = true;
-      window.clearTimeout(boot);
       window.clearInterval(interval);
     };
   }, [
@@ -1405,7 +1403,19 @@ export default function MapView({
     groupId,
     premiumGpsPolicy.precipAlertsPremiumOnly,
     selfPremium,
+    precipPoints,
   ]);
+
+  const immediateCheck = () => {
+    if (!isOnline || !currentLocation) return;
+    if (premiumGpsPolicy.precipAlertsPremiumOnly && !selfPremium) return;
+    if (Date.now() - lastPrecipBannerAtRef.current < COOLDOWN_MS) return;
+
+    // Si no hay puntos de precipitación, salta
+    if (precipPoints.length === 0) return;
+
+    checkPrecipitation();
+  };
 
   const navState = useNavigation(currentLocation, effectiveRouteForNav);
   const navigationHeading = useNavigationHeading(
@@ -1511,7 +1521,10 @@ export default function MapView({
       ? { lat: displayLocation.lat, lng: displayLocation.lng }
       : null);
 
-  const { nearestRadarDistanceM, radars } = useRoadData(currentLocation);
+  const { nearestRadarDistanceM, radars, precipPoints } = useRoadData(
+    currentLocation,
+    effectiveRouteForNav
+  );
 
   const wasRadarWithin500Ref = useRef(false);
   useEffect(() => {
@@ -4724,7 +4737,13 @@ export default function MapView({
         />
         <TileLayer
           url="https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png"
-          keepBuffer={mapHeadingRotationActive ? 420 : 300}
+          /** keepBuffer más grande cuando la rotación está activa (mapa sigue rumbo), con interpolación según velocidad */
+          keepBuffer={isRecording && speedKmh > 20 && mapHeadingRotationActive
+            ? 700 // Alto buffer para evitar cuadrados vacíos en rotación + velocidad
+            : mapHeadingRotationActive
+              ? 400 // Rotación activa: buffer generoso
+              : 250 // Normal: buffer estándar
+          }
           updateWhenIdle={false}
           updateWhenZooming={false}
           maxZoom={20}
@@ -4755,7 +4774,13 @@ export default function MapView({
               maxNativeZoom={rainRadar.maxNativeZoom}
               maxZoom={20}
               className="leaflet-radar-overlay"
-              keepBuffer={mapHeadingRotationActive ? 168 : 112}
+              /** Radar: buffer más grande en rotación activa para evitar huecos */
+              keepBuffer={isRecording && speedKmh > 20 && mapHeadingRotationActive
+                ? 350
+                : mapHeadingRotationActive
+                  ? 250
+                  : 150
+              }
               noWrap={false}
               errorTileUrl={LEAFLET_TRANSPARENT_ERROR_TILE}
               eventHandlers={{
