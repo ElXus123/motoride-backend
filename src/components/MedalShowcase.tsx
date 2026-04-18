@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useAppMessage } from '../contexts/AppMessageContext';
@@ -26,6 +26,7 @@ export default function MedalShowcase({ user, ownerUid, readOnly }: Props) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [editSlot, setEditSlot] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
+  const [detailMedalId, setDetailMedalId] = useState<string | null>(null);
 
   const unlockedIds = useMemo(() => listUnlockedMedalIds(user ?? null), [user]);
   const unlockedSet = useMemo(() => new Set(unlockedIds), [unlockedIds]);
@@ -36,6 +37,20 @@ export default function MedalShowcase({ user, ownerUid, readOnly }: Props) {
   }, [user]);
 
   const editable = Boolean(ownerUid) && !readOnly;
+
+  const detailDef = useMemo(
+    () => (detailMedalId ? getMedalDefinition(detailMedalId) : undefined),
+    [detailMedalId],
+  );
+
+  useEffect(() => {
+    if (!detailMedalId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setDetailMedalId(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [detailMedalId]);
 
   const persistTriple = async (next: [string, string, string]) => {
     if (!ownerUid) return;
@@ -83,7 +98,9 @@ export default function MedalShowcase({ user, ownerUid, readOnly }: Props) {
           <div className="min-w-0">
             <p className="text-xs font-black uppercase tracking-wider text-zinc-400">Vitrina de medallas</p>
             <p className="text-[10px] text-zinc-500 truncate">
-              {editable ? 'Elige hasta 3 logros para tu perfil.' : 'Logros destacados.'}
+              {editable
+                ? 'Elige hasta 3 logros para tu perfil. Pulsa una medalla para ver qué es.'
+                : 'Logros destacados. Pulsa una medalla para ver qué es.'}
             </p>
           </div>
         </div>
@@ -104,25 +121,31 @@ export default function MedalShowcase({ user, ownerUid, readOnly }: Props) {
                   : 'border-zinc-800 border-dashed from-zinc-900/50 to-zinc-950/80'
               }`}
             >
-              <div className="relative flex h-[72px] w-full items-center justify-center sm:h-[80px]">
-                {def ? (
-                  <MedalGlyph def={def} size={56} className="drop-shadow-md" />
-                ) : (
-                  <div className="text-center text-[10px] font-bold uppercase tracking-wide text-zinc-600">
-                    Vacío
+              {def ? (
+                <button
+                  type="button"
+                  onClick={() => setDetailMedalId(mid)}
+                  className="flex w-full flex-col items-center rounded-xl p-0 text-left outline-none ring-orange-500/0 transition-[box-shadow,transform] hover:ring-2 focus-visible:ring-2 active:scale-[0.98]"
+                  aria-label={`Ver qué es: ${def.title}`}
+                >
+                  <div className="relative flex h-[72px] w-full items-center justify-center sm:h-[80px]">
+                    <MedalGlyph def={def} size={56} className="drop-shadow-md" />
                   </div>
-                )}
-              </div>
-              {def && (
-                <p className="mt-1 line-clamp-2 text-center text-[9px] font-bold leading-tight text-zinc-300 sm:text-[10px]">
-                  {def.title}
-                </p>
+                  <p className="mt-1 line-clamp-2 text-center text-[9px] font-bold leading-tight text-zinc-300 sm:text-[10px]">
+                    {def.title}
+                  </p>
+                </button>
+              ) : (
+                <div className="relative flex h-[72px] w-full items-center justify-center sm:h-[80px]">
+                  <div className="text-center text-[10px] font-bold uppercase tracking-wide text-zinc-600">Vacío</div>
+                </div>
               )}
               {editable && (
                 <div className="mt-2 flex w-full flex-wrap justify-center gap-1">
                   <button
                     type="button"
-                    onClick={() => {
+                    onClick={(e) => {
+                      e.stopPropagation();
                       setEditSlot(idx);
                       setPickerOpen(true);
                     }}
@@ -133,7 +156,10 @@ export default function MedalShowcase({ user, ownerUid, readOnly }: Props) {
                   {def ? (
                     <button
                       type="button"
-                      onClick={() => clearSlot(idx)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        clearSlot(idx);
+                      }}
                       className="rounded-lg bg-zinc-800 px-2 py-1 text-[9px] font-bold text-zinc-400 hover:bg-zinc-700"
                     >
                       Quitar
@@ -150,6 +176,46 @@ export default function MedalShowcase({ user, ownerUid, readOnly }: Props) {
         <p className="mt-3 text-center text-[11px] text-zinc-500">
           Completa rutas con grabación para desbloquear medallas (km, curvas, inclinación, velocidad…).
         </p>
+      )}
+
+      {detailMedalId && (
+        <div
+          className="fixed inset-0 z-[6100] flex items-end justify-center bg-black/70 p-4 sm:items-center"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Detalle de medalla"
+          onClick={() => setDetailMedalId(null)}
+        >
+          <div
+            className="w-full max-w-sm overflow-hidden rounded-2xl border border-zinc-600 bg-zinc-900 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
+              <p className="text-sm font-black text-white">Medalla</p>
+              <button
+                type="button"
+                onClick={() => setDetailMedalId(null)}
+                className="rounded-full p-2 text-zinc-400 hover:bg-zinc-800 hover:text-white"
+                aria-label="Cerrar"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="px-4 py-5 text-center">
+              {detailDef ? (
+                <>
+                  <div className="mx-auto flex justify-center">
+                    <MedalGlyph def={detailDef} size={88} className="drop-shadow-lg" />
+                  </div>
+                  <h3 className="mt-4 text-lg font-black leading-tight text-white">{detailDef.title}</h3>
+                  <p className="mt-2 text-sm leading-relaxed text-zinc-400">{detailDef.subtitle}</p>
+                </>
+              ) : (
+                <p className="text-sm text-zinc-500">No hay información para esta medalla.</p>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {editable && pickerOpen && (

@@ -1,5 +1,5 @@
 MotoRide — registro de contexto / cambios recientes
-Ultima actualizacion: 2026-04-17 (+ host sale de ruta sin banner; retención grupos 24h + programadas; función `purgeStaleOpenGroups`)
+Ultima actualizacion: 2026-04-18 (+ niveles progresivos L×1000; medallas/vitrina; stats GPS para logros; reglas Firestore usuarios; popup novedades 2026.04.18)
 
 === Contacto y soporte ===
 - Correo publico de contacto: motorideapp1@gmail.com
@@ -403,3 +403,20 @@ Fecha: 2026-04-14
 - **MapView / participante:** eliminado el banner ámbar «El host ha abandonado la ruta…» y el estado `hostLeftRoute` (y el `useEffect` que lo activaba con `group.hostLeftAt`), más el hueco en layout (`hostBannerHeight`, `hostBannerTop`, extra en `belowBanners` y `H` en el cálculo del ranking). Se mantiene el socket `host-left-route` → `handleHostLeftRoute` que pone `isRecording: false` y `hostLeftAt` en el documento del grupo (comportamiento de datos sin mensaje en pantalla).
 - **Retención de grupos:** las reglas Firestore no pueden borrar por tiempo; la política está documentada en comentario encima de `match /groups` en `firestore.rules`.
 - **Cloud Function `purgeStaleOpenGroups`** (`functions/src/index.ts`): programada **cada 1 h** (`Europe/Madrid`, `europe-west1`). Consulta grupos con `createdAt` ≤ hace 24 h (lote por ejecución). **No borra** si `isRecording === true`. **No borra** rutas programadas (`isScheduled === true`) cuya `scheduledTimestamp` sigue en el futuro (aunque el doc sea viejo). Si programada sin `scheduledTimestamp`, no borra. Antes de borrar el grupo: borra en lotes `groups/{id}/planMessages` y `rideInvites` con `groupId` igual al código. Requiere **desplegar funciones** para activarla (`firebase deploy --only functions` o al menos `purgeStaleOpenGroups`).
+
+=== BLOQUE 40 — 2026-04-18: NIVELES PROGRESIVOS, MEDALLAS/VITRINA, STATS RUTA, REGLAS USERS ===
+- **Niveles (sustituye el tramo fijo de 1000 pts por nivel del BLOQUE 36):** del nivel **L** al **L+1** hacen falta **L × 1000** puntos en el tramo actual (1→2: 1000, 2→3: 2000, …). `users.points` = progreso en ese tramo; `users.level` = nivel.
+- **`src/lib/levelProgress.ts`:** `pointsToAdvanceFromLevel`, `legacyFlat1000TotalXp`, `decomposeProgressiveTotalXp`, `normalizeUserProgress` (migra desde el modelo antiguo siempre 1000 por subida), `calculateLevel`, `addPointsWithLevelUps`. `POINTS_PER_LEVEL` queda alias de unidad 1000 por compatibilidad.
+- **`src/lib/userPointsSync.ts`:** normalización con `normalizeUserProgress` al leer del servidor (sincroniza perfil con la curva nueva).
+- **`src/lib/utils.ts`:** exporta `pointsToAdvanceFromLevel`, `normalizeUserProgress`, `POINTS_LEVEL_UNIT`.
+- **`src/components/AdminPointsPanel.tsx`:** al guardar puntos/nivel, bucle con `pointsToAdvanceFromLevel(lvl)`.
+- **Anillo de nivel / mapa:** `src/lib/levelRing.ts` — hitos visuales cada **5 niveles** (paleta moto, sin pulse agresivo); `getLevelRingBoxStyle` / `getLevelRingWrapperClass` para mapa y ranking.
+
+- **Medallas / logros:** `src/lib/achievements.ts` — catálogo (`MEDAL_DEFINITIONS`): km acumulados (50, 100, 200, 500, 1000, 2500), tumbada épica (inclinación máx. ≥ 45°), Flash prudente (muestra de velocidad GPS y máx. &lt; 120 km/h), Flash velocidad (≥ 120 km/h), curvas, rutas completadas, nivel 5/10, «Noche en ruta», etc. Desbloqueo derivado de stats en `users`.
+- **Vitrina en perfil:** `profileShowcaseMedalIds` — lista de **hasta 3** strings (hueco `""`); solo medallas desbloqueadas. UI: `src/components/MedalShowcase.tsx`, iconos `MedalGlyph.tsx`. **Perfil propio:** edición Elegir/Quitar + catálogo plegable. **Perfil amigo:** `FriendsModal.tsx` — vitrina solo lectura.
+- **Stats al cerrar grabación (`MapView.tsx`):** `sessionMaxSpeedKmhRef` durante `rideActive`; en `commitRidePointsToProfile` se actualizan `statsMaxSpeedKmh`, `statsMaxLeanDeg`, `ridesCompletedCount`, `statsHadSpeedSample` (≥ 5 km/h en sesión); resumen y borrador incluyen `maxSpeedKmh`.
+- **`firestore.rules`:** `isValidUser` ampliado con opcionales `statsMaxSpeedKmh`, `statsMaxLeanDeg`, `ridesCompletedCount`, `statsHadSpeedSample`, `profileShowcaseMedalIds` (validación `validProfileShowcaseMedalIds`, ≤ 3 strings). Desplegar reglas: `firebase deploy --only firestore:rules` (hecho en proyecto `motoapp-3e6c6` el 2026-04-18).
+
+- **Git (referencia):** commit `f7332c6` en `main` con niveles + medallas + reglas + MapView/Profile/Friends/Admin/utils/functions/CONTEXTO según estado del repo en ese momento.
+
+- **Popup novedades:** `src/components/WhatsNewModal.tsx` — `WHATS_NEW_VERSION` **2026.04.18** y entradas de changelog alineadas con este bloque (push del modal solo si se versiona aparte del resto del commit masivo).
