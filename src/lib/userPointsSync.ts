@@ -1,10 +1,10 @@
 import { doc, getDoc, getDocFromServer, updateDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { POINTS_PER_LEVEL } from './utils';
+import { normalizeUserProgress } from './levelProgress';
 
 /**
- * Lee puntos y nivel desde el servidor, recalcula el nivel según puntos y,
- * si hace falta, escribe solo `points` y `level` en `users/{uid}`.
+ * Lee puntos y nivel desde el servidor, normaliza según la curva progresiva (y migra desde el modelo fijo 1000)
+ * y, si hace falta, escribe `points` y `level` en `users/{uid}`.
  */
 export async function syncUserPointsAndLevelFromServer(uid: string): Promise<boolean> {
   const ref = doc(db, 'users', uid);
@@ -35,13 +35,7 @@ export async function syncUserPointsAndLevelFromServer(uid: string): Promise<boo
     const safePoints = Math.max(0, Math.floor(rawPoints));
     const storedLevel = Number.isFinite(rawLevel) ? Math.max(1, Math.floor(rawLevel)) : 1;
 
-    /** Migración: antes `points` era total acumulado (≥1000 posible); ahora es progreso 0–999 y el nivel sube al completar 1000. */
-    let nextPoints = safePoints;
-    let nextLevel = storedLevel;
-    if (safePoints >= POINTS_PER_LEVEL) {
-      nextLevel = Math.floor(safePoints / POINTS_PER_LEVEL) + 1;
-      nextPoints = safePoints % POINTS_PER_LEVEL;
-    }
+    const { level: nextLevel, points: nextPoints } = normalizeUserProgress(storedLevel, safePoints);
 
     const pointsDirty = nextPoints !== safePoints;
     const levelDirty = nextLevel !== storedLevel;

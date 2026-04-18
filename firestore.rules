@@ -46,6 +46,18 @@ service cloud.firestore {
       return t is number || t is int || t is timestamp;
     }
 
+    function validProfileShowcaseMedalIds(data) {
+      return !('profileShowcaseMedalIds' in data) ||
+        (data.profileShowcaseMedalIds is list &&
+          data.profileShowcaseMedalIds.size() <= 3 &&
+          (data.profileShowcaseMedalIds.size() <= 0 ||
+            (data.profileShowcaseMedalIds[0] is string && data.profileShowcaseMedalIds[0].size() <= 48)) &&
+          (data.profileShowcaseMedalIds.size() <= 1 ||
+            (data.profileShowcaseMedalIds[1] is string && data.profileShowcaseMedalIds[1].size() <= 48)) &&
+          (data.profileShowcaseMedalIds.size() <= 2 ||
+            (data.profileShowcaseMedalIds[2] is string && data.profileShowcaseMedalIds[2].size() <= 48)));
+    }
+
     function isValidUser(data) {
       return hasRequiredFields(['displayName']) &&
              isValidString('displayName', 1, 50) &&
@@ -56,6 +68,16 @@ service cloud.firestore {
              isValidOptionalNumber('totalDistance') &&
              isValidOptionalNumber('totalLeftTurns') &&
              isValidOptionalNumber('totalRightTurns') &&
+             (!('statsMaxSpeedKmh' in data) ||
+               (data.statsMaxSpeedKmh is number && data.statsMaxSpeedKmh >= 0 && data.statsMaxSpeedKmh <= 450)) &&
+             (!('statsMaxLeanDeg' in data) ||
+               (data.statsMaxLeanDeg is number && data.statsMaxLeanDeg >= 0 && data.statsMaxLeanDeg <= 90)) &&
+             (!('ridesCompletedCount' in data) ||
+               (data.ridesCompletedCount is number &&
+                 data.ridesCompletedCount >= 0 &&
+                 data.ridesCompletedCount <= 2000000)) &&
+             isValidOptionalBool('statsHadSpeedSample') &&
+             validProfileShowcaseMedalIds(data) &&
              (!('friends' in data) || data.friends is list) &&
              (!('friendRequestsIncoming' in data) || data.friendRequestsIncoming is list) &&
              (!('friendRequestsOutgoing' in data) || data.friendRequestsOutgoing is list) &&
@@ -491,6 +513,12 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    /**
+     * Retención de grupos (lógica en Cloud Functions: `purgeStaleOpenGroups`):
+     * rutas en vivo / no programadas (`isScheduled == false`) con `createdAt` de hace más de 24 h
+     * se eliminan si no están grabando (`isRecording` distinto de true). Las rutas programadas
+     * con `scheduledTimestamp` aún en el futuro no se borran aunque lleven días creadas.
+     */
     match /groups/{groupId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidGroup(request.resource.data);

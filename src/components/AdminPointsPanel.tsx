@@ -46,7 +46,7 @@ import {
   normalizePremiumGpsPolicy,
   type PremiumGpsPolicy,
 } from '../lib/premiumGpsConfig';
-import { addPointsWithLevelUps, POINTS_PER_LEVEL } from '../lib/utils';
+import { addPointsWithLevelUps, pointsToAdvanceFromLevel } from '../lib/utils';
 
 type AdminSection = 'gps' | 'accounts' | 'userstats' | 'points' | 'events' | 'danger';
 
@@ -280,8 +280,8 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
       showMessage({ variant: 'error', title: 'Valores', message: 'Introduce números válidos.' });
       return;
     }
-    while (pts >= POINTS_PER_LEVEL) {
-      pts -= POINTS_PER_LEVEL;
+    while (pts >= pointsToAdvanceFromLevel(lvl)) {
+      pts -= pointsToAdvanceFromLevel(lvl);
       lvl += 1;
     }
     setStatsSaveLoading(true);

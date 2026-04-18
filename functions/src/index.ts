@@ -1,5 +1,10 @@
 import { initializeApp } from 'firebase-admin/app';
-import { getFirestore, type DocumentReference, type QuerySnapshot } from 'firebase-admin/firestore';
+import {
+  getFirestore,
+  type DocumentReference,
+  type Query,
+  type QuerySnapshot,
+} from 'firebase-admin/firestore';
 import { getMessaging } from 'firebase-admin/messaging';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
@@ -9,6 +14,34 @@ import * as logger from 'firebase-functions/logger';
 initializeApp();
 const db = getFirestore();
 const messaging = getMessaging();
+
+/** Rutas en vivo: caducidad tras 24 h desde `createdAt` (no aplica a programadas con salida futura). */
+const OPEN_GROUP_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+function readFirestoreMillis(v: unknown): number | null {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (v != null && typeof v === 'object' && 'toMillis' in v) {
+    const fn = (v as { toMillis?: () => number }).toMillis;
+    if (typeof fn === 'function') {
+      const n = fn.call(v);
+      return typeof n === 'number' && Number.isFinite(n) ? n : null;
+    }
+  }
+  return null;
+}
+
+/** Borra todos los documentos que devuelve la query, por lotes (mismo filtro en cada pasada). */
+async function deleteByQueryBatches(query: Query, batchSize: number): Promise<number> {
+  let total = 0;
+  for (;;) {
+    const snap = await query.limit(batchSize).get();
+    if (snap.empty) return total;
+    const batch = db.batch();
+    snap.docs.forEach((d) => batch.delete(d.ref));
+    await batch.commit();
+    total += snap.size;
+  }
+}
 
 /** Origen público de la PWA (ajusta si usas dominio propio). */
 const APP_ORIGIN = process.env.MOTORIDE_APP_ORIGIN || 'https://motoapp-3e6c6.web.app';
@@ -280,6 +313,79 @@ export const notifyScheduledRouteJoinWindow = onSchedule(
           logger.warn('notify member', uid, e);
         }
       }
+    }
+  }
+);
+
+/**
+ * Cada hora: elimina grupos con `createdAt` de hace ≥24 h que ya no apliquen como “abiertos”.
+ * Omite si `isRecording == true`. Omite rutas programadas (`isScheduled`) cuya `scheduledTimestamp`
+ * sigue en el futuro (aunque el doc sea antiguo). Borra subcolección `planMessages` e invitaciones `rideInvites` del código.
+ */
+export const purgeStaleOpenGroups = onSchedule(
+  {
+    schedule: 'every 1 hours',
+    timeZone: 'Europe/Madrid',
+    region: 'europe-west1',
+  },
+  async () => {
+    const now = Date.now();
+    const cutoff = now - OPEN_GROUP_MAX_AGE_MS;
+    let deleted = 0;
+    let skipped = 0;
+    try {
+      const groupSnap = await db
+        .collection('groups')
+        .where('createdAt', '<=', cutoff)
+        .orderBy('createdAt', 'asc')
+        .limit(200)
+        .get();
+      for (const doc of groupSnap.docs) {
+        const d = doc.data();
+        if (d.isRecording === true) {
+          skipped += 1;
+          continue;
+        }
+        const isSched = d.isScheduled === true;
+        const st = readFirestoreMillis(d.scheduledTimestamp);
+        if (isSched) {
+          if (st == null) {
+            skipped += 1;
+            continue;
+          }
+          if (st > now) {
+            skipped += 1;
+            continue;
+          }
+        }
+        const createdMs = readFirestoreMillis(d.createdAt);
+        if (createdMs == null || createdMs > cutoff) {
+          skipped += 1;
+          continue;
+        }
+        const code = doc.id;
+        try {
+          await deleteByQueryBatches(doc.ref.collection('planMessages'), 400);
+        } catch (e) {
+          logger.warn('purgeStaleOpenGroups planMessages', code, e);
+        }
+        try {
+          await deleteByQueryBatches(db.collection('rideInvites').where('groupId', '==', code), 400);
+        } catch (e) {
+          logger.warn('purgeStaleOpenGroups rideInvites', code, e);
+        }
+        try {
+          await doc.ref.delete();
+          deleted += 1;
+        } catch (e) {
+          logger.error('purgeStaleOpenGroups delete group', code, e);
+        }
+      }
+      if (deleted > 0 || groupSnap.size > 0) {
+        logger.info('purgeStaleOpenGroups done', { deleted, scanned: groupSnap.size, skipped });
+      }
+    } catch (e) {
+      logger.error('purgeStaleOpenGroups', e);
     }
   }
 );

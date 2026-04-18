@@ -1,8 +1,15 @@
 /**
- * Estilos visuales del “aro” alrededor del avatar según nivel (mapa / ranking).
+ * Aro alrededor del avatar según nivel (mapa / ranking).
+ * Hitos cada 5 niveles: estética ligera inspirada en ruta / neumático / casco / curva (sin glow agresivo ni animaciones que molesten al GPS).
  */
 
 export type LevelRingBoxStyle = { border: string; boxShadow: string };
+
+/** 0 = niveles 1–4, 1 = 5–9, 2 = 10–14, … */
+function levelVisualTier(level: number): number {
+  const lv = Math.max(1, Math.floor(level || 1));
+  return Math.min(12, Math.floor(lv / 5));
+}
 
 export function getLevelRingBoxStyle(level: number, isPremium: boolean): LevelRingBoxStyle {
   const lv = Math.max(1, Math.floor(level || 1));
@@ -10,75 +17,75 @@ export function getLevelRingBoxStyle(level: number, isPremium: boolean): LevelRi
     return {
       border: '3px solid #f59e0b',
       boxShadow:
-        '0 0 14px 2px rgba(245,158,11,0.55), 0 0 28px rgba(251,191,36,0.3), inset 0 0 12px rgba(253,230,138,0.15)',
+        '0 0 10px 1px rgba(245,158,11,0.45), 0 2px 5px rgba(0,0,0,0.25), inset 0 0 8px rgba(253,230,138,0.12)',
     };
   }
-  if (lv >= 35) {
-    return {
-      border: '3px solid #c084fc',
-      boxShadow:
-        '0 0 18px 4px rgba(192,132,252,0.65), 0 0 36px rgba(236,72,153,0.45), 0 0 8px rgba(34,211,238,0.35)',
-    };
+  const t = levelVisualTier(lv);
+  // Tieres: carretera → rodadura → visera/casco → curva → autopista de montaña → noche en ruta → leyenda
+  switch (t) {
+    case 0:
+      return { border: '3px solid #ea580c', boxShadow: '0 1px 4px rgba(0,0,0,0.22)' };
+    case 1:
+      return {
+        border: '3px solid #c2410c',
+        boxShadow: 'inset 0 0 0 1px rgba(254,215,170,0.25), 0 1px 4px rgba(0,0,0,0.25)',
+      };
+    case 2:
+      return {
+        border: '3px solid #57534e',
+        boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.35), 0 1px 3px rgba(0,0,0,0.2)',
+      };
+    case 3:
+      return {
+        border: '3px solid #f97316',
+        boxShadow: '0 0 0 1px rgba(251,191,36,0.35), 0 1px 4px rgba(0,0,0,0.22)',
+      };
+    case 4:
+      return {
+        border: '3px solid #7c3aed',
+        boxShadow: '0 0 8px 1px rgba(139,92,246,0.28), 0 1px 4px rgba(0,0,0,0.2)',
+      };
+    case 5:
+      return {
+        border: '3px solid #0e7490',
+        boxShadow: '0 0 8px 1px rgba(34,211,238,0.22), 0 1px 4px rgba(0,0,0,0.2)',
+      };
+    case 6:
+      return {
+        border: '3px solid #64748b',
+        boxShadow: 'inset 0 0 0 1px rgba(226,232,240,0.2), 0 1px 4px rgba(0,0,0,0.22)',
+      };
+    default:
+      return {
+        border: '3px solid #b45309',
+        boxShadow: '0 0 10px 1px rgba(245,158,11,0.32), 0 1px 4px rgba(0,0,0,0.22)',
+      };
   }
-  if (lv >= 25) {
-    return {
-      border: '3px solid #22d3ee',
-      boxShadow: '0 0 16px 3px rgba(34,211,238,0.55), 0 0 32px rgba(59,130,246,0.35)',
-    };
-  }
-  if (lv >= 18) {
-    return {
-      border: '3px solid #a855f7',
-      boxShadow: '0 0 14px 3px rgba(168,85,247,0.5), 0 0 24px rgba(236,72,153,0.25)',
-    };
-  }
-  if (lv >= 12) {
-    return {
-      border: '3px solid #fbbf24',
-      boxShadow: '0 0 12px 2px rgba(251,191,36,0.5), 0 0 22px rgba(249,115,22,0.25)',
-    };
-  }
-  if (lv >= 8) {
-    return {
-      border: '3px solid #fb923c',
-      boxShadow: '0 0 10px 2px rgba(249,115,22,0.45)',
-    };
-  }
-  if (lv >= 5) {
-    return {
-      border: '3px solid #f97316',
-      boxShadow: '0 0 8px 1px rgba(249,115,22,0.35)',
-    };
-  }
-  return {
-    border: '3px solid #f97316',
-    boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
-  };
 }
 
-/** Clases Tailwind para anillo en componentes React (ranking). */
+/** Clases Tailwind para anillo en componentes React (ranking / cabecera). Sin pulse en mapa. */
 export function getLevelRingWrapperClass(level: number, isPremium: boolean): string {
   const lv = Math.max(1, Math.floor(level || 1));
   if (isPremium) {
-    return 'ring-2 ring-amber-400 shadow-[0_0_14px_rgba(251,191,36,0.55)]';
+    return 'ring-2 ring-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.45)]';
   }
-  if (lv >= 35) {
-    return 'ring-2 ring-purple-400 shadow-[0_0_16px_rgba(192,132,252,0.6)] motion-safe:animate-pulse';
+  const t = levelVisualTier(lv);
+  switch (t) {
+    case 0:
+      return 'ring-2 ring-orange-600';
+    case 1:
+      return 'ring-2 ring-orange-700 shadow-[inset_0_0_0_1px_rgba(254,215,170,0.2)]';
+    case 2:
+      return 'ring-2 ring-stone-600 shadow-[inset_0_1px_2px_rgba(0,0,0,0.25)]';
+    case 3:
+      return 'ring-2 ring-orange-500 shadow-[0_0_0_1px_rgba(251,191,36,0.35)]';
+    case 4:
+      return 'ring-2 ring-violet-500 shadow-[0_0_8px_rgba(139,92,246,0.28)]';
+    case 5:
+      return 'ring-2 ring-cyan-600 shadow-[0_0_8px_rgba(34,211,238,0.22)]';
+    case 6:
+      return 'ring-2 ring-slate-500 shadow-[inset_0_0_0_1px_rgba(226,232,240,0.18)]';
+    default:
+      return 'ring-2 ring-amber-700 shadow-[0_0_10px_rgba(245,158,11,0.3)]';
   }
-  if (lv >= 25) {
-    return 'ring-2 ring-cyan-400 shadow-[0_0_14px_rgba(34,211,238,0.5)]';
-  }
-  if (lv >= 18) {
-    return 'ring-2 ring-violet-400 shadow-[0_0_12px_rgba(167,139,250,0.45)]';
-  }
-  if (lv >= 12) {
-    return 'ring-2 ring-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.4)]';
-  }
-  if (lv >= 8) {
-    return 'ring-2 ring-orange-400 shadow-[0_0_8px_rgba(251,146,60,0.4)]';
-  }
-  if (lv >= 5) {
-    return 'ring-2 ring-orange-500';
-  }
-  return 'ring-2 ring-orange-600';
 }

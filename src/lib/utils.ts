@@ -19,5 +19,8 @@ export {
   calculateLevel,
   addPointsWithLevelUps,
   levelFromStored,
+  normalizeUserProgress,
+  pointsToAdvanceFromLevel,
+  POINTS_LEVEL_UNIT,
   POINTS_PER_LEVEL,
 } from './levelProgress';

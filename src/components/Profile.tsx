@@ -19,6 +19,8 @@ import { ArrowLeft, Camera, LogOut, ChevronDown, ChevronUp, Activity, Trash2, Pl
 import PremiumBadge from './PremiumBadge';
 import AdminPointsPanel from './AdminPointsPanel';
 import { formatRideCardSubtitle, formatRideCardTitle, rideHistoryPointsEarned } from '../lib/rideHistoryDisplay';
+import MedalShowcase from './MedalShowcase';
+import { MEDAL_DEFINITIONS, listUnlockedMedalIds } from '../lib/achievements';
 
 type Props = {
   onBack: () => void;
@@ -40,6 +42,7 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [detailRide, setDetailRide] = useState<Record<string, unknown> & { id: string } | null>(null);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const [medalsCatalogOpen, setMedalsCatalogOpen] = useState(false);
 
   const isAdmin = user?.email?.toLowerCase() === 'juarp123@gmail.com';
 
@@ -276,6 +279,41 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
               </p>
             </div>
           </div>
+
+          {user && userData && (
+            <div className="w-full mb-6 rounded-2xl border border-zinc-700/80 bg-zinc-950/50 p-4">
+              <MedalShowcase user={userData} ownerUid={user.uid} />
+              <button
+                type="button"
+                onClick={() => setMedalsCatalogOpen((o) => !o)}
+                className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-zinc-700 py-2 text-xs font-bold text-zinc-400 hover:border-zinc-600 hover:text-zinc-200"
+              >
+                {medalsCatalogOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                Catálogo de medallas ({listUnlockedMedalIds(userData).length}/{MEDAL_DEFINITIONS.length})
+              </button>
+              {medalsCatalogOpen && (
+                <ul className="mt-3 max-h-64 space-y-2 overflow-y-auto pr-1 text-left">
+                  {MEDAL_DEFINITIONS.map((m) => {
+                    const ok = m.isUnlocked(userData);
+                    return (
+                      <li
+                        key={m.id}
+                        className={`flex gap-2 rounded-lg border px-2 py-2 text-xs ${
+                          ok ? 'border-emerald-800/60 bg-emerald-950/20' : 'border-zinc-800 bg-zinc-900/40 opacity-70'
+                        }`}
+                      >
+                        <Trophy size={14} className={ok ? 'text-emerald-400 shrink-0 mt-0.5' : 'text-zinc-600 shrink-0 mt-0.5'} />
+                        <div className="min-w-0">
+                          <p className="font-bold text-zinc-200">{m.title}</p>
+                          <p className="text-[10px] text-zinc-500 leading-snug">{m.subtitle}</p>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          )}
 
           <div className="w-full space-y-4">
             <div>

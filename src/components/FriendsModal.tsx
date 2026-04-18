@@ -5,9 +5,10 @@ import { useAuth } from '../contexts/AuthContext';
 import { X, Search, UserPlus, UserMinus, User as UserIcon, Play, Check, Clock, Ban, MessageCircle } from 'lucide-react';
 import PremiumBadge from './PremiumBadge';
 import FriendDirectChatModal from './FriendDirectChatModal';
+import MedalShowcase from './MedalShowcase';
 import { formatRideCardSubtitle, formatRideCardTitle, rideHistoryPointsEarned } from '../lib/rideHistoryDisplay';
 
-export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () => void, onRepeatRoute: (route: string) => void }) {
+export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () => void; onRepeatRoute: (route: string) => void }) {
   const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -283,6 +284,10 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                   <p className="text-[10px] text-zinc-400 uppercase font-bold tracking-wider mb-1">Curvas Totales</p>
                   <p className="font-black text-xl text-white">{(selectedUser.totalLeftTurns || 0) + (selectedUser.totalRightTurns || 0)}</p>
                 </div>
+              </div>
+
+              <div className="rounded-2xl border border-zinc-700 bg-zinc-950/50 p-4">
+                <MedalShowcase user={selectedUser} readOnly />
               </div>
 
               {friendsIds.includes(String(selectedUser.uid || selectedUser.id || '').trim()) ? (

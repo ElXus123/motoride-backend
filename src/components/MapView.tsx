@@ -637,7 +637,6 @@ export default function MapView({
   const [inCurve, setInCurve] = useState(false);
   const [currentCurveMax, setCurrentCurveMax] = useState(0);
   const [alertType, setAlertType] = useState<string | null>(null);
-  const [hostLeftRoute, setHostLeftRoute] = useState(false);
   const [showRanking, setShowRanking] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const rotationLockAppliedRef = useRef(false);
@@ -1605,7 +1604,6 @@ export default function MapView({
       setLocations(prev => prev.filter(l => l.uid !== data.uid));
     };
     const handleHostLeftRoute = () => {
-      setHostLeftRoute(true);
       setGroup((prev: any) => (prev ? { ...prev, isRecording: false, hostLeftAt: Date.now() } : prev));
     };
     const handleAlertTriggered = (data: {
@@ -1709,13 +1707,6 @@ export default function MapView({
       unsubs.forEach(u => u());
     };
   }, [group?.members, user?.uid]);
-
-  useEffect(() => {
-    if (isHost) return;
-    if (group?.hostLeftAt) {
-      setHostLeftRoute(true);
-    }
-  }, [group?.hostLeftAt, isHost]);
 
   const deleteGroupIfHost = async (reason: string): Promise<boolean> => {
     if (!groupId || groupId === 'REPEATED' || !user || leaveInProgressRef.current) return false;
@@ -1998,6 +1989,14 @@ export default function MapView({
   const prevRecordingRef = useRef(isRecording);
   const recordingStartTimeRef = useRef<number>(0);
   const ridePointsCommittedSessionKeyRef = useRef<string | null>(null);
+  /** Máx. km/h en la sesión de grabación actual (GPS). */
+  const sessionMaxSpeedKmhRef = useRef(0);
+
+  useEffect(() => {
+    if (!rideActive || speed == null || !Number.isFinite(speed)) return;
+    const kmh = Math.max(0, speed * 3.6);
+    if (kmh > sessionMaxSpeedKmhRef.current) sessionMaxSpeedKmhRef.current = kmh;
+  }, [rideActive, speed]);
 
   useEffect(() => {
     if (isRecording || summaryData) return;
@@ -2281,6 +2280,7 @@ export default function MapView({
       rightTurns: number;
       maxLeanLeft: number;
       maxLeanRight: number;
+      maxSpeedKmh?: number;
     }): Promise<boolean> => {
       if (!user?.uid) return false;
       const userRef = doc(db, 'users', user.uid);
@@ -2288,6 +2288,8 @@ export default function MapView({
         const userSnap = await getDoc(userRef);
         const finalScore = stats.score;
         const dist = stats.distance;
+        const rideMaxKmh = Math.max(0, Number(stats.maxSpeedKmh) || 0);
+        const leanAbs = Math.max(Math.abs(Number(stats.maxLeanLeft) || 0), Math.abs(Number(stats.maxLeanRight) || 0));
         if (userSnap.exists()) {
           const userData = userSnap.data();
           const currentPoints = Math.max(0, Math.floor(Number(userData.points) || 0));
@@ -2297,12 +2299,20 @@ export default function MapView({
             currentLevel,
             finalScore
           );
+          const prevMaxKmh = Math.max(0, Number(userData.statsMaxSpeedKmh) || 0);
+          const prevMaxLean = Math.max(0, Number(userData.statsMaxLeanDeg) || 0);
+          const ridesDone = Math.max(0, Math.floor(Number(userData.ridesCompletedCount) || 0));
+          const hadSample = userData.statsHadSpeedSample === true;
           await updateDoc(userRef, {
             points: newPoints,
             level: newLevel,
             totalDistance: (userData.totalDistance || 0) + dist,
             totalLeftTurns: (userData.totalLeftTurns || 0) + stats.leftTurns,
             totalRightTurns: (userData.totalRightTurns || 0) + stats.rightTurns,
+            statsMaxSpeedKmh: Math.max(prevMaxKmh, rideMaxKmh),
+            statsMaxLeanDeg: Math.max(prevMaxLean, leanAbs),
+            ridesCompletedCount: ridesDone + 1,
+            statsHadSpeedSample: hadSample || rideMaxKmh >= 5,
           });
         } else {
           const { points: newPoints, level: newLevel } = addPointsWithLevelUps(0, 1, finalScore);
@@ -2312,6 +2322,10 @@ export default function MapView({
             totalDistance: dist,
             totalLeftTurns: stats.leftTurns,
             totalRightTurns: stats.rightTurns,
+            statsMaxSpeedKmh: rideMaxKmh,
+            statsMaxLeanDeg: leanAbs,
+            ridesCompletedCount: 1,
+            statsHadSpeedSample: rideMaxKmh >= 5,
           });
         }
         return true;
@@ -2357,6 +2371,7 @@ export default function MapView({
         rightTurns: rightTurnsRef.current,
         maxLeanLeft,
         maxLeanRight,
+        maxSpeedKmh: sessionMaxSpeedKmhRef.current,
         duration: rideDuration,
         multipliers: pointsConfig,
         rideSessionKey,
@@ -2370,6 +2385,7 @@ export default function MapView({
         rightTurns: currentRideStats.rightTurns,
         maxLeanLeft: currentRideStats.maxLeanLeft,
         maxLeanRight: currentRideStats.maxLeanRight,
+        maxSpeedKmh: currentRideStats.maxSpeedKmh,
       });
 
       if (!ok) {
@@ -2407,6 +2423,7 @@ export default function MapView({
     if (!prevRecordingRef.current && isRecording) {
       ridePointsCommittedSessionKeyRef.current = null;
       recordingStartTimeRef.current = group?.startTime ?? Date.now();
+      sessionMaxSpeedKmhRef.current = 0;
       clearRideDraft();
       resetMaxLean();
       setLocalDistance(0);
@@ -2473,6 +2490,7 @@ export default function MapView({
         rightTurns: rightTurnsRef.current,
         maxLeanLeft,
         maxLeanRight,
+        maxSpeedKmh: sessionMaxSpeedKmhRef.current,
         duration: rideDuration,
         multipliers: pointsConfig,
         rideSessionKey,
@@ -2535,6 +2553,7 @@ export default function MapView({
             rightTurns: currentRideStats.rightTurns,
             maxLeanLeft: currentRideStats.maxLeanLeft,
             maxLeanRight: currentRideStats.maxLeanRight,
+            maxSpeedKmh: currentRideStats.maxSpeedKmh,
           });
 
           if (!ok) {
@@ -3485,18 +3504,14 @@ export default function MapView({
     `calc(var(--motoride-safe-top, env(safe-area-inset-top, 0px)) + ${extraPx + viewportTopInset}px)`;
 
   const connectionBannerHeight = !isOnline ? 58 : 0;
-  const hostBannerHeight = hostLeftRoute && !isHost ? 64 : 0;
   const headerOverlayHeight = effectiveRouteForNav ? 220 : (!isMoving ? 98 : 0);
   const C = connectionBannerHeight;
-  const H = hostBannerHeight;
   const navHeaderPad = !isMoving ? 86 : 8;
 
   const firstRowTop = topBelowSafe(edgeGap);
-  const hostBannerTop = topBelowSafe(edgeGap + (!isOnline ? C + 8 : 8));
 
   let belowBanners = edgeGap;
   if (!isOnline) belowBanners += C + 8;
-  if (hostLeftRoute && !isHost) belowBanners += 64 + 8;
 
   const peerAlertRowH = 84;
   const peerAlertsStripHeight =
@@ -3513,11 +3528,11 @@ export default function MapView({
   );
   const leanIosBannerTop = topBelowSafe(blockBelowHeader + navHeaderPad + (gpsError ? 58 : 0) + 8);
 
-  const topStackBelowSafe = edgeGap + C + H;
+  const topStackBelowSafe = edgeGap + C;
   const headerBlockForRanking = !effectiveRouteForNav ? 56 : headerOverlayHeight;
   const rankingExtra = Math.max(
     topStackBelowSafe + peerAlertsStripHeight + headerBlockForRanking + 10,
-    edgeGap + C + H + peerAlertsStripHeight + navHeaderPad + (gpsError ? 72 : 0),
+    edgeGap + C + peerAlertsStripHeight + navHeaderPad + (gpsError ? 72 : 0),
     edgeGap + 68
   );
   const rankingTop = topBelowSafe(rankingExtra);
@@ -3552,17 +3567,6 @@ export default function MapView({
           >
             <ShieldAlert size={20} className="animate-pulse" />
             SIN CONEXIÓN - RECONECTANDO...
-          </motion.div>
-        )}
-        {hostLeftRoute && !isHost && (
-          <motion.div
-            initial={{ y: -100, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: -100, opacity: 0 }}
-            className="absolute left-1/2 -translate-x-1/2 z-[3000] bg-amber-500 text-black px-4 py-3 rounded-2xl shadow-2xl font-black text-xs sm:text-sm border-2 border-white/30 backdrop-blur-md max-w-[92vw] text-center"
-            style={{ top: hostBannerTop }}
-          >
-            El host ha abandonado la ruta. No se guardará progreso nuevo; se sumarán solo los puntos logrados hasta ese momento.
           </motion.div>
         )}
         {activeAlerts.length > 0 && (
@@ -4968,6 +4972,10 @@ export default function MapView({
                         rightTurns: summaryData.rightTurns,
                         maxLeanLeft: summaryData.maxLeanLeft,
                         maxLeanRight: summaryData.maxLeanRight,
+                        maxSpeedKmh:
+                          typeof summaryData.maxSpeedKmh === 'number' && Number.isFinite(summaryData.maxSpeedKmh)
+                            ? summaryData.maxSpeedKmh
+                            : 0,
                       });
                       if (!ok) {
                         showMessage({
