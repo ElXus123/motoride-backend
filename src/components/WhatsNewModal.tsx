@@ -3,7 +3,7 @@ import { Check } from 'lucide-react';
 import appLogo from '../../ICONO.png';
 
 /** Sube este valor cuando cambien las novedades para volver a mostrar el aviso una vez por dispositivo. */
-export const WHATS_NEW_VERSION = '2026.04.17';
+export const WHATS_NEW_VERSION = '2026.04.18';
 
 const STORAGE_KEY = 'motoride_whats_new_seen_version';
 
@@ -18,6 +18,21 @@ export type ChangelogEntry = {
 
 /** Orden visual: más recientes arriba; `updatedAt` descendente. */
 const CHANGELOG: ChangelogEntry[] = [
+  {
+    kind: 'novedad',
+    text: 'Medallas y vitrina en tu perfil: desbloquea logros (km acumulados, curvas, rutas completadas, inclinación épica ≥45°, nivel, y medallas «Flash» según si has superado o no 120 km/h con GPS). Elige hasta 3 para enseñarlas en el expositor; en el perfil de un amigo verás las suyas. Requiere reglas Firestore actualizadas en el proyecto.',
+    updatedAt: '2026-04-18T20:00:00',
+  },
+  {
+    kind: 'novedad',
+    text: 'Progreso de nivel: ya no es siempre 1000 puntos por tramo — del nivel L al siguiente necesitas L×1000 puntos en la barra (1→2: 1000, 2→3: 2000, etc.). El anillo del avatar evoluciona cada 5 niveles con un estilo ligero pensado para el mapa.',
+    updatedAt: '2026-04-18T19:45:00',
+  },
+  {
+    kind: 'novedad',
+    text: 'Al terminar una ruta con grabación, el perfil guarda también tu máxima velocidad GPS de la sesión, la máxima inclinación y un contador de rutas completadas; sirve para las medallas y para no perder el contexto si cambias de dispositivo.',
+    updatedAt: '2026-04-18T19:30:00',
+  },
   {
     kind: 'novedad',
     text: 'Bandeja (icono arriba): además de invitaciones, ves mensajes sin leer del chat de planificación de tus rutas programadas (como apuntado) y del chat privado con amigos. Al abrir el chat dejan de contarse hasta que llegue un mensaje nuevo. El contador del icono suma invitaciones + pendientes + mensajes.',
