@@ -3,7 +3,7 @@ import { Check } from 'lucide-react';
 import appLogo from '../../ICONO.png';
 
 /** Sube este valor cuando cambien las novedades para volver a mostrar el aviso una vez por dispositivo. */
-export const WHATS_NEW_VERSION = '2026.04.19';
+export const WHATS_NEW_VERSION = '2026.04.20';
 
 const STORAGE_KEY = 'motoride_whats_new_seen_version';
 
@@ -12,10 +12,11 @@ const STORAGE_KEY = 'motoride_whats_new_seen_version';
  * Mantener pocas frases y lenguaje muy claro.
  */
 const WHATS_NEW_HIGHLIGHTS: string[] = [
+  'Chat de texto con amigos y bandeja con invitaciones y avisos de mensajes en tus rutas programadas.',
+  'Los chats ahora encajan bien en la pantalla de móvil.',
   'Medallas al rodar (distancia, curvas, rutas, inclinación…). En tu perfil eliges tres para enseñarlas; en el de un amigo ves las suyas. Si pulsas una, te dice de qué va.',
   'Subir de nivel pide más puntos cuanto más alto vas; el aro del avatar cambia de aspecto.',
   'Al terminar una ruta se guardan datos de esa salida (por ejemplo velocidad máxima e inclinación) para las medallas.',
-  'Chat de texto con amigos y bandeja con invitaciones y avisos de mensajes en tus rutas programadas.',
   'En el mapa, la voz puede avisarte si puede llover cerca y cuando te acercas a un radar.',
   'Rutas programadas con chat del grupo para acordar hora y quedada.',
   'Si activas las notificaciones del navegador, puedes recibir avisos antes de una salida, invitaciones a ruta y solicitudes de amistad.',

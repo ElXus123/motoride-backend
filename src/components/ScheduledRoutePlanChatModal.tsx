@@ -165,7 +165,7 @@ export default function ScheduledRoutePlanChatModal({
       aria-modal="true"
       aria-labelledby="plan-chat-title"
     >
-      <div className="flex h-[min(92dvh,640px)] w-full max-w-lg flex-col rounded-t-3xl border border-white/[0.08] bg-zinc-900 shadow-2xl sm:rounded-3xl sm:max-h-[85vh]">
+      <div className="flex h-[min(95dvh,600px)] w-full max-w-[calc(100%-1rem)] flex-col rounded-t-3xl border border-white/[0.08] bg-zinc-900 shadow-2xl sm:rounded-3xl sm:max-h-[85vh]">
         <div className="flex shrink-0 items-center justify-between border-b border-zinc-800 px-4 py-3">
           <div className="min-w-0 pr-2">
             <h2 id="plan-chat-title" className="truncate text-base font-black text-white">

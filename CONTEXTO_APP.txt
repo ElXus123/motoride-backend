@@ -1,5 +1,5 @@
 MotoRide — registro de contexto / cambios recientes
-Ultima actualizacion: 2026-04-18 (+ niveles progresivos L×1000; medallas/vitrina; stats GPS para logros; reglas Firestore usuarios; popup novedades 2026.04.18)
+Ultima actualizacion: 2026-04-18 (+ chat redimensionado a pantalla móvil)
 
 === Contacto y soporte ===
 - Correo publico de contacto: motorideapp1@gmail.com
