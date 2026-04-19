@@ -1759,8 +1759,6 @@ export default function MapView({
     let cancelled = false;
     const shouldKeepAwake = true;
     const nav = navigator as Navigator & { wakeLock?: { request: (type: 'screen') => Promise<any> } };
-    /** Último ángulo de rotación de pantalla para detectar modo bolsillo. */
-    const lastScreenRotationRef = useRef<number>(0);
 
     const requestWakeLock = async () => {
       if (!shouldKeepAwake || !nav.wakeLock?.request) return;
