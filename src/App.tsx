@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { AppMessageProvider, useAppMessage } from './contexts/AppMessageContext';
 import Login from './components/Login';
 import MainApp from './components/MainApp';
+import AppLogoSplash from './components/AppLogoSplash';
 import { AlertTriangle, Download, RefreshCcw, ShieldAlert } from 'lucide-react';
 
 type BeforeInstallPromptEvent = Event & {
@@ -153,11 +154,7 @@ const AppContent = () => {
   };
   
   if (loading) {
-    return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
-        <div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin"></div>
-      </div>
-    );
+    return <AppLogoSplash zClassName="z-[9999]" />;
   }
 
   if (error) {
