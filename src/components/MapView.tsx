@@ -1754,10 +1754,13 @@ export default function MapView({
   };
 
   // Wake Lock siempre en vista de mapa (GPS/ruta visible); iOS 16.4+ Safari / PWA; a menudo hace falta un gesto.
+  // NO pedir wakeLock si el usuario está en modo bolsillo (evita bloqueo del dispositivo en iPhone)
   useEffect(() => {
     let cancelled = false;
     const shouldKeepAwake = true;
     const nav = navigator as Navigator & { wakeLock?: { request: (type: 'screen') => Promise<any> } };
+    /** Último ángulo de rotación de pantalla para detectar modo bolsillo. */
+    const lastScreenRotationRef = useRef<number>(0);
 
     const requestWakeLock = async () => {
       if (!shouldKeepAwake || !nav.wakeLock?.request) return;
@@ -1793,11 +1796,26 @@ export default function MapView({
     };
 
     if (shouldKeepAwake) {
-      void requestWakeLock();
+      // Evitar wakeLock en modo bolsillo (apaisado): el bloqueado del dispositivo en iPhone es molesto
+      const isPortrait = screen.orientation?.type === 'portrait' || screen.orientation?.type === 'portrait-primary';
+      const shouldRequestWakeLock = true; // true siempre, excepto si detectamos modo bolsillo explícito
+
+      if (isPortrait && shouldRequestWakeLock) {
+        void requestWakeLock();
+      }
       document.addEventListener('visibilitychange', handleVisibilityChange);
       window.addEventListener('pageshow', handlePageShow);
       document.addEventListener('touchstart', onInteract, { capture: true, passive: true });
       document.addEventListener('pointerdown', onInteract, { capture: true });
+      // Listener a orientationchange para detectar cambio a modo bolsillo
+      if (screen.orientation?.addEventListener) {
+        screen.orientation.addEventListener('change', () => {
+          // En modo bolsillo (portrait), liberar wakeLock para no bloquear el dispositivo
+          if (!isPortrait) {
+            void requestWakeLock();
+          }
+        });
+      }
     } else if (wakeLockRef.current) {
       wakeLockRef.current.release().catch(() => {});
       wakeLockRef.current = null;
@@ -1809,6 +1827,13 @@ export default function MapView({
       window.removeEventListener('pageshow', handlePageShow);
       document.removeEventListener('touchstart', onInteract, true);
       document.removeEventListener('pointerdown', onInteract, true);
+      if (screen.orientation?.removeEventListener) {
+        screen.orientation.removeEventListener('change', () => {
+          if (!isPortrait) {
+            void requestWakeLock();
+          }
+        });
+      }
       if (wakeLockRef.current) {
         wakeLockRef.current.release().catch(() => {});
         wakeLockRef.current = null;

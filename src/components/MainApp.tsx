@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, Suspense } from 'react';
 import Dashboard from './Dashboard';
 import MapView from './MapView';
 import Profile from './Profile';
@@ -13,7 +13,7 @@ import { formatScheduledRideDayOnlyEs } from '../lib/scheduledRouteShare';
 import { useMotorideSystemNotifications } from '../hooks/useMotorideSystemNotifications';
 import { registerWebPushFcm, startForegroundFcmListeners, stopForegroundFcmListeners } from '../lib/fcmWeb';
 import NotificationPermissionBanner from './NotificationPermissionBanner';
-import { Calendar } from 'lucide-react';
+import { Calendar, Loader2, MapPin, Motorcycle } from 'lucide-react';
 
 type ScheduledJoinPromptState =
   | null
@@ -34,6 +34,9 @@ export default function MainApp() {
   const [scheduledJoinPrompt, setScheduledJoinPrompt] = useState<ScheduledJoinPromptState>(null);
   const [rsvpBusy, setRsvpBusy] = useState(false);
   const lastBackHandledAtRef = useRef(0);
+  /** Logo animado al cargar: visible hasta que haya datos de Firebase o cache. */
+  const [showLoadingScreen, setShowLoadingScreen] = useState(true);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
   /** Una sola entrada `pushState` al entrar en ruta (evita doble capa con Strict Mode o re-renders). */
   const routeHistoryInsertedRef = useRef(false);
   /** Tras confirmar salida: el siguiente popstate no debe volver a interceptar. */
@@ -99,6 +102,27 @@ export default function MainApp() {
   useEffect(() => {
     if (!user) setScheduledJoinPrompt(null);
   }, [user]);
+
+  // Logo animado al cargar + fallback si hay errores de conexión
+  useEffect(() => {
+    let mounted = true;
+
+    const hideLoadingScreen = () => {
+      if (!mounted) return;
+      mounted = false;
+      setShowLoadingScreen(false);
+    };
+
+    // Ocultar loading screen tras 2 segundos si ya hay datos o usuario
+    const timeout = setTimeout(() => hideLoadingScreen(), 2000);
+
+    // Esperar a que el mapa cargue o haya datos de Firebase
+    if (activeGroupId) {
+      hideLoadingScreen();
+    }
+
+    return () => clearTimeout(timeout);
+  }, [user?.uid, activeGroupId, showLoadingScreen]);
 
   useMotorideSystemNotifications(user?.uid);
 
@@ -344,7 +368,52 @@ export default function MainApp() {
           </div>
         </div>
       )}
-      <Dashboard onJoinGroup={(id) => setActiveGroupId(id)} onRepeatRoute={(route) => setRepeatedRoute(route)} onOpenProfile={() => setShowProfile(true)} />
+      {showLoadingScreen && (
+        <div
+          className="fixed inset-0 z-[10000] flex flex-col items-center justify-center bg-black"
+          role="alert"
+          aria-live="polite"
+        >
+          <div className="relative flex flex-col items-center">
+            {/* Logo animado */}
+            <div className="relative mb-8">
+              <div className="flex h-24 w-24 items-center justify-center rounded-2xl overflow-hidden ring-4 ring-orange-500/20 shadow-[0_0_60px_-15px_rgba(249,115,22,0.5)]">
+                <img
+                  src="/ICONO.png"
+                  alt=""
+                  className="absolute inset-0 h-full w-full object-cover"
+                  aria-hidden
+                />
+                {/* Gleam animado */}
+                <div
+                  className="absolute inset-0 logo-gleam pointer-events-none mix-blend-overlay"
+                  style={{
+                    background:
+                      'linear-gradient(105deg, transparent 0%, rgba(255,255,255,0.45) 45%, rgba(255,255,255,0.15) 55%, transparent 100%)',
+                    width: '42%',
+                    height: '160%',
+                    top: '-30%',
+                  }}
+                />
+              </div>
+              {/* Reflexión */}
+              <div className="absolute left-0 top-0 h-24 w-24 scale-y-[-1] [transform:rotateX(12deg)_scaleY(-1)] origin-top [mask-image:linear-gradient(to_bottom,rgba(0,0,0,0.5)_0%,rgba(0,0,0,0.2)_45%,transparent_100%)] [webkit-mask-image:linear-gradient(to_bottom,rgba(0,0,0,0.5)_0%,rgba(0,0,0,0.2)_45%,transparent_100%)] mix-blend-overlay blur-[0.35px] brightness-105" aria-hidden />
+            </div>
+            <div className="flex items-center gap-3 text-center">
+              <Loader2 className="h-5 w-5 animate-spin text-orange-400" aria-hidden />
+              <p className="text-sm font-semibold text-zinc-300">Cargando MotoRide</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <Suspense fallback={
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black">
+          <Loader2 className="h-12 w-12 animate-spin text-orange-400" />
+        </div>
+      }>
+        <Dashboard onJoinGroup={(id) => setActiveGroupId(id)} onRepeatRoute={(route) => setRepeatedRoute(route)} onOpenProfile={() => setShowProfile(true)} />
+      </Suspense>
     </>
   );
 }
