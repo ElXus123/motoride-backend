@@ -99,6 +99,13 @@ function leanDegreeLabel(id: string): string {
   return '°';
 }
 
+/** Inclinación visual en la chapa (ligeramente menor que el ángulo real para que quepa bien). */
+function leanVisualTiltDeg(label: string): number {
+  const n = parseInt(label, 10);
+  if (!Number.isFinite(n)) return -30;
+  return -Math.min(46, 12 + n * 0.58);
+}
+
 /** Cinta con pliegue central y colas (estilo chapa / arcade). `defs` fuera del grupo filtrado — evita glitches en Safari. */
 function RibbonDeluxe({ accent, ring, defsId }: { accent: string; ring: string; defsId: string }) {
   const g = `${defsId}-rib`;
@@ -300,32 +307,107 @@ function GlyphCurves(p: GlyphCommon & { count: number }) {
   return wrapMedal(p, inner);
 }
 
-/** Inclinación: moto de perfil con giro claro + ángulo. */
+/** Tumbada: asfalto en curva + moto de perfil inclinada + referencia vertical (plomo). */
 function GlyphLean(props: GlyphCommon & { label: string }) {
   const { label, ...common } = props;
-  const { ring, accent } = common;
+  const { ring, accent, defsId, core } = common;
+  const tilt = leanVisualTiltDeg(label);
+  const px = 23.5;
+  const py = 37.2;
   const inner = (
     <>
-      <path d="M14 39 A14 14 0 0 1 42 39" fill="none" stroke={accent} strokeWidth={1.1} strokeLinecap="round" opacity={0.35} />
-      <g transform="rotate(-24 28 33)">
-        <circle cx="19" cy="36" r="4.2" fill="none" stroke={accent} strokeWidth={1.9} />
-        <circle cx="35" cy="33" r="4.2" fill="none" stroke={accent} strokeWidth={1.9} />
+      <defs>
+        <linearGradient id={`${defsId}-lean-road`} x1="0" y1="1" x2="1" y2="0">
+          <stop offset="0%" stopColor="#18181b" stopOpacity={1} />
+          <stop offset="100%" stopColor="#3f3f46" stopOpacity={0.95} />
+        </linearGradient>
+        <linearGradient id={`${defsId}-lean-tire`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#52525b" />
+          <stop offset="100%" stopColor="#0a0a0b" />
+        </linearGradient>
+        <radialGradient id={`${defsId}-lean-rim`} cx="35%" cy="35%" r="65%">
+          <stop offset="0%" stopColor={accent} stopOpacity={0.35} />
+          <stop offset="100%" stopColor={ring} stopOpacity={0.5} />
+        </radialGradient>
+      </defs>
+      {/* Arcén / asfalto en curva */}
+      <path
+        d="M7 41 Q28 26 49 41"
+        fill="none"
+        stroke={`url(#${defsId}-lean-road)`}
+        strokeWidth={9}
+        strokeLinecap="round"
+        opacity={0.92}
+      />
+      <path
+        d="M10 40.5 Q28 29 46 40.5"
+        fill="none"
+        stroke="#fbbf24"
+        strokeWidth={0.55}
+        strokeDasharray="2 2.5"
+        strokeLinecap="round"
+        opacity={0.45}
+      />
+      {/* Plomo: vertical de referencia (la moto se separa de ella al tumbar) */}
+      <line x1="14" y1="41" x2="14" y2="19" stroke={ring} strokeWidth={0.55} strokeDasharray="2 2" opacity={0.35} />
+      {/* Moto: perfil deportivo girando en curva izquierda (tumbada hacia el interior) */}
+      <g transform={`rotate(${tilt} ${px} ${py})`}>
+        {/* Rueda trasera */}
+        <circle cx="16.2" cy="37.2" r="4.9" fill={`url(#${defsId}-lean-tire)`} stroke={ring} strokeWidth={1.15} />
+        <circle cx="16.2" cy="37.2" r="2.5" fill={`url(#${defsId}-lean-rim)`} stroke={ring} strokeWidth={0.35} opacity={0.95} />
+        {/* Rueda delantera (lige. menor, horquilla girada) */}
+        <circle cx="35.5" cy="34.2" r="4.5" fill={`url(#${defsId}-lean-tire)`} stroke={ring} strokeWidth={1.05} />
+        <circle cx="35.5" cy="34.2" r="2.2" fill={`url(#${defsId}-lean-rim)`} stroke={ring} strokeWidth={0.35} opacity={0.95} />
+        {/* Basculante + bloque motor */}
         <path
-          d="M19 36 L26 22 L33 24 L35 33"
+          d="M16.2 37.2 L24 25 L30 27"
           fill="none"
-          stroke={ring}
-          strokeWidth={1.8}
+          stroke={accent}
+          strokeWidth={2.1}
           strokeLinecap="round"
           strokeLinejoin="round"
         />
-        <path d="M26 22 Q28 18 31 20" fill="none" stroke={accent} strokeWidth={1.4} strokeLinecap="round" />
-        <ellipse cx="28" cy="19" rx="3.5" ry="2.6" fill={accent} fillOpacity={0.4} stroke={accent} strokeWidth={0.6} />
+        {/* Depósito + asiento */}
+        <path
+          d="M24 25 L27 21 L32 24.5 L30 27 Z"
+          fill={accent}
+          fillOpacity={0.42}
+          stroke={ring}
+          strokeWidth={0.55}
+          strokeLinejoin="round"
+        />
+        {/* Horquilla invertida simplificada */}
+        <path d="M30 27 L34.5 33.5" stroke={ring} strokeWidth={1.75} strokeLinecap="round" />
+        <path d="M30 27 L33 32.2" stroke={accent} strokeWidth={0.9} strokeLinecap="round" opacity={0.55} />
+        {/* Manillar + carenado */}
+        <path d="M27 21 L24.5 17.5 M29 20 L32 17" stroke={accent} strokeWidth={1.15} strokeLinecap="round" />
+        <path
+          d="M24.5 17.5 Q27 15 31 17.5 L32 20.5 L27 21 Z"
+          fill={accent}
+          fillOpacity={0.38}
+          stroke={ring}
+          strokeWidth={0.45}
+        />
+        {/* Casco / piloto */}
+        <ellipse cx="26.5" cy="15.8" rx="2.8" ry="2.2" fill={core} stroke={accent} strokeWidth={0.65} />
+        <path d="M24.2 15.2 Q26.5 14 29 15.5" fill="none" stroke={accent} strokeWidth={0.6} strokeLinecap="round" opacity={0.7} />
+        {/* Pie en estribo (sugerido) */}
+        <path d="M22 28 L20 33" stroke={ring} strokeWidth={1.1} strokeLinecap="round" opacity={0.65} />
       </g>
-      <text x="28" y="14" textAnchor="middle" fill={accent} fontSize="11" fontWeight={900} fontFamily="system-ui, sans-serif">
+      {/* Indicador de ángulo entre plomo y eje aproximado de la moto */}
+      <path
+        d="M14 37 A9 9 0 0 1 22 31"
+        fill="none"
+        stroke={accent}
+        strokeWidth={0.75}
+        strokeLinecap="round"
+        opacity={0.4}
+      />
+      <text x="28" y="12.5" textAnchor="middle" fill={accent} fontSize="11" fontWeight={900} fontFamily="system-ui, sans-serif">
         {label}
       </text>
-      <text x="28" y="42" textAnchor="middle" fill={ring} fontSize="5.5" fontWeight={700} opacity={0.75}>
-        inclinación
+      <text x="28" y="43.5" textAnchor="middle" fill={ring} fontSize="5.5" fontWeight={700} opacity={0.78}>
+        tumbada
       </text>
     </>
   );
