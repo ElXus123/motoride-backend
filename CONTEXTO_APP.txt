@@ -1,5 +1,5 @@
 MotoRide — registro de contexto / cambios recientes
-Ultima actualizacion: 2026-04-18 (+ chat redimensionado a pantalla móvil)
+Ultima actualizacion: 2026-04-19 (medallas, voz WebRTC, zoom UI, CONTEXTO)
 
 === Contacto y soporte ===
 - Correo publico de contacto: motorideapp1@gmail.com
@@ -420,3 +420,27 @@ Fecha: 2026-04-14
 - **Git (referencia):** commit `f7332c6` en `main` con niveles + medallas + reglas + MapView/Profile/Friends/Admin/utils/functions/CONTEXTO según estado del repo en ese momento.
 
 - **Popup novedades:** `src/components/WhatsNewModal.tsx` — `WHATS_NEW_VERSION` **2026.04.18** y entradas de changelog alineadas con este bloque (push del modal solo si se versiona aparte del resto del commit masivo).
+
+=== BLOQUE 41 — 2026-04-19: MEDALLAS (SVG), VOZ WEBRTC, ZOOM, SPLASH (REFERENCIA) ===
+
+**Medallas (`src/components/MedalGlyph.tsx`)**
+- **Corrección de enrutado:** los IDs reales de `achievements.ts` (`first_ride`, `twentyfive_km`, `speed_safe`, etc.) no coincidían con prefijos antiguos (`km_*`, `rides_*`); casi todo caía en trofeo genérico. Ahora hay sets por categoría y casos especiales (`first_ride`, `wildcard`, combinados, etc.).
+- **Marco común `MedalFrame`:** doble anillo con gradiente metálico, viñeta radial, clip circular del interior, brillo superior, sombra inferior, borde fino accent.
+- **Cinta `RibbonDeluxe`:** gradiente en cinta, pliegue central, colas; `defs` fuera del grupo con `filter` (evita problemas en Safari).
+- **Glifos por tipo:** km (carretera en perspectiva, línea discontinua, catadióptricos, rueda con rayos); rutas (trazo con halo, waypoints); curvas (doble trazo); inclinación (moto + texto sombreado); velocímetro (arco sombra + aguja); nivel (escudo + romanos sombreados); combo/cadena (estrella facetada); prudent/tortuga/rayo/huracán/café/brújula/peregrino/cazador/plata/oro/cromo/mula/dados/primera ruta/noche/trofeo) con detalle y varias pasadas de pulido visual (auras, reflejos, letras N/S/E/W en brújula, asas en trofeo, hebilla en mula, etc.).
+- **`RIDES_MEDAL_IDS`:** solo `ten_rides` y `fifty_rides` (primera ruta va a `GlyphFirstRide`).
+
+**Voz grupal (`src/hooks/useVoiceChat.ts` + `src/lib/webrtcPeerConfig.ts`)**
+- Audio remoto: elementos `<audio>` en el DOM (`#motoride-remote-audio-root`), `playsinline` / `webkit-playsinline`, `srcObject` siempre actualizado, `play()` con reintentos, tracks remotos `enabled`.
+- Tras `getUserMedia`: `AudioContext` temporal + `resume()` (desbloqueo típico iOS).
+- Listeners `visibilitychange`, `pageshow`, `touchstart` (throttle) para reanudar reproducción.
+- Configuración WebRTC: `getWebRtcPeerConfig()` — STUN Google + `iceCandidatePoolSize`; opcional `VITE_WEBRTC_ICE_SERVERS` (JSON) en `.env.example` para TURN.
+
+**Interfaz / Apple**
+- `index.html`: viewport `maximum-scale=1`, `user-scalable=no`; `format-detection` para no convertir datos en enlaces raros.
+- `src/index.css`: `-webkit-text-size-adjust`, `touch-action: manipulation`, `-webkit-touch-callout: none` (zoom del mapa sigue en Leaflet).
+
+**Splash de carga (`src/components/MainApp.tsx`) — si ya está en main**
+- `hideSplash` con ref; al activar `autoJoining` se oculta el splash para no volver a tapar el dashboard al terminar el join; temporizadores con cleanup correcto; failsafe ~9 s; sin depender de `showLoadingScreen` en las deps del efecto que rompía los timeouts.
+
+**Git:** commit en `main` con esta sesión: medallas, voz, env, index, css, `webrtcPeerConfig.ts`.

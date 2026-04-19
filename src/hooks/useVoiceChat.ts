@@ -1,6 +1,22 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Peer from 'simple-peer';
 import socket from '../lib/socket';
+import { getWebRtcPeerConfig } from '../lib/webrtcPeerConfig';
+
+const REMOTE_AUDIO_ROOT_ID = 'motoride-remote-audio-root';
+
+function getOrCreateRemoteAudioRoot(): HTMLElement {
+  let el = document.getElementById(REMOTE_AUDIO_ROOT_ID);
+  if (!el) {
+    el = document.createElement('div');
+    el.id = REMOTE_AUDIO_ROOT_ID;
+    el.setAttribute('aria-hidden', 'true');
+    el.style.cssText =
+      'position:fixed;width:1px;height:1px;overflow:hidden;opacity:0.01;pointer-events:none;bottom:0;left:0;clip:rect(0,0,0,0);';
+    document.body.appendChild(el);
+  }
+  return el;
+}
 
 function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -124,8 +140,10 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
     stopPeerMedia(peerId);
     if (audioRefs.current[peerId]) {
       try {
-        audioRefs.current[peerId].pause();
-        audioRefs.current[peerId].srcObject = null;
+        const a = audioRefs.current[peerId];
+        a.pause();
+        a.srcObject = null;
+        a.remove();
       } catch {
         /* ignore */
       }
@@ -148,17 +166,74 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
     [groupId, startMeshResetUi]
   );
 
+  const playRemoteAudio = useCallback((el: HTMLAudioElement) => {
+    el.volume = 1;
+    el.muted = false;
+    const run = () => void el.play().catch(() => {});
+    run();
+    queueMicrotask(run);
+    window.setTimeout(run, 80);
+    window.setTimeout(run, 400);
+  }, []);
+
+  /**
+   * Safari/iOS: el audio remoto suele bloquearse si el elemento no está en el DOM o no se llama play()
+   * tras un gesto; además hay que actualizar srcObject si llega un stream nuevo.
+   */
   const addAudioStream = (peerId: string, stream: MediaStream) => {
-    if (!audioRefs.current[peerId]) {
-      const audio = new Audio();
-      audio.srcObject = stream;
+    try {
+      stream.getAudioTracks().forEach((t) => {
+        t.enabled = true;
+      });
+    } catch {
+      /* ignore */
+    }
+
+    let audio = audioRefs.current[peerId];
+    if (!audio) {
+      audio = document.createElement('audio');
       audio.autoplay = true;
-      (audio as any).playsInline = true;
+      audio.playsInline = true;
       audio.setAttribute('playsinline', 'true');
-      audio.play().catch(() => {});
+      audio.setAttribute('webkit-playsinline', 'true');
+      audio.volume = 1;
+      audio.muted = false;
+      audio.preload = 'auto';
+      getOrCreateRemoteAudioRoot().appendChild(audio);
       audioRefs.current[peerId] = audio;
     }
+    audio.srcObject = stream;
+    playRemoteAudio(audio);
   };
+
+  /** Safari/iOS: reanudar altavoz al volver al primer plano o al tocar la pantalla. */
+  useEffect(() => {
+    if (!isVoiceActive) return;
+    let lastTouchResume = 0;
+    const resumeAll = () => {
+      Object.keys(audioRefs.current).forEach((id) => {
+        const a = audioRefs.current[id];
+        if (a?.srcObject) playRemoteAudio(a);
+      });
+    };
+    const onVis = () => {
+      if (document.visibilityState === 'visible') resumeAll();
+    };
+    const onTouchResume = () => {
+      const n = Date.now();
+      if (n - lastTouchResume < 350) return;
+      lastTouchResume = n;
+      resumeAll();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    document.addEventListener('touchstart', onTouchResume, { passive: true });
+    window.addEventListener('pageshow', resumeAll);
+    return () => {
+      document.removeEventListener('visibilitychange', onVis);
+      document.removeEventListener('touchstart', onTouchResume);
+      window.removeEventListener('pageshow', resumeAll);
+    };
+  }, [isVoiceActive, playRemoteAudio]);
 
   useEffect(() => {
     const gid = groupId;
@@ -186,6 +261,7 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
         try {
           a.pause();
           a.srcObject = null;
+          a.remove();
         } catch {
           /* ignore */
         }
@@ -229,6 +305,7 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
         initiator: isInitiatorVersus(callerId),
         trickle: true,
         stream: localStream,
+        config: getWebRtcPeerConfig(),
       });
 
       peer.on('signal', (signal) => {
@@ -274,6 +351,7 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
           initiator: false,
           trickle: true,
           stream: localStream,
+          config: getWebRtcPeerConfig(),
         });
 
         peer.on('signal', (sig) => {
@@ -470,6 +548,21 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
         joinedVoiceRoomRef.current = groupId;
         setIsVoiceActive(true);
         setMicError(null);
+        try {
+          const AC = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+          if (AC) {
+            const ctx = new AC();
+            void ctx.resume().finally(() => {
+              try {
+                ctx.close();
+              } catch {
+                /* ignore */
+              }
+            });
+          }
+        } catch {
+          /* ignore */
+        }
         // Tras el render: los listeners de `user-joined-voice` / `webrtc-signal` deben estar activos antes del join.
         queueMicrotask(() => {
           if (!canUseVoiceRef.current || joinedVoiceRoomRef.current !== groupId || !masterStreamRef.current) return;
