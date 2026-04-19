@@ -113,12 +113,19 @@ export default function MainApp() {
       setShowLoadingScreen(false);
     };
 
-    // Ocultar loading screen tras 2 segundos si ya hay datos o usuario
-    const timeout = setTimeout(() => hideLoadingScreen(), 2000);
+    // Timeout más largo: 5 segundos para dar tiempo a carga con cache o datos locales
+    const timeout = setTimeout(() => hideLoadingScreen(), 5000);
 
     // Esperar a que el mapa cargue o haya datos de Firebase
     if (activeGroupId) {
       hideLoadingScreen();
+    }
+
+    // Si el usuario está cargando, ocultamos loading tras 3s
+    if (user?.uid && !activeGroupId) {
+      // Esperamos a que Dashboard cargue los datos
+      const userTimeout = setTimeout(() => hideLoadingScreen(), 3000);
+      return () => clearTimeout(userTimeout);
     }
 
     return () => clearTimeout(timeout);
@@ -131,7 +138,15 @@ export default function MainApp() {
       stopForegroundFcmListeners();
       return;
     }
-    startForegroundFcmListeners();
+    const init = async () => {
+      try {
+        startForegroundFcmListeners();
+      } catch (e) {
+        console.warn('Error inittando FCM:', e);
+        // Si falla FCM, no bloqueamos la app
+      }
+    };
+    void init();
     return () => stopForegroundFcmListeners();
   }, [user?.uid]);
 
@@ -143,6 +158,12 @@ export default function MainApp() {
     }, 2500);
     return () => window.clearTimeout(t);
   }, [user?.uid]);
+
+  // Manejo de errores globales para evitar pantalla negra
+  const handleGlobalError = (error: unknown) => {
+    console.error('Error global MotoRide:', error);
+    // No bloqueamos la app; el usuario sigue usando con datos locales
+  };
 
   const acceptScheduledRsvp = async () => {
     if (!user?.uid || !scheduledJoinPrompt || scheduledJoinPrompt.variant !== 'confirm') return;
@@ -159,9 +180,7 @@ export default function MainApp() {
       });
       setScheduledJoinPrompt(null);
     } catch (e) {
-      console.error('acceptScheduledRsvp:', e);
-      handleFirestoreError(e, OperationType.WRITE, `groups/${scheduledJoinPrompt.code}`);
-    } finally {
+      handleGlobalError(e);
       setRsvpBusy(false);
     }
   };

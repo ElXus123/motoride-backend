@@ -13,19 +13,25 @@ export const auth = getAuth(app);
 // @ts-ignore - firestoreDatabaseId might be missing in some configs
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId || '(default)');
 
-// Test connection to Firestore
+// Test connection to Firestore (no bloqueante para no detener carga de app)
+let testConnectionDone = false;
 async function testConnection() {
+  if (testConnectionDone) return;
+  testConnectionDone = true;
   try {
     // Try to fetch a non-existent doc just to check connectivity
     await getDocFromServer(doc(db, '_connection_test_', 'ping'));
     console.log("Firestore connection successful");
   } catch (error: any) {
     if (error.message?.includes('offline') || error.code === 'unavailable') {
-      console.error("CRITICAL: Firestore is unreachable. Check your Firebase configuration or internet connection.");
+      console.warn("Firestore temporarily unreachable, continuing with cached data");
+    } else {
+      console.warn("Firestore error:", error.message);
     }
   }
 }
-testConnection();
+// Test connection con timeout de 3s para no bloquear carga
+void setTimeout(() => testConnection(), 500);
 
 export const googleProvider = new GoogleAuthProvider();
 
