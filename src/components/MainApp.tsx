@@ -13,7 +13,7 @@ import { formatScheduledRideDayOnlyEs } from '../lib/scheduledRouteShare';
 import { useMotorideSystemNotifications } from '../hooks/useMotorideSystemNotifications';
 import { registerWebPushFcm, startForegroundFcmListeners, stopForegroundFcmListeners } from '../lib/fcmWeb';
 import NotificationPermissionBanner from './NotificationPermissionBanner';
-import { Calendar, Loader2, MapPin, Motorcycle } from 'lucide-react';
+import { Calendar, Loader2, MapPin } from 'lucide-react';
 
 type ScheduledJoinPromptState =
   | null

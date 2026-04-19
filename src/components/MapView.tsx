@@ -1796,26 +1796,12 @@ export default function MapView({
     };
 
     if (shouldKeepAwake) {
-      // Evitar wakeLock en modo bolsillo (apaisado): el bloqueado del dispositivo en iPhone es molesto
-      const isPortrait = screen.orientation?.type === 'portrait' || screen.orientation?.type === 'portrait-primary';
-      const shouldRequestWakeLock = true; // true siempre, excepto si detectamos modo bolsillo explícito
-
-      if (isPortrait && shouldRequestWakeLock) {
-        void requestWakeLock();
-      }
+      // wakeLock siempre activo en vista de mapa (GPS/ruta visible); iOS pide gesto del usuario
+      void requestWakeLock();
       document.addEventListener('visibilitychange', handleVisibilityChange);
       window.addEventListener('pageshow', handlePageShow);
       document.addEventListener('touchstart', onInteract, { capture: true, passive: true });
       document.addEventListener('pointerdown', onInteract, { capture: true });
-      // Listener a orientationchange para detectar cambio a modo bolsillo
-      if (screen.orientation?.addEventListener) {
-        screen.orientation.addEventListener('change', () => {
-          // En modo bolsillo (portrait), liberar wakeLock para no bloquear el dispositivo
-          if (!isPortrait) {
-            void requestWakeLock();
-          }
-        });
-      }
     } else if (wakeLockRef.current) {
       wakeLockRef.current.release().catch(() => {});
       wakeLockRef.current = null;
@@ -1827,13 +1813,6 @@ export default function MapView({
       window.removeEventListener('pageshow', handlePageShow);
       document.removeEventListener('touchstart', onInteract, true);
       document.removeEventListener('pointerdown', onInteract, true);
-      if (screen.orientation?.removeEventListener) {
-        screen.orientation.removeEventListener('change', () => {
-          if (!isPortrait) {
-            void requestWakeLock();
-          }
-        });
-      }
       if (wakeLockRef.current) {
         wakeLockRef.current.release().catch(() => {});
         wakeLockRef.current = null;
