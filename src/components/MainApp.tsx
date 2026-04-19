@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, Suspense } from 'react';
+import { useState, useEffect, useRef, Suspense, useCallback } from 'react';
 import Dashboard from './Dashboard';
 import MapView from './MapView';
 import Profile from './Profile';
@@ -36,6 +36,7 @@ export default function MainApp() {
   const lastBackHandledAtRef = useRef(0);
   /** Logo animado al cargar: visible hasta que haya datos de Firebase o cache. */
   const [showLoadingScreen, setShowLoadingScreen] = useState(true);
+  const splashHiddenRef = useRef(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   /** Una sola entrada `pushState` al entrar en ruta (evita doble capa con Strict Mode o re-renders). */
   const routeHistoryInsertedRef = useRef(false);
@@ -103,33 +104,45 @@ export default function MainApp() {
     if (!user) setScheduledJoinPrompt(null);
   }, [user]);
 
-  // Logo animado al cargar + fallback si hay errores de conexión
-  useEffect(() => {
-    let mounted = true;
+  const hideSplash = useCallback(() => {
+    if (splashHiddenRef.current) return;
+    splashHiddenRef.current = true;
+    setShowLoadingScreen(false);
+  }, []);
 
-    const hideLoadingScreen = () => {
-      if (!mounted) return;
-      mounted = false;
-      setShowLoadingScreen(false);
+  /** Pantalla de unión automática: quitar splash para no volver a tapar el dashboard al terminar (antes showLoadingScreen seguía true). */
+  useEffect(() => {
+    if (autoJoining) hideSplash();
+  }, [autoJoining, hideSplash]);
+
+  /** Splash inicial: sin `showLoadingScreen` en deps (re-ejecutaba el efecto y limpiaba mal el timeout de 5s → solapamientos / overlay atrapado). */
+  useEffect(() => {
+    let tFast: ReturnType<typeof setTimeout> | undefined;
+    let tMax: ReturnType<typeof setTimeout> | undefined;
+
+    const clear = () => {
+      if (tFast !== undefined) clearTimeout(tFast);
+      if (tMax !== undefined) clearTimeout(tMax);
     };
 
-    // Timeout más largo: 5 segundos para dar tiempo a carga con cache o datos locales
-    const timeout = setTimeout(() => hideLoadingScreen(), 5000);
-
-    // Esperar a que el mapa cargue o haya datos de Firebase
     if (activeGroupId) {
-      hideLoadingScreen();
+      hideSplash();
+      return clear;
     }
 
-    // Si el usuario está cargando, ocultamos loading tras 3s
-    if (user?.uid && !activeGroupId) {
-      // Esperamos a que Dashboard cargue los datos
-      const userTimeout = setTimeout(() => hideLoadingScreen(), 3000);
-      return () => clearTimeout(userTimeout);
+    tMax = setTimeout(() => hideSplash(), 5000);
+    if (user?.uid) {
+      tFast = setTimeout(() => hideSplash(), 2800);
     }
 
-    return () => clearTimeout(timeout);
-  }, [user?.uid, activeGroupId, showLoadingScreen]);
+    return clear;
+  }, [user?.uid, activeGroupId, hideSplash]);
+
+  /** Failsafe absoluto: nunca dejar el overlay negro indefinidamente. */
+  useEffect(() => {
+    const id = setTimeout(() => hideSplash(), 9000);
+    return () => clearTimeout(id);
+  }, [hideSplash]);
 
   useMotorideSystemNotifications(user?.uid);
 
