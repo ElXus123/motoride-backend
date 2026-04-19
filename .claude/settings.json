@@ -1,0 +1,41 @@
+{
+  "autoUpdatesChannel": "latest",
+  "model": "haiku",
+  "permissions": {
+    "allow": [
+      "Bash(git status *)",
+      "Bash(git log *)",
+      "Bash(git diff *)",
+      "Bash(git branch *)",
+      "Bash(gh pr view *)",
+      "Bash(gh issue view *)",
+      "Bash(gh pr list *)",
+      "Bash(gh api *)",
+      "Bash(cat *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(ls *)",
+      "Bash(pwd)",
+      "Bash(echo *)",
+      "Bash(date *)",
+      "Bash(file *)",
+      "Bash(which *)",
+      "Bash(type *)",
+      "Bash(test -e)",
+      "Bash(npm *)",
+      "Bash(yarn *)",
+      "Bash(pnpm *)",
+      "Bash(bun *)",
+      "Bash(node *)",
+      "Bash(tsc *)",
+      "Bash(vite *)",
+      "Bash(esbuild *)",
+      "Read(*)",
+      "Grep(*)",
+      "Glob(*)",
+      "Edit(*)",
+      "Write(*)",
+      "NotebookEdit(*)"
+    ]
+  }
+}

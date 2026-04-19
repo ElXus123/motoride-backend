@@ -34,6 +34,7 @@ import { useLeanAngle, type LeanCalibrationProfile } from '../hooks/useLeanAngle
 import { useNavigation } from '../hooks/useNavigation';
 import { useNavigationHeading } from '../hooks/useNavigationHeading';
 import { getLineCoordinates, snapPointToRouteDetailed } from '../lib/navigationPose';
+import { offsetByMeters } from '../lib/geoUtils';
 import { anyPrecipitationRiskAtPoints } from '../lib/precipitationRisk';
 import {
   DEFAULT_PREMIUM_GPS_POLICY,
@@ -1350,72 +1351,10 @@ export default function MapView({
     lastPrecipBannerAtRef.current = 0;
   }, [groupId]);
 
+  /** Tiempo entre dos anuncios de lluvia (ms). */
+  const COOLDOWN_MS = 10 * 60 * 1000;
+
   const lastPrecipLocation = useRef<{ lat: number; lng: number }>({ lat: 0, lng: 0 });
-
-  useEffect(() => {
-    if (!isOnline || !currentLocation) return;
-    let cancelled = false;
-    const COOLDOWN_MS = 10 * 60 * 1000;
-    // Revisión cada 30s para captar cambios rápidos de precipitación
-    const INTERVAL_MS = 30000;
-
-    // Revisión periódica cada 30s
-    const periodicCheck = () => {
-      if (cancelled) return;
-      if (Date.now() - lastPrecipBannerAtRef.current < COOLDOWN_MS) return;
-      // Solo revisar si el usuario se ha movido un mínimo (evita spam si está parado)
-      const movedEnough = Math.abs(currentLocation.lat - lastPrecipLocation.current.lat) > 0.0005 ||
-                          Math.abs(currentLocation.lng - lastPrecipLocation.current.lng) > 0.0005;
-      if (!movedEnough && precipPoints.length > 0) return;
-
-      if (precipPoints.length > 0) {
-        checkPrecipitation();
-      }
-    };
-
-    const checkPrecipitation = async () => {
-      try {
-        const risk = await anyPrecipitationRiskAtPoints(precipPoints, 3);
-        if (cancelled || !risk) return;
-        lastPrecipBannerAtRef.current = Date.now();
-        setPrecipitationBanner(true);
-        if (navigator.vibrate) navigator.vibrate(80);
-      } catch {
-        /* ignore */
-      }
-    };
-
-    // Guardar última posición para detectar movimiento
-    lastPrecipLocation.current = { lat: currentLocation.lat || 0, lng: currentLocation.lng || 0 };
-
-    // Revisión inmediata + periódica
-    immediateCheck();
-    const interval = window.setInterval(() => periodicCheck(), INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [
-    isOnline,
-    currentLocation?.lat,
-    currentLocation?.lng,
-    effectiveRouteForNav,
-    groupId,
-    premiumGpsPolicy.precipAlertsPremiumOnly,
-    selfPremium,
-    precipPoints,
-  ]);
-
-  const immediateCheck = () => {
-    if (!isOnline || !currentLocation) return;
-    if (premiumGpsPolicy.precipAlertsPremiumOnly && !selfPremium) return;
-    if (Date.now() - lastPrecipBannerAtRef.current < COOLDOWN_MS) return;
-
-    // Si no hay puntos de precipitación, salta
-    if (precipPoints.length === 0) return;
-
-    checkPrecipitation();
-  };
 
   const navState = useNavigation(currentLocation, effectiveRouteForNav);
   const navigationHeading = useNavigationHeading(
@@ -1525,6 +1464,61 @@ export default function MapView({
     currentLocation,
     effectiveRouteForNav
   );
+
+  /** Precipitaciones: chequeo periódico y por movimiento. */
+  useEffect(() => {
+    let cancelled = false;
+    const INTERVAL_MS = 30000;
+
+    /** Verifica si hay riesgo de lluvia en los puntos de la ruta cercanos. */
+    const checkPrecipitation = async () => {
+      try {
+        const risk = await anyPrecipitationRiskAtPoints(precipPoints, 3);
+        if (cancelled || !risk) return;
+        lastPrecipBannerAtRef.current = Date.now();
+        setPrecipitationBanner(true);
+        if (navigator.vibrate) navigator.vibrate(80);
+      } catch {
+        /* ignore */
+      }
+    };
+
+    // Revisión inmediata
+    // Revisión inmediata
+    if (!isOnline || !currentLocation) return;
+    if (premiumGpsPolicy.precipAlertsPremiumOnly && !selfPremium) return;
+    if (Date.now() - lastPrecipBannerAtRef.current < COOLDOWN_MS) return;
+    if (precipPoints.length === 0) return;
+    checkPrecipitation();
+
+    // Revisión periódica cada 30s
+    const interval = window.setInterval(() => {
+      if (cancelled) return;
+      if (Date.now() - lastPrecipBannerAtRef.current < COOLDOWN_MS) return;
+      // Solo revisar si el usuario se ha movido un mínimo (evita spam si está parado)
+      const movedEnough = Math.abs(currentLocation.lat - lastPrecipLocation.current.lat) > 0.0005 ||
+                          Math.abs(currentLocation.lng - lastPrecipLocation.current.lng) > 0.0005;
+      if (!movedEnough && precipPoints.length > 0) return;
+      checkPrecipitation();
+    }, INTERVAL_MS);
+
+    // Guardar última posición para detectar movimiento
+    lastPrecipLocation.current = { lat: currentLocation.lat || 0, lng: currentLocation.lng || 0 };
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [
+    isOnline,
+    currentLocation?.lat,
+    currentLocation?.lng,
+    effectiveRouteForNav,
+    groupId,
+    premiumGpsPolicy.precipAlertsPremiumOnly,
+    selfPremium,
+    precipPoints,
+  ]);
 
   const wasRadarWithin500Ref = useRef(false);
   useEffect(() => {
@@ -1724,30 +1718,39 @@ export default function MapView({
   const deleteGroupIfHost = async (reason: string): Promise<boolean> => {
     if (!groupId || groupId === 'REPEATED' || !user || leaveInProgressRef.current) return false;
     leaveInProgressRef.current = true;
-    try {
-      if (isHostRef.current) {
-        const hostLeftAt = Date.now();
-        await updateDoc(doc(db, 'groups', groupId), {
-          isRecording: false,
-          hostLeftAt,
-          hostLeftUid: user.uid,
-          members: arrayRemove(user.uid)
-        });
-        socket.emit('leave-group', { groupId, uid: user.uid, isHost: true, timestamp: hostLeftAt });
-      } else {
-        await updateDoc(doc(db, 'groups', groupId), {
-          members: arrayRemove(user.uid)
-        });
-        socket.emit('leave-group', { groupId, uid: user.uid, isHost: false, timestamp: Date.now() });
+
+    /**
+     * No borrar el grupo si es una ruta programada y la hora de inicio aún no ha pasado.
+     * El grupo se mantiene hasta que:
+     * 1. La ruta programada ha comenzado (scheduledTimestamp ya pasó), o
+     * 2. El anfitrión vuelve a entrar al grupo manualmente.
+     */
+    const now = Date.now();
+    if (group?.isScheduled === true && Number.isFinite(group.scheduledTimestamp) && group.scheduledTimestamp > 0) {
+      if (group.scheduledTimestamp > now) {
+        console.warn(`Ruta programada: no se borra el grupo porque la salida está programada para ${new Date(group.scheduledTimestamp).toLocaleString()}`);
+        return false;
       }
-      return true;
-    } catch (error) {
-      console.error(`Error leaving group (${reason}):`, error);
-      handleFirestoreError(error, OperationType.UPDATE, `groups/${groupId}`);
-      return false;
-    } finally {
-      leaveInProgressRef.current = false;
     }
+
+    // Si el anfitrión es el único miembro y sale, el grupo se auto-borra como antes
+    // Esto es correcto para rutas espontáneas y para rutas programadas que ya han comenzado
+    if (isHostRef.current) {
+      const hostLeftAt = Date.now();
+      await updateDoc(doc(db, 'groups', groupId), {
+        isRecording: false,
+        hostLeftAt,
+        hostLeftUid: user.uid,
+        members: arrayRemove(user.uid)
+      });
+      socket.emit('leave-group', { groupId, uid: user.uid, isHost: true, timestamp: hostLeftAt });
+    } else {
+      await updateDoc(doc(db, 'groups', groupId), {
+        members: arrayRemove(user.uid)
+      });
+      socket.emit('leave-group', { groupId, uid: user.uid, isHost: false, timestamp: Date.now() });
+    }
+    return true;
   };
 
   // Wake Lock siempre en vista de mapa (GPS/ruta visible); iOS 16.4+ Safari / PWA; a menudo hace falta un gesto.
@@ -4738,7 +4741,7 @@ export default function MapView({
         <TileLayer
           url="https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png"
           /** keepBuffer más grande cuando la rotación está activa (mapa sigue rumbo), con interpolación según velocidad */
-          keepBuffer={isRecording && speedKmh > 20 && mapHeadingRotationActive
+          keepBuffer={isRecording && speedKmhForMapFollow > 20 && mapHeadingRotationActive
             ? 700 // Alto buffer para evitar cuadrados vacíos en rotación + velocidad
             : mapHeadingRotationActive
               ? 400 // Rotación activa: buffer generoso
@@ -4775,7 +4778,7 @@ export default function MapView({
               maxZoom={20}
               className="leaflet-radar-overlay"
               /** Radar: buffer más grande en rotación activa para evitar huecos */
-              keepBuffer={isRecording && speedKmh > 20 && mapHeadingRotationActive
+              keepBuffer={isRecording && speedKmhForMapFollow > 20 && mapHeadingRotationActive
                 ? 350
                 : mapHeadingRotationActive
                   ? 250
