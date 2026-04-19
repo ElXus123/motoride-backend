@@ -44,6 +44,25 @@ export default function MainApp() {
   /** Tras confirmar salida: el siguiente popstate no debe volver a interceptar. */
   const bypassRoutePopRef = useRef(false);
 
+  const hideSplash = useCallback(() => {
+    if (splashHiddenRef.current) return;
+    splashHiddenRef.current = true;
+    setShowLoadingScreen(false);
+  }, []);
+
+  /** Al abrir GPS/mapa: quitar splash por si el estado seguía en “cargando” (evita pantalla negra encima del mapa). */
+  const openRouteMap = useCallback(
+    (groupId: string) => {
+      try {
+        hideSplash();
+      } catch {
+        /* ignore */
+      }
+      setActiveGroupId(groupId);
+    },
+    [hideSplash]
+  );
+
   /** `?join=` : rutas programadas → modal para apuntarse (no entrar al GPS); rutas en vivo → unión y mapa como antes. */
   useEffect(() => {
     if (!user?.uid || activeGroupId) return;
@@ -84,13 +103,13 @@ export default function MainApp() {
         }
 
         if (already) {
-          setActiveGroupId(code);
+          openRouteMap(code);
           return;
         }
         await updateDoc(groupRef, {
           members: arrayUnion(user.uid),
         });
-        setActiveGroupId(code);
+        openRouteMap(code);
       } catch (e) {
         console.error('Error auto-joining:', e);
         handleFirestoreError(e, OperationType.WRITE, `groups/${code}`);
@@ -99,17 +118,21 @@ export default function MainApp() {
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- solo reaccionar a usuario y salida de mapa; no repetir al cambiar handlers de mensaje
-  }, [user?.uid, activeGroupId]);
+  }, [user?.uid, activeGroupId, openRouteMap]);
 
   useEffect(() => {
     if (!user) setScheduledJoinPrompt(null);
   }, [user]);
 
-  const hideSplash = useCallback(() => {
-    if (splashHiddenRef.current) return;
-    splashHiddenRef.current = true;
-    setShowLoadingScreen(false);
-  }, []);
+  useEffect(() => {
+    if (activeGroupId || repeatedRoute) {
+      try {
+        hideSplash();
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [activeGroupId, repeatedRoute, hideSplash]);
 
   /** Pantalla de unión automática: quitar splash para no volver a tapar el dashboard al terminar (antes showLoadingScreen seguía true). */
   useEffect(() => {
@@ -265,7 +288,7 @@ export default function MainApp() {
   }, [mainMenuVisible, user?.uid]);
 
   const inviteOverlay = user?.uid ? (
-    <PendingRideInviteOverlay onJoinGroup={(id) => setActiveGroupId(id)} activeGroupId={activeGroupId} />
+    <PendingRideInviteOverlay onJoinGroup={(id) => openRouteMap(id)} activeGroupId={activeGroupId} />
   ) : null;
 
   const notificationBanner =
@@ -310,6 +333,11 @@ export default function MainApp() {
             bypassRoutePopRef.current = true;
           }}
           onPromoteFromRepeat={(liveCode) => {
+            try {
+              hideSplash();
+            } catch {
+              /* ignore */
+            }
             setActiveGroupId(liveCode);
             setRepeatedRoute(null);
           }}
@@ -404,7 +432,7 @@ export default function MainApp() {
       {showLoadingScreen && <AppLogoSplash />}
 
       <Suspense fallback={<AppLogoSplash />}>
-        <Dashboard onJoinGroup={(id) => setActiveGroupId(id)} onRepeatRoute={(route) => setRepeatedRoute(route)} onOpenProfile={() => setShowProfile(true)} />
+        <Dashboard onJoinGroup={(id) => openRouteMap(id)} onRepeatRoute={(route) => setRepeatedRoute(route)} onOpenProfile={() => setShowProfile(true)} />
       </Suspense>
     </>
   );

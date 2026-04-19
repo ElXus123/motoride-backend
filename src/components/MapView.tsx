@@ -4714,9 +4714,12 @@ export default function MapView({
         </div>
       )}
 
-      <div ref={mapRotationShellRef} className="w-full flex-1 relative overflow-hidden bg-[#dfe0e6]">
+      <div
+        ref={mapRotationShellRef}
+        className="w-full min-h-0 flex-1 relative overflow-hidden bg-[#dfe0e6]"
+      >
         <div
-          className="w-full h-full transition-transform duration-500 ease-out isolate"
+          className="w-full h-full min-h-0 transition-transform duration-500 ease-out isolate"
           style={{
             transform: mapHeadingRotationActive
               ? `scale(${mapRotationCoverScale}) rotate(${-navigationHeading}deg)`
@@ -4736,7 +4739,7 @@ export default function MapView({
             fadeAnimation={false}
             zoomAnimation
           >
-        <MapInvalidateHelper layoutKey={`${mapHeadingRotationActive ? 1 : 0}`} />
+        <MapInvalidateHelper layoutKey={`${groupId}-${mapHeadingRotationActive ? 1 : 0}`} />
         <MapTilePrefetchBridge
           mapZoomRef={mapZoomRef}
           mapCenterRef={mapViewportCenterRef}
