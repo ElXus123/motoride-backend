@@ -22,7 +22,57 @@ async function startServer() {
     }
   });
 
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
+
+  /**
+   * Credenciales TURN temporales para la voz (WebRTC con datos móviles necesita TURN).
+   * Opción A (recomendada, gratis hasta 1 TB/mes): Cloudflare Realtime TURN →
+   *   CLOUDFLARE_TURN_KEY_ID + CLOUDFLARE_TURN_KEY_API_TOKEN
+   * Opción B: ICE_SERVERS_JSON con un array RTCIceServer fijo (p. ej. Metered, coturn propio).
+   */
+  let turnCache: { at: number; body: unknown } | null = null;
+  app.get("/ice-servers", async (req, res) => {
+    const origin = req.headers.origin;
+    if (allowedOrigins.includes("*")) res.set("Access-Control-Allow-Origin", "*");
+    else if (origin && allowedOrigins.includes(origin)) {
+      res.set("Access-Control-Allow-Origin", origin);
+      res.set("Vary", "Origin");
+    }
+    res.set("Cache-Control", "no-store");
+    try {
+      if (turnCache && Date.now() - turnCache.at < 30 * 60 * 1000) {
+        res.json(turnCache.body);
+        return;
+      }
+      const keyId = process.env.CLOUDFLARE_TURN_KEY_ID;
+      const token = process.env.CLOUDFLARE_TURN_KEY_API_TOKEN;
+      if (keyId && token) {
+        const r = await fetch(
+          `https://rtc.live.cloudflare.com/v1/turn/keys/${encodeURIComponent(keyId)}/credentials/generate-ice-servers`,
+          {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ ttl: 4 * 60 * 60 }),
+          }
+        );
+        if (r.ok) {
+          const body = await r.json();
+          turnCache = { at: Date.now(), body };
+          res.json(body);
+          return;
+        }
+        console.warn("Cloudflare TURN respondió", r.status);
+      }
+      if (process.env.ICE_SERVERS_JSON) {
+        res.json({ iceServers: JSON.parse(process.env.ICE_SERVERS_JSON) });
+        return;
+      }
+      res.json({ iceServers: [] });
+    } catch (e) {
+      console.warn("ice-servers error", e);
+      res.json({ iceServers: [] });
+    }
+  });
 
   // Socket.io logic for real-time location and ranking sharing
   io.on("connection", (socket) => {
@@ -108,6 +158,21 @@ async function startServer() {
       });
     });
 
+    // Un participante (no iniciador) pide al otro que rehaga el enlace de voz entre ambos.
+    socket.on("voice-peer-reset", (data: { target?: string }) => {
+      if (!data?.target) return;
+      io.to(data.target).emit("voice-peer-reset", { caller: socket.id });
+    });
+
+    // Antes de perder las salas: avisar a las salas de voz para que nadie se quede con un enlace fantasma.
+    socket.on("disconnecting", () => {
+      for (const room of socket.rooms) {
+        if (room.endsWith("-voice")) {
+          socket.to(room).emit("user-left-voice", socket.id);
+        }
+      }
+    });
+
     socket.on("disconnect", () => {
       const groupId = (socket as any).groupId;
       const uid = (socket as any).uid; // Assuming I can store uid too
@@ -126,6 +191,13 @@ async function startServer() {
       }
       console.log("User disconnected:", socket.id);
     });
+  });
+
+  // Ping ligero para despertar el servicio (Render free se duerme sin tráfico) y comprobarlo.
+  app.get("/health", (_req, res) => {
+    res.set("Access-Control-Allow-Origin", "*");
+    res.set("Cache-Control", "no-store");
+    res.status(200).json({ ok: true, service: "socket-backend", uptime: Math.round(process.uptime()) });
   });
 
   // Vite middleware for development
@@ -147,9 +219,6 @@ async function startServer() {
       });
     } else {
       // Backend-only mode (recommended on Render when frontend is on Netlify)
-      app.get('/health', (_req, res) => {
-        res.status(200).json({ ok: true, service: "socket-backend" });
-      });
       app.get('/', (_req, res) => {
         res.status(200).send('MotoRide socket backend is running.');
       });
