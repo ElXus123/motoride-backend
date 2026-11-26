@@ -4618,7 +4618,7 @@ export default function MapView({
           }}
         >
           <AlertTriangle size={18} className="shrink-0" />
-          <span>Sin señal GPS, reconectando...</span>
+          <span>{gpsError}</span>
         </div>
       )}
 

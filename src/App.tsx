@@ -53,17 +53,14 @@ const AppContent = () => {
   const showMessage = useAppMessage();
   const [showInstallNotice, setShowInstallNotice] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
-  const [isSafari, setIsSafari] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
   const [isChromeIOS, setIsChromeIOS] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const ua = window.navigator.userAgent;
-    const safariDetected = /Safari/i.test(ua) && !/Chrome|CriOS|Edg|OPR|SamsungBrowser/i.test(ua);
     const iosDetected = /iPhone|iPad|iPod/i.test(ua);
     const chromeIosDetected = /CriOS/i.test(ua) && iosDetected;
-    setIsSafari(safariDetected);
     setIsIOS(iosDetected);
     setIsChromeIOS(chromeIosDetected);
 
@@ -138,8 +135,7 @@ const AppContent = () => {
         showMessage({
           title: 'Pantalla completa',
           variant: 'info',
-          message:
-            'En iPhone no suele funcionar la pantalla completa en el navegador. Instala MotoRide en la pantalla de inicio: en Safari, Compartir → Añadir a pantalla de inicio; en Chrome, Compartir → Ver más → Añadir a pantalla de inicio. Luego ábrela desde el icono.',
+          message: 'Tu navegador no permite pantalla completa. Abre MotoRide desde su icono en la pantalla de inicio.',
         });
       }
     } catch (err) {
@@ -147,8 +143,7 @@ const AppContent = () => {
       showMessage({
         title: 'Pantalla completa',
         variant: 'info',
-        message:
-          'No se pudo usar pantalla completa aquí. En iPhone: añade MotoRide a la pantalla de inicio (Safari: Compartir → Añadir a pantalla de inicio; Chrome: Compartir → Ver más → Añadir a pantalla de inicio) y ábrela desde el icono.',
+        message: 'No se pudo usar pantalla completa aquí. Abre MotoRide desde su icono en la pantalla de inicio.',
       });
     }
   };
@@ -190,84 +185,37 @@ const AppContent = () => {
                 <Download size={20} />
               </div>
               <div>
-                <h2 className="font-black text-lg leading-tight">Instala MotoRide para mejor rendimiento</h2>
-                <p className="text-zinc-400 text-sm mt-1">
-                  Te recomendamos instalarla para que cargue mas rapido, use mejor el GPS y funcione como una app real.
-                </p>
+                <h2 className="font-black text-lg leading-tight">Instala MotoRide</h2>
+                <p className="text-zinc-400 text-sm mt-1">Carga más rápido y el GPS funciona mejor.</p>
               </div>
             </div>
 
-            {(deferredPrompt || isSafari || isChromeIOS || isIOS) && (
-            <div className="rounded-2xl border border-zinc-700 bg-zinc-900/60 p-3 mb-3 text-sm text-zinc-200">
-              <p className="font-semibold mb-2">Cómo ponerla en tu móvil</p>
-              {deferredPrompt && !isIOS ? (
-                <>
-                  <p className="text-zinc-300 mb-2">En <strong className="text-zinc-200">Android</strong> u ordenador con Chrome/Edge:</p>
-                  <ol className="list-decimal list-inside space-y-1.5 text-zinc-300">
-                    <li>Pulsa <strong className="text-zinc-200">Instalar app</strong> si aparece (abajo o en la barra).</li>
-                    <li>Si no, abre el menú <strong className="text-zinc-200">⋮</strong> o <strong className="text-zinc-200">Instalar aplicación</strong>.</li>
-                    <li>Abre MotoRide desde su <strong className="text-zinc-200">icono</strong> en la pantalla de inicio: se verá sin barras del navegador.</li>
-                  </ol>
-                </>
-              ) : isChromeIOS ? (
-                <>
-                  <p className="text-zinc-300 mb-2">
-                    En <strong className="text-zinc-200">Chrome para iPhone</strong> la opción va en <strong className="text-zinc-200">Compartir</strong> y luego en <strong className="text-zinc-200">Ver más</strong>:
-                  </p>
-                  <ol className="list-decimal list-inside space-y-1.5 text-zinc-300">
-                    <li>Abre esta página en Chrome.</li>
-                    <li>Abajo, toca <strong className="text-zinc-200">Compartir</strong> (cuadrado con flecha hacia arriba).</li>
-                    <li>
-                      Desplázate y toca <strong className="text-zinc-200">Ver más</strong> (o despliega la lista de acciones) hasta ver{' '}
-                      <strong className="text-zinc-200">Añadir a pantalla de inicio</strong>.
-                    </li>
-                    <li>Toca <strong className="text-zinc-200">Añadir</strong>. Abre MotoRide desde el icono en tu pantalla de inicio.</li>
-                  </ol>
-                </>
-              ) : isSafari && isIOS ? (
-                <>
-                  <p className="text-zinc-300 mb-2">En <strong className="text-zinc-200">Safari</strong> (iPhone o iPad):</p>
-                  <ol className="list-decimal list-inside space-y-1.5 text-zinc-300">
-                    <li>Abre esta página en Safari.</li>
-                    <li>Abajo, toca <strong className="text-zinc-200">Compartir</strong> (cuadrado con flecha hacia arriba).</li>
-                    <li>
-                      Toca <strong className="text-zinc-200">Añadir a pantalla de inicio</strong> y luego <strong className="text-zinc-200">Añadir</strong>.
-                    </li>
-                  </ol>
-                </>
-              ) : isIOS ? (
-                <p className="text-zinc-300">
-                  Abre el menú <strong className="text-zinc-200">Compartir</strong> del navegador y busca <strong className="text-zinc-200">Añadir a pantalla de inicio</strong>. Si no aparece, abre la página en <strong className="text-zinc-200">Safari</strong> o en <strong className="text-zinc-200">Chrome</strong> y sigue los pasos de arriba.
-                </p>
-              ) : (
-                <p className="text-zinc-300">
-                  Si tu navegador muestra <strong className="text-zinc-200">Instalar</strong> o un icono de instalación en la barra de direcciones, úsalo. Si no, revisa el menú del navegador (Archivo, Aplicación o ⋮).
-                </p>
-              )}
-            </div>
+            {isIOS ? (
+              <div className="rounded-2xl border border-zinc-700 bg-zinc-900/60 p-3 mb-3 text-sm text-zinc-200">
+                <ol className="list-decimal list-inside space-y-1.5 text-zinc-300">
+                  <li>Toca el botón <strong className="text-zinc-200">Compartir</strong> (cuadrado con flecha).</li>
+                  <li>Elige <strong className="text-zinc-200">«Añadir a pantalla de inicio»</strong>.</li>
+                  <li>Abre MotoRide desde ese icono.</li>
+                </ol>
+                {isChromeIOS && (
+                  <p className="text-zinc-400 mt-2">En Chrome, la opción está en Compartir → Ver más.</p>
+                )}
+              </div>
+            ) : (
+              <p className="text-sm text-zinc-300 mb-3">
+                {deferredPrompt ? 'Pulsa «Instalar app» abajo.' : 'Abre el menú ⋮ y elige «Instalar aplicación».'}
+              </p>
             )}
 
-            {/* iPhone: Safari no da pantalla completa a webs; la vía es la app añadida a inicio (standalone).
-                Android/escritorio: requestFullscreen funciona directamente. */}
-            {(
-              <div className="rounded-2xl border border-blue-500/30 bg-blue-500/10 p-3 mb-3 text-sm text-zinc-200">
-                <p className="font-semibold mb-2">{isIOS ? 'En iPhone: mapa a pantalla llena' : 'Mapa a pantalla completa'}</p>
-                <p className="text-zinc-300 mb-3">
-                  {isIOS ? (
-                    <>
-                      Safari de iPhone no permite pantalla completa desde una web. Abre MotoRide desde el <strong className="text-zinc-200">icono que añadiste</strong> a la pantalla de inicio (no desde el navegador): se abrirá sin barras y el mapa ocupará toda la pantalla. Si aún no la has añadido, sigue los pasos de arriba. Puedes probar este botón; si no hace nada, instálala primero.
-                    </>
-                  ) : (
-                    <>
-                      Con la app instalada, Android la abre sin barras del navegador. También puedes pulsar este botón para ver el mapa a pantalla completa (se sale igual pulsando de nuevo).
-                    </>
-                  )}
-                </p>
+            {/* Pantalla completa: en iPhone no existe desde una web; ahí basta con abrir el icono instalado. */}
+            {!isIOS && (
+              <div className="rounded-2xl border border-blue-500/30 bg-blue-500/10 p-3 mb-3 flex items-center justify-between gap-3 text-sm text-zinc-200">
+                <span>Mapa a pantalla completa</span>
                 <button
                   onClick={requestFullscreen}
-                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl py-2.5 transition-colors"
+                  className="shrink-0 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl px-4 py-2 transition-colors"
                 >
-                  Intentar pantalla completa
+                  Pantalla completa
                 </button>
               </div>
             )}

@@ -5,6 +5,10 @@ import { useAuth } from '../contexts/AuthContext';
 import { getDistance, getBearing } from '../lib/geoUtils';
 import socket from '../lib/socket';
 
+/** Mensaje cuando el usuario (o iOS) bloquea la ubicación. Se muestra en el banner del mapa. */
+export const LOCATION_DENIED_MESSAGE =
+  'Ubicación bloqueada. Permítela en Ajustes → Privacidad y seguridad → Localización y vuelve a abrir MotoRide.';
+
 export type LocationTrackingOptions = {
   /** Por defecto `true`. Si `false`, GPS menos preciso (menor consumo; p. ej. usuarios no Premium). */
   enableHighAccuracy?: boolean;
@@ -259,7 +263,8 @@ export const useLocationTracking = (
           console.error('Geolocation error:', err);
           setHorizontalAccuracy(null);
           if (err.code === 1) {
-            setError('Permiso de GPS denegado');
+            // Denegado: no reintentar en bucle. Se reanuda al volver a la app (onVisible) o al reabrirla.
+            setError(LOCATION_DENIED_MESSAGE);
             return;
           }
           if (err.code === 2) {
