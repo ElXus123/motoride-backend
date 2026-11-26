@@ -2,43 +2,124 @@ import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import { createServer as createViteServer } from "vite";
+import admin from "firebase-admin";
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
+import { registerRealtime, SOCKET_MAX_HTTP_BUFFER } from "./server-realtime";
+import { FixedWindowLimiter, resolveAllowedOrigins } from "./server-security";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+/**
+ * Firebase Admin con la cuenta de servicio en FIREBASE_SERVICE_ACCOUNT_JSON (texto JSON).
+ * Si falta o no es válida, el servidor arranca pero rechaza TODO (fallo seguro).
+ * Nunca se registra el contenido de la variable ni mensajes de error que puedan contenerlo.
+ */
+function initFirebaseAdmin(): boolean {
+  const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim();
+  if (!raw) {
+    console.error(
+      "[SEGURIDAD] FIREBASE_SERVICE_ACCOUNT_JSON no está definida. Se RECHAZARÁN todas las conexiones de socket y /ice-servers hasta configurarla."
+    );
+    return false;
+  }
+  try {
+    const serviceAccount = JSON.parse(raw);
+    admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+    console.log("[seguridad] Firebase Admin inicializado.");
+    return true;
+  } catch {
+    console.error(
+      "[SEGURIDAD] FIREBASE_SERVICE_ACCOUNT_JSON no es una cuenta de servicio válida. Se RECHAZARÁN todas las conexiones."
+    );
+    return false;
+  }
+}
+
+const firebaseReady = initFirebaseAdmin();
+
+async function verifyToken(token: string): Promise<{ uid: string }> {
+  if (!firebaseReady) throw new Error("auth-unavailable");
+  const decoded = await admin.auth().verifyIdToken(token);
+  return { uid: decoded.uid };
+}
+
+async function isGroupMember(uid: string, groupId: string): Promise<boolean> {
+  if (!firebaseReady) return false;
+  const snap = await admin.firestore().collection("groups").doc(groupId).get();
+  const members = snap.data()?.members;
+  return Array.isArray(members) && members.includes(uid);
+}
+
 async function startServer() {
   const app = express();
+  // Render (y cualquier proxy) añade X-Forwarded-For: así el límite por IP usa la IP real del cliente.
+  app.set("trust proxy", 1);
   const httpServer = createServer(app);
-  const pendingDisconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  const DISCONNECT_GRACE_MS = 20000;
-  const allowedOrigins = (process.env.CORS_ORIGIN || "*").split(",").map((o) => o.trim());
+  const allowedOrigins = resolveAllowedOrigins(process.env.CORS_ORIGIN, process.env.NODE_ENV);
   const io = new Server(httpServer, {
     cors: {
       origin: allowedOrigins,
-      methods: ["GET", "POST"]
-    }
+      methods: ["GET", "POST"],
+    },
+    maxHttpBufferSize: SOCKET_MAX_HTTP_BUFFER,
   });
 
+  registerRealtime(io, { verifyToken, isMember: isGroupMember });
+
   const PORT = Number(process.env.PORT) || 3000;
+
+  function applyCors(req: express.Request, res: express.Response): void {
+    const origin = req.headers.origin;
+    if (allowedOrigins.includes("*")) {
+      res.set("Access-Control-Allow-Origin", "*");
+    } else if (origin && allowedOrigins.includes(origin)) {
+      res.set("Access-Control-Allow-Origin", origin);
+      res.set("Vary", "Origin");
+    }
+  }
+
+  /** Preflight para la cabecera Authorization de /ice-servers. */
+  app.options("/ice-servers", (req, res) => {
+    applyCors(req, res);
+    res.set("Access-Control-Allow-Methods", "GET, OPTIONS");
+    res.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
+    res.set("Access-Control-Max-Age", "600");
+    res.sendStatus(204);
+  });
 
   /**
    * Credenciales TURN temporales para la voz (WebRTC con datos móviles necesita TURN).
    * Opción A (recomendada, gratis hasta 1 TB/mes): Cloudflare Realtime TURN →
    *   CLOUDFLARE_TURN_KEY_ID + CLOUDFLARE_TURN_KEY_API_TOKEN
    * Opción B: ICE_SERVERS_JSON con un array RTCIceServer fijo (p. ej. Metered, coturn propio).
+   * Requiere ID token de Firebase en `Authorization: Bearer <token>` y límite de 30 peticiones/min por IP.
    */
+  const iceLimiter = new FixedWindowLimiter(30, 60 * 1000);
   let turnCache: { at: number; body: unknown } | null = null;
   app.get("/ice-servers", async (req, res) => {
-    const origin = req.headers.origin;
-    if (allowedOrigins.includes("*")) res.set("Access-Control-Allow-Origin", "*");
-    else if (origin && allowedOrigins.includes(origin)) {
-      res.set("Access-Control-Allow-Origin", origin);
-      res.set("Vary", "Origin");
-    }
+    applyCors(req, res);
     res.set("Cache-Control", "no-store");
+
+    if (!iceLimiter.hit(req.ip || "unknown")) {
+      res.set("Retry-After", "60");
+      res.status(429).json({ error: "rate-limited" });
+      return;
+    }
+    const match = /^Bearer\s+(\S+)$/i.exec(req.headers.authorization ?? "");
+    if (!match) {
+      res.status(401).json({ error: "unauthorized" });
+      return;
+    }
+    try {
+      await verifyToken(match[1]);
+    } catch {
+      res.status(401).json({ error: "unauthorized" });
+      return;
+    }
+
     try {
       if (turnCache && Date.now() - turnCache.at < 30 * 60 * 1000) {
         res.json(turnCache.body);
@@ -72,125 +153,6 @@ async function startServer() {
       console.warn("ice-servers error", e);
       res.json({ iceServers: [] });
     }
-  });
-
-  // Socket.io logic for real-time location and ranking sharing
-  io.on("connection", (socket) => {
-    console.log("User connected:", socket.id);
-
-    socket.on("join-group", (data: { groupId: string, uid: string }) => {
-      if (!data?.groupId || !data?.uid) return;
-      const disconnectKey = `${data.groupId}:${data.uid}`;
-      const pendingTimer = pendingDisconnectTimers.get(disconnectKey);
-      if (pendingTimer) {
-        clearTimeout(pendingTimer);
-        pendingDisconnectTimers.delete(disconnectKey);
-      }
-      socket.join(data.groupId);
-      (socket as any).groupId = data.groupId;
-      (socket as any).uid = data.uid;
-      console.log(`User ${socket.id} (uid: ${data.uid}) joined group: ${data.groupId}`);
-      // Los que ya estaban reenvían su posición (el recién unido ve al host).
-      socket.to(data.groupId).emit("location-sync-request", { joinedUid: data.uid });
-      // El recién unido también reenvía la suya: el host la recibe aunque el primer paquete se perdiera.
-      socket.emit("location-sync-request", { joinedUid: data.uid, self: true });
-    });
-
-    socket.on("leave-group", (data: { groupId: string, uid: string, isHost?: boolean, timestamp?: number }) => {
-      if (!data?.groupId || !data?.uid) return;
-      const disconnectKey = `${data.groupId}:${data.uid}`;
-      const pendingTimer = pendingDisconnectTimers.get(disconnectKey);
-      if (pendingTimer) {
-        clearTimeout(pendingTimer);
-        pendingDisconnectTimers.delete(disconnectKey);
-      }
-      socket.leave(data.groupId);
-      socket.to(data.groupId).emit("user-left", { uid: data.uid, reason: "explicit-leave" });
-      if (data.isHost) {
-        socket.to(data.groupId).emit("host-left-route", {
-          uid: data.uid,
-          timestamp: data.timestamp || Date.now()
-        });
-      }
-      console.log(`User ${socket.id} (uid: ${data.uid}) explicitly left group: ${data.groupId}`);
-    });
-
-    socket.on("update-location", (data) => {
-      if (!data?.groupId || !data?.uid || typeof data.lat !== "number" || typeof data.lng !== "number") return;
-      // Broadcast location and score to everyone else in the group
-      // data: { groupId, uid, lat, lng, speed, heading, score, photoURL, displayName, alert }
-      socket.to(data.groupId).emit("location-updated", data);
-    });
-
-    socket.on("trigger-alert", (data) => {
-      if (!data?.groupId || !data?.uid || !data?.type) return;
-      // data: { groupId, uid, displayName, type }
-      socket.to(data.groupId).emit("alert-triggered", data);
-    });
-
-    // WebRTC Signaling
-    socket.on("join-voice", (groupId) => {
-      if (!groupId) return;
-      const room = `${groupId}-voice`;
-      const existing = Array.from(io.sockets.adapter.rooms.get(room) ?? []);
-      socket.join(room);
-      socket.to(room).emit("user-joined-voice", socket.id);
-      // Quien entra tarde también debe conocer a los que ya estaban (antes solo el primero veía a los demás).
-      for (const peerId of existing) {
-        if (peerId !== socket.id) {
-          socket.emit("user-joined-voice", peerId);
-        }
-      }
-    });
-
-    socket.on("leave-voice", (groupId) => {
-      if (!groupId) return;
-      socket.leave(`${groupId}-voice`);
-      socket.to(`${groupId}-voice`).emit("user-left-voice", socket.id);
-    });
-
-    socket.on("webrtc-signal", (data) => {
-      if (!data?.target || !data?.signal) return;
-      // data: { target: string, caller: string, signal: any }
-      io.to(data.target).emit("webrtc-signal", {
-        caller: socket.id,
-        signal: data.signal
-      });
-    });
-
-    // Un participante (no iniciador) pide al otro que rehaga el enlace de voz entre ambos.
-    socket.on("voice-peer-reset", (data: { target?: string }) => {
-      if (!data?.target) return;
-      io.to(data.target).emit("voice-peer-reset", { caller: socket.id });
-    });
-
-    // Antes de perder las salas: avisar a las salas de voz para que nadie se quede con un enlace fantasma.
-    socket.on("disconnecting", () => {
-      for (const room of socket.rooms) {
-        if (room.endsWith("-voice")) {
-          socket.to(room).emit("user-left-voice", socket.id);
-        }
-      }
-    });
-
-    socket.on("disconnect", () => {
-      const groupId = (socket as any).groupId;
-      const uid = (socket as any).uid; // Assuming I can store uid too
-      if (groupId && uid) {
-        const disconnectKey = `${groupId}:${uid}`;
-        const existingTimer = pendingDisconnectTimers.get(disconnectKey);
-        if (existingTimer) {
-          clearTimeout(existingTimer);
-        }
-        const timer = setTimeout(() => {
-          pendingDisconnectTimers.delete(disconnectKey);
-          console.log(`User ${uid} timed out after disconnect in group: ${groupId}`);
-          socket.to(groupId).emit("user-left", { uid, reason: "disconnect-timeout" });
-        }, DISCONNECT_GRACE_MS);
-        pendingDisconnectTimers.set(disconnectKey, timer);
-      }
-      console.log("User disconnected:", socket.id);
-    });
   });
 
   // Ping ligero para despertar el servicio (Render free se duerme sin tráfico) y comprobarlo.
@@ -227,6 +189,7 @@ async function startServer() {
 
   httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`[seguridad] CORS: ${allowedOrigins.join(", ")}`);
   });
 }
 
