@@ -9,8 +9,8 @@
   "start_url": "/",
   "display": "standalone",
   "display_override": ["fullscreen", "standalone", "minimal-ui"],
-  "background_color": "#09090b",
-  "theme_color": "#09090b",
+  "background_color": "#F4EFE6",
+  "theme_color": "#F4EFE6",
   "prefer_related_applications": false,
   "categories": ["navigation", "lifestyle"],
   "icons": [

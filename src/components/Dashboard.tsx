@@ -64,6 +64,7 @@ import { WeeklyChallengeCard } from './WeeklyChallengeCard';
 import ScheduledRouteAttendees from './ScheduledRouteAttendees';
 import ScheduledRouteSoonOverlay from './ScheduledRouteSoonOverlay';
 import ScheduledRoutePlanChatModal from './ScheduledRoutePlanChatModal';
+import { Button, Eyebrow } from './ui';
 
 /** Leaflet solo se descarga al abrir la vista previa de una ruta (no en el arranque). */
 const RoutePreviewMap = lazy(() => import('./RoutePreviewMap'));
@@ -1135,7 +1136,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       className="flex w-full min-w-0 flex-col gap-0 py-0 text-center rounded-[1rem] sm:rounded-[1.15rem] focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/70 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
       aria-label={`Abrir perfil: nivel ${level} y experiencia hacia el nivel ${level + 1}`}
     >
-      <div className="relative flex flex-col gap-1 rounded-[1rem] sm:rounded-[1.15rem] border border-white/[0.07] bg-zinc-900/80 px-2 py-1.5 sm:px-2.5 sm:py-1.5 transition-colors hover:border-white/[0.14] hover:bg-zinc-900">
+      <div className="relative flex flex-col gap-1 rounded-[1rem] sm:rounded-[1.15rem] border border-mr-line bg-mr-paper px-2 py-1.5 sm:px-2.5 sm:py-1.5 transition-colors hover:border-mr-line-strong hover:bg-mr-paper">
         {isOffline && (
           <span
             className="absolute right-1.5 top-1.5 h-1.5 w-1.5 animate-pulse rounded-full bg-red-500 ring-1 ring-red-900/40"
@@ -1143,7 +1144,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           />
         )}
         <div className="flex min-h-0 w-full min-w-0 flex-nowrap items-center justify-start gap-1.5 text-left leading-none pl-0.5">
-          <span className="shrink-0 whitespace-nowrap rounded-md bg-orange-500/15 px-1.5 py-0.5 text-[11px] sm:text-[11px] font-black text-orange-400">
+          <span className="shrink-0 whitespace-nowrap rounded-md bg-mr-accent/15 px-1.5 py-0.5 text-[11px] sm:text-[11px] font-black text-mr-accent-text">
             Lv. {level}
           </span>
           {isPremiumUser && (
@@ -1151,7 +1152,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
               <PremiumBadge compact />
             </span>
           )}
-          <p className="min-w-0 flex-1 truncate text-left text-xs sm:text-sm font-bold text-white leading-tight">
+          <p className="min-w-0 flex-1 truncate text-left text-xs sm:text-sm font-bold text-mr-ink leading-tight">
             {displayName}
           </p>
         </div>
@@ -1160,7 +1161,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           aria-hidden
         >
           <div
-            className="h-full rounded-full bg-orange-500 transition-[width] duration-500 ease-out"
+            className="h-full rounded-full bg-mr-accent transition-[width] duration-500 ease-out"
             style={{ width: `${levelProgressPercent}%` }}
           />
         </div>
@@ -1173,7 +1174,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       <button
         type="button"
         onClick={() => setShowSupportModal(true)}
-        className="flex h-9 w-9 sm:h-10 sm:w-auto sm:min-w-0 items-center justify-center gap-1.5 sm:px-2.5 rounded-full bg-orange-500/15 border border-orange-500/30 text-orange-400 hover:bg-orange-500/25 transition-colors shrink-0"
+        className="flex h-9 w-9 sm:h-10 sm:w-auto sm:min-w-0 items-center justify-center gap-1.5 sm:px-2.5 rounded-full bg-mr-accent/15 border border-orange-500/30 text-mr-accent-text hover:bg-orange-500/25 transition-colors shrink-0"
         title="Apoyar MotoRide (Ko-fi)"
       >
         <HeartHandshake size={15} className="shrink-0 sm:w-4 sm:h-4" />
@@ -1182,12 +1183,12 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       <button
         type="button"
         onClick={() => setShowInvitesMailbox(true)}
-        className="relative flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center p-0 bg-zinc-900 border border-zinc-800 rounded-full hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-orange-400 shrink-0"
+        className="relative flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center p-0 bg-zinc-900 border border-zinc-800 rounded-full hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-mr-accent-text shrink-0"
         title="Bandeja: invitaciones y mensajes"
       >
         <Inbox size={18} className="sm:w-5 sm:h-5" />
         {inboxBadgeTotal > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-orange-500 text-[11px] font-black text-white flex items-center justify-center border-2 border-zinc-950">
+          <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-mr-accent text-[11px] font-black text-mr-on-accent flex items-center justify-center border-2 border-zinc-950">
             {inboxBadgeTotal > 9 ? '9+' : inboxBadgeTotal}
           </span>
         )}
@@ -1195,7 +1196,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       <button
         type="button"
         onClick={() => setShowFriendsModal(true)}
-        className="relative flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center p-0 bg-zinc-900 border border-zinc-800 rounded-full hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-white shrink-0"
+        className="relative flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center p-0 bg-zinc-900 border border-zinc-800 rounded-full hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-mr-ink shrink-0"
         aria-label={
           pendingFriendRequestCount > 0
             ? `Amigos, ${pendingFriendRequestCount} solicitud${pendingFriendRequestCount === 1 ? '' : 'es'} pendiente${pendingFriendRequestCount === 1 ? '' : 's'}`
@@ -1218,9 +1219,9 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   const reduceMotion = useReducedMotion();
 
   return (
-    <div className="min-h-dvh overflow-x-hidden bg-zinc-950 pb-[env(safe-area-inset-bottom,0px)] text-white">
+    <div className="min-h-dvh overflow-x-hidden bg-zinc-950 pb-[env(safe-area-inset-bottom,0px)] text-mr-ink">
       {/* Header — una fila: avatar | nivel/nombre/XP | acciones (como HUD compacto) */}
-      <header className="sticky top-0 z-30 border-b border-white/[0.06] bg-zinc-950/90 pl-[max(0.75rem,env(safe-area-inset-left,0px))] pr-[max(0.75rem,env(safe-area-inset-right,0px))] pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-2.5 backdrop-blur-xl sm:pb-3 sm:pl-[max(1.5rem,env(safe-area-inset-left,0px))] sm:pr-[max(1.5rem,env(safe-area-inset-right,0px))]">
+      <header className="sticky top-0 z-30 border-b border-mr-line bg-mr-page/90 pl-[max(0.75rem,env(safe-area-inset-left,0px))] pr-[max(0.75rem,env(safe-area-inset-right,0px))] pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-2.5 backdrop-blur-xl sm:pb-3 sm:pl-[max(1.5rem,env(safe-area-inset-left,0px))] sm:pr-[max(1.5rem,env(safe-area-inset-right,0px))]">
         <div className="max-w-5xl mx-auto flex flex-nowrap items-center gap-2 sm:gap-3 min-w-0">
           {renderHeaderAvatar()}
           <div className="flex-1 min-w-0">{renderHeaderProfileCard()}</div>
@@ -1238,47 +1239,52 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
 
         {/* Quick Actions — estética alineada con cabecera zinc + acento naranja */}
         <div className="grid grid-cols-1 gap-6">
-          <div className="mr-sheet relative overflow-hidden rounded-[var(--radius-hero)] p-6 sm:p-9">
-            <svg className="pointer-events-none absolute -right-4 bottom-0 hidden h-40 w-72 text-orange-500/25 sm:block sm:h-52 sm:w-96" viewBox="0 0 380 200" fill="none" aria-hidden>
+          <div className="mr-card relative overflow-hidden rounded-[var(--radius-hero)] p-6 sm:p-9">
+            <svg className="pointer-events-none absolute -right-4 bottom-0 hidden h-40 w-72 text-mr-accent sm:block sm:h-52 sm:w-96" viewBox="0 0 380 200" fill="none" aria-hidden>
               <path className="mr-route-line" d="M-10 170 C 70 170, 90 90, 170 110 S 280 40, 390 30" stroke="currentColor" strokeWidth="3" />
             </svg>
             <div className="relative z-10 max-w-xl pr-16 sm:pr-20">
-              <h2 className="mb-2 text-4xl uppercase leading-[0.95] text-zinc-50 sm:text-5xl">
+              <Eyebrow className="mb-2">Hola, {displayName}</Eyebrow>
+              <h2 className="mb-2 text-4xl uppercase leading-[0.95] text-mr-ink sm:text-5xl">
                 ¿Listo para rodar?
               </h2>
-              <p className="text-zinc-400 mb-6 text-sm sm:text-base leading-relaxed">
+              <p className="mb-6 text-sm leading-relaxed text-mr-muted sm:text-base">
                 Crea una ruta al momento o programa una con tus amigos. Elige cómo quieres empezar.
               </p>
               <div className="flex w-full flex-col gap-3 sm:max-w-xl sm:flex-row sm:flex-nowrap sm:items-stretch sm:gap-3">
-                <button
-                  type="button"
+                <Button
+                  variant="primary"
+                  size="lg"
+                  fullWidth
+                  className="sm:flex-1"
+                  icon={<Plus size={22} strokeWidth={2.5} />}
                   onClick={() => {
                     setLoading(false);
                     setShowCreateModal(true);
                   }}
-                  className="mr-focus min-h-[52px] w-full sm:flex-1 rounded-[var(--radius-control)] bg-orange-500 px-4 py-3.5 text-sm sm:text-base font-bold text-zinc-950 shadow-[var(--shadow-ember)] transition-colors duration-200 hover:bg-orange-400 active:scale-[0.99] flex items-center justify-center gap-2"
                 >
-                  <Plus size={22} strokeWidth={2.5} className="shrink-0" />
-                  <span>Crear ruta</span>
-                </button>
-                                <button
-                  type="button"
+                  Crear ruta
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="lg"
+                  fullWidth
+                  className="sm:flex-1"
                   onClick={() => setShowJoinCodeModal(true)}
-                  className="mr-focus min-h-[52px] w-full sm:flex-1 rounded-[var(--radius-control)] border border-white/[0.12] bg-white/[0.04] px-4 py-3.5 text-sm sm:text-base font-semibold text-zinc-100 transition-colors duration-200 hover:border-white/25 hover:bg-white/[0.07] active:scale-[0.99]"
                 >
                   Unirse con código
-                </button>
+                </Button>
               </div>
             </div>
-                      </div>
+          </div>
         </div>
 
         {/* Search & Discovery */}
-        <section className="mr-surface rounded-[var(--radius-sheet)] p-5 sm:p-6">
+        <section className="mr-card rounded-[var(--radius-sheet)] p-5 sm:p-6">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
             <div>
               <h2 className="text-3xl uppercase flex items-center gap-2 text-zinc-50">
-                <Search className="text-orange-500" size={20} />
+                <Search className="text-mr-accent-text" size={20} />
                 Explorar rutas planificadas
               </h2>
               <p className="text-[11px] text-zinc-500 mt-1 max-w-xl">
@@ -1286,7 +1292,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                 <span className="text-zinc-400">1 h antes</span> de la hora.
               </p>
               {exploreFromGpsHint && (
-                <p className="text-[11px] text-emerald-500/90 mt-1 flex items-center gap-1">
+                <p className="text-[11px] text-emerald-700/90 mt-1 flex items-center gap-1">
                   <MapPin size={10} /> Provincia sugerida desde tu ubicación (puedes cambiarla).
                 </p>
               )}
@@ -1314,11 +1320,11 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                 <div key={route.id} className="mr-ticket bg-zinc-900 border border-zinc-800 p-4 rounded-2xl hover:border-orange-500/50 transition-all group">
                   <div className="flex justify-between items-start mb-3 gap-2 flex-wrap">
                     <div className="flex flex-wrap gap-1.5">
-                      <div className="bg-orange-500/10 text-orange-500 text-[11px] font-bold px-2 py-1 rounded-full uppercase">
+                      <div className="bg-mr-accent/10 text-mr-accent-text text-[11px] font-bold px-2 py-1 rounded-full uppercase">
                         {route.isEsporadica ? 'Espontánea' : 'GPX'}
                       </div>
                       {route.routeListing === 'friends_only' && (
-                        <div className="bg-blue-500/15 text-blue-400 text-[11px] font-bold px-2 py-1 rounded-full uppercase flex items-center gap-1">
+                        <div className="bg-blue-500/15 text-blue-800 text-[11px] font-bold px-2 py-1 rounded-full uppercase flex items-center gap-1">
                           <HeartHandshake size={10} /> Solo amigos
                         </div>
                       )}
@@ -1334,7 +1340,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                     </div>
                   </div>
                   </div>
-                  <h3 className="font-bold mb-1 group-hover:text-orange-500 transition-colors">{route.name}</h3>
+                  <h3 className="font-bold mb-1 group-hover:text-mr-accent-text transition-colors">{route.name}</h3>
                   {route.description && (
                     <p className="text-[11px] text-zinc-400 mb-2 line-clamp-2 italic">"{route.description}"</p>
                   )}
@@ -1347,7 +1353,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                       {route.routeGeoJSON && (
                         <button 
                           onClick={() => setShowPreviewModal(route)}
-                          className="flex-1 py-2 bg-zinc-800 hover:bg-zinc-700 text-white text-sm font-bold rounded-xl transition-all flex items-center justify-center gap-2"
+                          className="flex-1 py-2 bg-zinc-800 hover:bg-zinc-700 text-mr-ink text-sm font-bold rounded-xl transition-all flex items-center justify-center gap-2"
                         >
                           <MapIcon size={14} /> Vista Previa
                         </button>
@@ -1366,7 +1372,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                             }}
                             disabled={!canEnterSession && isJoined && isCreator}
                             title={!canEnterSession && isJoined && isCreator ? 'Como organizador, borra la ruta si no quieres participar' : undefined}
-                            className={`flex-1 py-2 text-white text-sm font-bold rounded-xl transition-all ${canEnterSession ? 'bg-orange-500 hover:bg-orange-600' : (isJoined && isCreator) ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-70' : (isJoined ? 'bg-red-500/20 text-red-500 hover:bg-red-500/30' : 'bg-blue-500 hover:bg-blue-600')}`}
+                            className={`flex-1 py-2 text-mr-on-accent text-sm font-bold rounded-xl transition-all ${canEnterSession ? 'bg-mr-accent hover:bg-mr-accent-hover' : (isJoined && isCreator) ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-70' : (isJoined ? 'bg-red-500/20 text-red-700 hover:bg-red-500/30' : 'bg-blue-500 hover:bg-blue-600')}`}
                           >
                             {canEnterSession ? 'Entrar a la ruta' : (isJoined && isCreator) ? 'Organizador' : (isJoined ? 'Desapuntarse' : 'Apuntarse')}
                           </button>
@@ -1377,7 +1383,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                       <button
                         type="button"
                         onClick={() => setPlanChatRoute({ id: route.id, name: String(route.name || 'Ruta') })}
-                        className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 py-2 text-xs font-bold text-emerald-200 transition-colors hover:bg-emerald-500/20"
+                        className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 py-2 text-xs font-bold text-emerald-800 transition-colors hover:bg-emerald-500/20"
                       >
                         <MessageCircle size={14} className="shrink-0" />
                         Chat planificación
@@ -1388,7 +1394,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                       onClick={() => bumpAttendeesList(route.members)}
                       className="mt-4 w-full py-2 rounded-xl border border-zinc-600/60 bg-zinc-800/50 text-zinc-100 text-xs font-bold flex items-center justify-center gap-2 hover:bg-zinc-800 hover:border-zinc-500 transition-colors"
                     >
-                      <ListOrdered size={14} className="text-orange-400 shrink-0" />
+                      <ListOrdered size={14} className="text-mr-accent-text shrink-0" />
                       Ver lista de apuntados
                     </button>
                 </div>
@@ -1396,7 +1402,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
             </div>
           ) : (
             <div className="text-center py-12 border-2 border-dashed border-zinc-800 rounded-2xl">
-              <MapIcon className="mx-auto text-zinc-700 mb-2" size={32} />
+              <MapIcon className="mx-auto text-mr-subtle mb-2" size={32} />
               <p className="text-zinc-500 text-sm">
                 {searchProvince ? 'No hay rutas programadas en esta zona. Prueba otra localidad o limpia el filtro.' : 'Elige una provincia para ver las rutas planificadas.'}
               </p>
@@ -1405,9 +1411,9 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
         </section>
 
         {/* Rutas planificadas por tus amigos (encima de Mis próximas rutas) */}
-        <section className="mr-surface rounded-[var(--radius-sheet)] p-5 sm:p-6 max-w-xl mx-auto w-full">
+        <section className="mr-card rounded-[var(--radius-sheet)] p-5 sm:p-6 max-w-xl mx-auto w-full">
           <h2 className="text-3xl uppercase flex items-center gap-2 mb-4 text-zinc-50">
-            <Users className="text-sky-brand-400" size={20} />
+            <Users className="text-sky-800" size={20} />
             Rutas de amigos
           </h2>
           <p className="text-[11px] text-zinc-500 mb-4 leading-relaxed">
@@ -1426,7 +1432,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                     className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex flex-col gap-3"
                   >
                     <div className="flex justify-between items-start gap-2 flex-wrap">
-                      <p className="font-bold text-white truncate min-w-0">{route.name}</p>
+                      <p className="font-bold text-mr-ink truncate min-w-0">{route.name}</p>
                       <div className="text-zinc-500 text-[11px] flex items-center gap-2 shrink-0">
                         <span className="flex items-center gap-0.5">
                           <Users size={10} />
@@ -1453,7 +1459,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                         <button
                           type="button"
                           onClick={() => setShowPreviewModal(route)}
-                          className="flex-1 py-2 bg-zinc-800 hover:bg-zinc-700 text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5"
+                          className="flex-1 py-2 bg-zinc-800 hover:bg-zinc-700 text-mr-ink text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5"
                         >
                           <MapIcon size={12} /> Vista Previa
                         </button>
@@ -1471,13 +1477,13 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                             ? 'Como organizador, borra la ruta si no quieres participar'
                             : undefined
                         }
-                        className={`flex-1 py-2 text-white text-xs font-bold rounded-xl transition-all ${
+                        className={`flex-1 py-2 text-mr-ink text-xs font-bold rounded-xl transition-all ${
                           canEnterSession
-                            ? 'bg-orange-500 hover:bg-orange-600'
+                            ? 'bg-mr-accent hover:bg-mr-accent-hover'
                             : isJoined && isCreator
                               ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-70'
                               : isJoined
-                                ? 'bg-red-500/20 text-red-500 hover:bg-red-500/30'
+                                ? 'bg-red-500/20 text-red-700 hover:bg-red-500/30'
                                 : 'bg-blue-500 hover:bg-blue-600'
                         }`}
                       >
@@ -1494,7 +1500,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                       <button
                         type="button"
                         onClick={() => setPlanChatRoute({ id: route.id, name: String(route.name || 'Ruta') })}
-                        className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 py-2 text-xs font-bold text-emerald-200 transition-colors hover:bg-emerald-500/20"
+                        className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 py-2 text-xs font-bold text-emerald-800 transition-colors hover:bg-emerald-500/20"
                       >
                         <MessageCircle size={14} className="shrink-0" />
                         Chat planificación
@@ -1505,7 +1511,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                       onClick={() => bumpAttendeesList(route.members)}
                       className="mt-3 w-full py-2 rounded-xl border border-zinc-600/60 bg-zinc-800/50 text-zinc-100 text-xs font-bold flex items-center justify-center gap-2 hover:bg-zinc-800 hover:border-zinc-500 transition-colors"
                     >
-                      <ListOrdered size={14} className="text-orange-400 shrink-0" />
+                      <ListOrdered size={14} className="text-mr-accent-text shrink-0" />
                       Ver lista de apuntados
                     </button>
                   </div>
@@ -1521,7 +1527,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
 
         <div className="max-w-xl mx-auto w-full space-y-4">
             <h3 className="text-2xl uppercase flex items-center gap-2 text-zinc-50">
-              <Calendar className="text-sky-brand-400" size={18} />
+              <Calendar className="text-sky-800" size={18} />
               Mis próximas rutas
             </h3>
             <div className="space-y-3">
@@ -1536,12 +1542,12 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                           <div className="flex flex-wrap items-center gap-1.5 pr-2">
                             <p className="font-bold text-sm truncate">{route.name}</p>
                             {route.routeListing === 'friends_only' && (
-                              <span className="shrink-0 text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400">
+                              <span className="shrink-0 text-[11px] font-bold uppercase px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-800">
                                 Solo amigos
                               </span>
                             )}
                             {route.routeListing === 'unlisted' && (
-                              <span className="shrink-0 text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-zinc-700 text-zinc-300 flex items-center gap-0.5">
+                              <span className="shrink-0 text-[11px] font-bold uppercase px-1.5 py-0.5 rounded bg-zinc-700 text-zinc-300 flex items-center gap-0.5">
                                 <Lock size={9} /> Privada
                               </span>
                             )}
@@ -1569,7 +1575,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                                   </button>
                                   <button 
                                     onClick={(e) => { e.stopPropagation(); setDeletingId(null); }}
-                                    className="bg-zinc-800 text-zinc-400 text-[11px] px-3 py-1.5 rounded-md hover:text-white transition-colors"
+                                    className="bg-zinc-800 text-zinc-400 text-[11px] px-3 py-1.5 rounded-md hover:text-mr-ink transition-colors"
                                   >
                                     Cancelar
                                   </button>
@@ -1578,7 +1584,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                                 <button
                                   type="button"
                                   onClick={(e) => deleteScheduledRoute(e, route.id)}
-                                  className="inline-flex min-h-[36px] shrink-0 items-center gap-1 rounded-lg border border-red-500/35 bg-red-500/10 px-2.5 text-[11px] font-bold text-red-400 transition-colors hover:bg-red-500/20"
+                                  className="inline-flex min-h-[36px] shrink-0 items-center gap-1 rounded-lg border border-red-500/35 bg-red-500/10 px-2.5 text-[11px] font-bold text-red-700 transition-colors hover:bg-red-500/20"
                                   title="Borrar ruta programada"
                                   aria-label={`Borrar la ruta ${String(route.name || '')}`}
                                 >
@@ -1598,7 +1604,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                           <button
                             type="button"
                             onClick={() => setShowPreviewModal(route)}
-                            className="flex min-w-[calc(50%-0.25rem)] flex-1 items-center justify-center gap-1 rounded-lg bg-zinc-800 py-1.5 text-[11px] font-bold text-white transition-all hover:bg-zinc-700"
+                            className="flex min-w-[calc(50%-0.25rem)] flex-1 items-center justify-center gap-1 rounded-lg bg-zinc-800 py-1.5 text-[11px] font-bold text-mr-ink transition-all hover:bg-zinc-700"
                           >
                             <MapIcon size={12} /> Vista Previa
                           </button>
@@ -1607,7 +1613,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                           <button
                             type="button"
                             onClick={() => void joinGroup(route.code)}
-                            className="flex min-w-[calc(50%-0.25rem)] flex-1 items-center justify-center gap-1 rounded-lg bg-orange-500 py-1.5 text-[11px] font-bold text-white transition-all hover:bg-orange-600"
+                            className="flex min-w-[calc(50%-0.25rem)] flex-1 items-center justify-center gap-1 rounded-lg bg-mr-accent py-1.5 text-[11px] font-bold text-mr-on-accent transition-all hover:bg-mr-accent-hover"
                           >
                             <ChevronRight size={12} />
                             Entrar a la ruta
@@ -1617,7 +1623,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                           <button
                             type="button"
                             onClick={() => openScheduledInvite(route)}
-                            className="flex min-w-[calc(50%-0.25rem)] flex-1 items-center justify-center gap-1 rounded-lg border border-orange-500/35 bg-orange-500/10 py-1.5 text-[11px] font-bold text-orange-200 hover:bg-orange-500/20"
+                            className="flex min-w-[calc(50%-0.25rem)] flex-1 items-center justify-center gap-1 rounded-lg border border-orange-500/35 bg-mr-accent/10 py-1.5 text-[11px] font-bold text-mr-accent-text hover:bg-orange-500/20"
                           >
                             <UserPlus size={12} />
                             Invitar
@@ -1626,7 +1632,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                         <button
                           type="button"
                           onClick={() => setPlanChatRoute({ id: route.id, name: String(route.name || 'Ruta') })}
-                          className="flex min-w-[calc(50%-0.25rem)] flex-1 items-center justify-center gap-1 rounded-lg border border-emerald-500/35 bg-emerald-500/10 py-1.5 text-[11px] font-bold text-emerald-200 hover:bg-emerald-500/20"
+                          className="flex min-w-[calc(50%-0.25rem)] flex-1 items-center justify-center gap-1 rounded-lg border border-emerald-500/35 bg-emerald-500/10 py-1.5 text-[11px] font-bold text-emerald-800 hover:bg-emerald-500/20"
                         >
                           <MessageCircle size={12} />
                           Chat
@@ -1635,7 +1641,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                           <button
                             type="button"
                             onClick={() => toggleRSVP(route.code, true)}
-                            className="flex min-w-[calc(50%-0.25rem)] flex-1 items-center justify-center gap-1 rounded-lg bg-red-500/10 py-1.5 text-[11px] font-bold text-red-500 transition-all hover:bg-red-500/20"
+                            className="flex min-w-[calc(50%-0.25rem)] flex-1 items-center justify-center gap-1 rounded-lg bg-red-500/10 py-1.5 text-[11px] font-bold text-red-700 transition-all hover:bg-red-500/20"
                           >
                             <X size={12} />
                             Desapuntarse
@@ -1652,7 +1658,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                         onClick={() => bumpAttendeesList(route.members)}
                         className="mt-3 w-full py-2 rounded-xl border border-zinc-600/60 bg-zinc-800/50 text-zinc-100 text-[11px] font-bold flex items-center justify-center gap-1.5 hover:bg-zinc-800 hover:border-zinc-500 transition-colors"
                       >
-                        <ListOrdered size={12} className="text-orange-400 shrink-0" />
+                        <ListOrdered size={12} className="text-mr-accent-text shrink-0" />
                         Ver lista de apuntados
                       </button>
                     </div>
@@ -1751,7 +1757,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       {/* Nivel de curvas antes de generar la ruta */}
       {curveLevelPickerOpen && (
         <div
-          className="fixed inset-0 z-[90] flex items-end sm:items-center justify-center p-4 bg-black/75 backdrop-blur-md"
+          className="fixed inset-0 z-[90] flex items-end sm:items-center justify-center p-4 bg-[#14110e73] backdrop-blur-md"
           role="dialog"
           aria-modal="true"
           aria-labelledby="curve-level-title"
@@ -1762,7 +1768,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
             onClick={(e) => e.stopPropagation()}
           >
             <p className="mr-eyebrow">Ruta revirada</p>
-            <h2 id="curve-level-title" className="font-display text-2xl font-black text-white tracking-tight mt-1">
+            <h2 id="curve-level-title" className="font-display text-2xl font-black text-mr-ink tracking-tight mt-1">
               ¿Cuántas curvas quieres?
             </h2>
             <p className="text-xs text-zinc-400 leading-relaxed mt-2">
@@ -1782,12 +1788,12 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                     className="mr-focus w-full text-left px-4 py-3 rounded-2xl border border-zinc-700 bg-zinc-950/60 hover:border-orange-500/60 hover:bg-orange-500/5 transition-all flex items-center justify-between gap-3"
                   >
                     <span className="min-w-0">
-                      <span className="block font-display text-lg font-black text-white uppercase tracking-wide">{cfg.label}</span>
+                      <span className="block font-display text-lg font-black text-mr-ink uppercase tracking-wide">{cfg.label}</span>
                       <span className="block text-xs text-zinc-400 leading-snug">{cfg.description}</span>
                     </span>
-                    <span className="shrink-0 text-[11px] font-bold text-orange-400 tabular-nums text-right">
+                    <span className="shrink-0 text-[11px] font-bold text-mr-accent-text tabular-nums text-right">
                       hasta +{Math.round(cfg.maxDetour * 100)} %
-                      <span className="block text-[10px] font-semibold text-zinc-500">de distancia</span>
+                      <span className="block text-[11px] font-semibold text-zinc-500">de distancia</span>
                     </span>
                   </button>
                 );
@@ -1796,7 +1802,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
             <button
               type="button"
               onClick={() => setCurveLevelPickerOpen(false)}
-              className="w-full mt-3 py-2.5 text-xs font-bold text-zinc-400 hover:text-white transition-colors"
+              className="w-full mt-3 py-2.5 text-xs font-bold text-zinc-400 hover:text-mr-ink transition-colors"
             >
               Cancelar
             </button>
@@ -1807,7 +1813,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       {/* Resultado generar ruta (sustituye alert nativo) */}
       {routeGenFeedback && (
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/75 backdrop-blur-md"
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-[#14110e73] backdrop-blur-md"
           role="dialog"
           aria-modal="true"
           aria-labelledby="route-gen-feedback-title"
@@ -1825,13 +1831,13 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
               <div className="flex justify-center mb-4">
                 <div
                   className={`w-16 h-16 rounded-2xl flex items-center justify-center ${
-                    routeGenFeedback.kind === 'success' ? 'bg-orange-500/20 text-orange-400' : 'bg-red-500/20 text-red-400'
+                    routeGenFeedback.kind === 'success' ? 'bg-mr-accent/20 text-mr-accent-text' : 'bg-red-500/20 text-red-700'
                   }`}
                 >
                   {routeGenFeedback.kind === 'success' ? <CheckCircle2 size={36} strokeWidth={2} /> : <AlertCircle size={36} strokeWidth={2} />}
                 </div>
               </div>
-              <h2 id="route-gen-feedback-title" className="text-center text-xl font-black text-white tracking-tight">
+              <h2 id="route-gen-feedback-title" className="text-center text-xl font-black text-mr-ink tracking-tight">
                 {routeGenFeedback.title}
               </h2>
               {routeGenFeedback.detail && (
@@ -1861,8 +1867,8 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                 onClick={() => setRouteGenFeedback(null)}
                 className={`w-full py-3.5 rounded-2xl text-sm font-black transition-all ${
                   routeGenFeedback.kind === 'success'
-                    ? 'bg-orange-500 hover:bg-orange-400 text-zinc-950 shadow-lg shadow-orange-500/25'
-                    : 'bg-zinc-800 hover:bg-zinc-700 text-white border border-zinc-700'
+                    ? 'bg-mr-accent hover:bg-mr-accent-hover text-mr-on-accent shadow-lg shadow-orange-500/25'
+                    : 'bg-zinc-800 hover:bg-zinc-700 text-mr-ink border border-zinc-700'
                 }`}
               >
                 Entendido
@@ -1875,7 +1881,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       {/* Support Modal */}
       {showSupportModal && (
         <div
-          className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+          className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-[#14110e80] backdrop-blur-sm"
           onClick={closeSupportModal}
         >
           <div
@@ -1883,8 +1889,8 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
             onClick={(e) => e.stopPropagation()}
           >
             <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                <HeartHandshake size={20} className="text-orange-400" />
+              <h2 className="text-xl font-bold text-mr-ink flex items-center gap-2">
+                <HeartHandshake size={20} className="text-mr-accent-text" />
                 Apoyar MotoRide
               </h2>
               <button onClick={closeSupportModal} className="p-2 hover:bg-zinc-800 rounded-full transition-colors text-zinc-400">
@@ -1904,11 +1910,11 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                 }}
                 className="w-full bg-zinc-950 border border-zinc-800 hover:border-emerald-500/40 rounded-2xl p-4 flex items-center gap-3 transition-all text-left"
               >
-                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-700 flex items-center justify-center shrink-0">
                   <CircleDollarSign size={18} />
                 </div>
                 <div>
-                  <p className="text-sm font-bold text-white">Donar (Ko-fi)</p>
+                  <p className="text-sm font-bold text-mr-ink">Donar (Ko-fi)</p>
                   <p className="text-[11px] text-zinc-500">Aporte voluntario · chat de voz Premium tras activación manual.</p>
                 </div>
               </button>
@@ -1925,7 +1931,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                     <Mail size={18} />
                   </div>
                   <div className="min-w-0">
-                    <p className="text-sm font-bold text-white">Contacto por correo</p>
+                    <p className="text-sm font-bold text-mr-ink">Contacto por correo</p>
                     <p className="text-[11px] text-zinc-500 mt-0.5">
                       Se abrirá tu app de correo con un texto breve; puedes cambiarlo o borrarlo y enviar cuando quieras.
                     </p>
@@ -1952,7 +1958,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
             <div className="p-5 border-b border-zinc-800 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2 min-w-0">
                 <Users className="text-blue-500 shrink-0" size={22} />
-                <h2 id="join-code-modal-title" className="text-lg font-bold text-white truncate">
+                <h2 id="join-code-modal-title" className="text-lg font-bold text-mr-ink truncate">
                   Unirse con código
                 </h2>
               </div>
@@ -1973,7 +1979,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                   value={joinCode}
                   onChange={(e) => setJoinCode(e.target.value)}
                   autoFocus
-                  className="w-full h-14 bg-zinc-950 border border-zinc-800 rounded-2xl px-6 text-white uppercase tracking-[0.3em] font-mono text-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all placeholder:tracking-normal placeholder:font-sans placeholder:text-zinc-600 placeholder:text-sm"
+                  className="w-full h-14 bg-zinc-950 border border-zinc-800 rounded-2xl px-6 text-mr-ink uppercase tracking-[0.3em] font-mono text-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all placeholder:tracking-normal placeholder:font-sans placeholder:text-zinc-600 placeholder:text-sm"
                   maxLength={6}
                 />
               </div>
@@ -2020,9 +2026,9 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                       clearGpxRouteState();
                       clearPlannerSearchState();
                     }}
-                    className={`p-4 rounded-2xl border-2 transition-all text-left ${isEsporadica ? 'border-orange-500 bg-orange-500/5' : 'border-zinc-800 bg-zinc-950 text-zinc-500'}`}
+                    className={`p-4 rounded-2xl border-2 transition-all text-left ${isEsporadica ? 'border-orange-500 bg-mr-accent/5' : 'border-zinc-800 bg-zinc-950 text-zinc-500'}`}
                   >
-                    <Activity size={20} className={isEsporadica ? 'text-orange-500 mb-2' : 'mb-2'} />
+                    <Activity size={20} className={isEsporadica ? 'text-mr-accent-text mb-2' : 'mb-2'} />
                     <p className="font-bold text-sm">Espontánea</p>
                     <p className="text-[11px] opacity-60">Sin trazado fijo</p>
                   </button>
@@ -2041,7 +2047,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                 {!isEsporadica && (
                   <div className="flex items-center justify-between p-4 bg-zinc-950 border border-zinc-800 rounded-2xl">
                     <div className="flex items-center gap-3">
-                      <div className={`p-2 rounded-lg ${routeType === 'scheduled' ? 'bg-blue-500/20 text-blue-400' : 'bg-zinc-800 text-zinc-500'}`}>
+                      <div className={`p-2 rounded-lg ${routeType === 'scheduled' ? 'bg-blue-500/20 text-blue-800' : 'bg-zinc-800 text-zinc-500'}`}>
                         <Clock size={18} />
                       </div>
                       <div>
@@ -2086,7 +2092,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                       <div className="p-5 bg-zinc-950 border border-emerald-500/35 rounded-2xl space-y-4">
                         <div className="flex items-start justify-between gap-3">
                           <div>
-                            <p className="text-xs font-bold uppercase tracking-wider text-emerald-400/90">Ruta desde GPX</p>
+                            <p className="text-xs font-bold uppercase tracking-wider text-emerald-700/90">Ruta desde GPX</p>
                             <p className="text-[11px] text-zinc-500 mt-1">Listo para guardar. Puedes ver el mapa abajo.</p>
                           </div>
                           <button
@@ -2095,7 +2101,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                               clearGpxRouteState();
                               clearPlannerSearchState();
                             }}
-                            className="shrink-0 text-xs font-bold text-zinc-400 hover:text-white px-3 py-1.5 rounded-lg bg-zinc-800/80 border border-zinc-700"
+                            className="shrink-0 text-xs font-bold text-zinc-400 hover:text-mr-ink px-3 py-1.5 rounded-lg bg-zinc-800/80 border border-zinc-700"
                           >
                             Usar búsqueda
                           </button>
@@ -2103,11 +2109,11 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                         <div className="grid grid-cols-2 gap-2">
                           <div className="bg-zinc-900/90 p-3 rounded-xl border border-zinc-800">
                             <p className="text-[11px] text-zinc-500 uppercase font-bold">Distancia</p>
-                            <p className="text-lg font-black text-white tabular-nums">{routeStats.distance.toFixed(1)} km</p>
+                            <p className="text-lg font-black text-mr-ink tabular-nums">{routeStats.distance.toFixed(1)} km</p>
                           </div>
                           <div className="bg-zinc-900/90 p-3 rounded-xl border border-zinc-800">
                             <p className="text-[11px] text-zinc-500 uppercase font-bold">Tiempo est.</p>
-                            <p className="text-lg font-black text-white">{formatDurationHoursMinutes(routeStats.duration)}</p>
+                            <p className="text-lg font-black text-mr-ink">{formatDurationHoursMinutes(routeStats.duration)}</p>
                           </div>
                         </div>
                         <button
@@ -2125,14 +2131,14 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                                   : Date.now(),
                             })
                           }
-                          className="w-full py-3 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2"
+                          className="w-full py-3 bg-zinc-800 hover:bg-zinc-700 text-mr-ink rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2"
                         >
                           <MapIcon size={18} /> Ver en el mapa
                         </button>
                       </div>
                     ) : (
                       <div className="p-5 bg-zinc-950 border border-blue-500/30 rounded-2xl space-y-4 shadow-lg shadow-blue-500/5">
-                        <div className="flex items-center gap-2 text-blue-400">
+                        <div className="flex items-center gap-2 text-blue-800">
                           <Search size={16} />
                           <p className="text-xs font-bold uppercase tracking-wider">Buscar destino</p>
                         </div>
@@ -2192,7 +2198,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                                   onClick={() => applyDestinationSuggestion(item)}
                                   className={`w-full text-left px-3 py-2.5 text-xs transition-colors border-b border-zinc-800/80 last:border-b-0 ${
                                     idx === destinationHighlightIdx
-                                      ? 'bg-blue-500/20 text-white ring-inset ring-1 ring-blue-500/40'
+                                      ? 'bg-blue-500/20 text-mr-ink ring-inset ring-1 ring-blue-500/40'
                                       : 'text-zinc-300 hover:bg-zinc-800'
                                   }`}
                                 >
@@ -2221,7 +2227,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                               <button
                                 type="button"
                                 onClick={() => clearPlannerSearchState()}
-                                className="shrink-0 text-[11px] font-bold text-zinc-400 hover:text-white px-2 py-1 rounded-lg bg-zinc-800/80 border border-zinc-700"
+                                className="shrink-0 text-[11px] font-bold text-zinc-400 hover:text-mr-ink px-2 py-1 rounded-lg bg-zinc-800/80 border border-zinc-700"
                               >
                                 Quitar
                               </button>
@@ -2251,7 +2257,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                           <div className="flex flex-col gap-3 animate-in fade-in slide-in-from-top-2 pt-1 border-t border-zinc-800/80">
                             {routeCurveSummary && (
                               <p className="text-[11px] text-zinc-400 leading-snug">
-                                <span className="font-bold text-orange-400 uppercase tracking-wider">
+                                <span className="font-bold text-mr-accent-text uppercase tracking-wider">
                                   Curvas {CURVE_LEVELS[routeCurveSummary.level].label.toLowerCase()}
                                 </span>
                                 {' · '}
@@ -2265,11 +2271,11 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                             <div className="grid grid-cols-2 gap-2">
                               <div className="bg-zinc-900 p-3 rounded-xl border border-zinc-800">
                                 <p className="text-[11px] text-zinc-500 uppercase font-bold">Distancia</p>
-                                <p className="text-lg font-black text-white">{routeStats.distance.toFixed(1)} km</p>
+                                <p className="text-lg font-black text-mr-ink">{routeStats.distance.toFixed(1)} km</p>
                               </div>
                               <div className="bg-zinc-900 p-3 rounded-xl border border-zinc-800">
                                 <p className="text-[11px] text-zinc-500 uppercase font-bold">Duración</p>
-                                <p className="text-lg font-black text-white">{formatDurationHoursMinutes(routeStats.duration)}</p>
+                                <p className="text-lg font-black text-mr-ink">{formatDurationHoursMinutes(routeStats.duration)}</p>
                               </div>
                             </div>
                             <button
@@ -2287,7 +2293,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                                       : Date.now(),
                                 })
                               }
-                              className="w-full py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2"
+                              className="w-full py-2.5 bg-zinc-800 hover:bg-zinc-700 text-mr-ink rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2"
                             >
                               <Search size={14} /> Ver en el mapa
                             </button>
@@ -2350,7 +2356,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                 {routeType === 'scheduled' && (
                   <div className="p-4 rounded-2xl border border-zinc-800 bg-zinc-950/90 space-y-3">
                     <div className="flex items-center gap-2 text-zinc-400">
-                      <Shield size={16} className="text-blue-400 shrink-0" />
+                      <Shield size={16} className="text-blue-800 shrink-0" />
                       <span className="text-xs font-bold uppercase tracking-wider">Privacidad</span>
                     </div>
                     <p className="text-[11px] text-zinc-500 leading-relaxed">
@@ -2368,16 +2374,16 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                             onClick={() => setRouteListing(key)}
                             className={`flex items-start gap-3 p-3 rounded-xl border text-left transition-all ${
                               active
-                                ? 'border-orange-500/60 bg-orange-500/10 ring-1 ring-orange-500/30'
+                                ? 'border-orange-500/60 bg-mr-accent/10 ring-1 ring-orange-500/30'
                                 : 'border-zinc-800 bg-zinc-900/50 hover:border-zinc-700'
                             }`}
                           >
                             <Icon
                               size={18}
-                              className={`shrink-0 mt-0.5 ${active ? 'text-orange-400' : 'text-zinc-500'}`}
+                              className={`shrink-0 mt-0.5 ${active ? 'text-mr-accent-text' : 'text-zinc-500'}`}
                             />
                             <span className="min-w-0">
-                              <span className="block text-sm font-bold text-white">{meta.title}</span>
+                              <span className="block text-sm font-bold text-mr-ink">{meta.title}</span>
                               <span className="block text-[11px] text-zinc-500 mt-0.5 leading-snug">{meta.description}</span>
                             </span>
                           </button>
@@ -2393,7 +2399,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
               <button 
                 onClick={createRoute}
                 disabled={loading || (!isEsporadica && !routeName) || (routeType === 'scheduled' && (!scheduledDate || !scheduledTime))}
-                className="w-full bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white py-4 rounded-2xl font-bold shadow-lg shadow-orange-500/20 transition-all active:scale-95"
+                className="w-full bg-mr-accent hover:bg-mr-accent-hover disabled:opacity-50 text-mr-on-accent py-4 rounded-2xl font-bold shadow-lg shadow-orange-500/20 transition-all active:scale-95"
               >
                 {loading ? 'Creando...' : routeType === 'instant' ? (isEsporadica ? 'Iniciar Ahora' : 'Iniciar Ruta') : 'Programar Ruta'}
               </button>
@@ -2412,15 +2418,15 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
             onClick={(e) => e.stopPropagation()}
           >
             <div className="p-6 border-b border-zinc-800">
-              <h2 className="text-xl font-black text-white flex items-center gap-2">
-                <Users className="text-orange-500" size={22} />
+              <h2 className="text-xl font-black text-mr-ink flex items-center gap-2">
+                <Users className="text-mr-accent-text" size={22} />
                 Invita a tu ruta
               </h2>
               <p className="text-sm text-zinc-400 mt-2">
-                Ruta programada: <span className="text-white font-semibold">{postScheduleInvite.name}</span>
+                Ruta programada: <span className="text-mr-ink font-semibold">{postScheduleInvite.name}</span>
               </p>
               {formatScheduledRideDayOnlyEs(postScheduleInvite.scheduledTimestamp) ? (
-                <p className="text-xs text-orange-400/90 mt-1.5 font-semibold">
+                <p className="text-xs text-mr-accent-text/90 mt-1.5 font-semibold">
                   Día de la salida: {formatScheduledRideDayOnlyEs(postScheduleInvite.scheduledTimestamp)}
                 </p>
               ) : null}
@@ -2443,7 +2449,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
             <div className="p-6 space-y-4">
               <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 text-center">
                 <p className="text-[11px] font-black uppercase tracking-widest text-zinc-500 mb-1">Código</p>
-                <p className="text-3xl font-black text-orange-500 tracking-wider">{postScheduleInvite.code}</p>
+                <p className="text-3xl font-black text-mr-accent-text tracking-wider">{postScheduleInvite.code}</p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <button
@@ -2457,7 +2463,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                       window.prompt('Copia el código:', postScheduleInvite.code);
                     }
                   }}
-                  className="flex items-center justify-center gap-2 py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white font-bold text-sm"
+                  className="flex items-center justify-center gap-2 py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-mr-ink font-bold text-sm"
                 >
                   {scheduleInviteCopied === 'code' ? <Check size={18} className="text-green-500" /> : <Copy size={18} />}
                   Copiar código
@@ -2479,7 +2485,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                       window.prompt('Copia el mensaje y el enlace:', clipboardText);
                     }
                   }}
-                  className="flex items-center justify-center gap-2 py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white font-bold text-sm"
+                  className="flex items-center justify-center gap-2 py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-mr-ink font-bold text-sm"
                 >
                   {scheduleInviteCopied === 'link' ? <Check size={18} className="text-green-500" /> : <Copy size={18} />}
                   Copiar enlace
@@ -2506,7 +2512,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                       if (err?.name !== 'AbortError') console.error(e);
                     }
                   }}
-                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-sm"
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-mr-accent hover:bg-mr-accent-hover text-mr-on-accent font-bold text-sm"
                 >
                   <Share2 size={18} />
                   Compartir…
@@ -2536,7 +2542,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           >
             <div className="p-4 border-b border-zinc-800 flex items-center justify-between bg-zinc-900">
               <div>
-                <h2 className="text-lg font-bold text-orange-500">{showPreviewModal.name}</h2>
+                <h2 className="text-lg font-bold text-mr-accent-text">{showPreviewModal.name}</h2>
                 <p className="text-xs text-zinc-500 capitalize">{showPreviewModal.municipality}, {showPreviewModal.province}</p>
               </div>
               <button onClick={() => setShowPreviewModal(null)} className="p-2 hover:bg-zinc-800 rounded-full transition-colors">
@@ -2556,8 +2562,8 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
               
               <div className="absolute bottom-4 left-4 right-4 bg-zinc-900/90 backdrop-blur-md p-4 rounded-2xl border border-zinc-800 shadow-xl z-[1000]">
                 <p className="text-xs font-bold text-zinc-500 uppercase mb-1">Punto de encuentro</p>
-                <p className="text-sm text-white">{showPreviewModal.description || 'No se ha especificado lugar de quedada.'}</p>
-                <div className="mt-3 flex items-center gap-2 text-xs text-blue-400 font-bold">
+                <p className="text-sm text-mr-ink">{showPreviewModal.description || 'No se ha especificado lugar de quedada.'}</p>
+                <div className="mt-3 flex items-center gap-2 text-xs text-blue-800 font-bold">
                   <Clock size={14} />
                   <span>Inicia el {new Date(showPreviewModal.scheduledTimestamp).toLocaleString()}</span>
                 </div>

@@ -187,7 +187,7 @@ export default function InviteFriendsModal({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[5000] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-sm"
+          className="fixed inset-0 z-[5000] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-[#14110e73] backdrop-blur-sm"
           onClick={onClose}
         >
           <motion.div
@@ -198,16 +198,16 @@ export default function InviteFriendsModal({
             className="mr-sheet flex max-h-[min(85dvh,560px)] w-full flex-col overflow-hidden rounded-b-none sm:max-w-md sm:rounded-b-[var(--radius-sheet)] rounded-t-[var(--radius-hero)] sm:rounded-t-[var(--radius-sheet)]"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800 shrink-0">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-mr-line shrink-0">
               <div>
-                <p className="text-[11px] font-black uppercase tracking-widest text-orange-500">Invitar a la ruta</p>
-                <h2 className="truncate text-3xl uppercase text-zinc-50 max-w-[220px] sm:max-w-xs">{groupName || 'Ruta'}</h2>
-                <p className="text-xs text-zinc-500 font-mono mt-0.5">Código {groupId}</p>
+                <p className="text-[11px] font-black uppercase tracking-widest text-mr-accent-text">Invitar a la ruta</p>
+                <h2 className="mr-title truncate text-[2.25rem] uppercase max-w-[220px] sm:max-w-xs">{groupName || 'Ruta'}</h2>
+                <p className="text-xs text-mr-muted font-mono mt-0.5">Código {groupId}</p>
               </div>
               <button
                 type="button"
                 onClick={onClose}
-                className="p-2 rounded-full bg-zinc-800 text-zinc-400 hover:text-white transition-colors"
+                className="p-2 rounded-full bg-mr-line text-mr-muted hover:text-mr-ink transition-colors"
                 aria-label="Cerrar"
               >
                 <X size={20} />
@@ -215,10 +215,10 @@ export default function InviteFriendsModal({
             </div>
 
             <div className="px-5 py-3 overflow-y-auto flex-1 custom-scrollbar">
-              <p className="text-xs text-zinc-400 mb-3 leading-relaxed">
+              <p className="text-xs text-mr-muted mb-3 leading-relaxed">
                 {inviteKind === 'scheduled_ride' ? (
                   <>
-                    Invita a tus amigos a esta <span className="text-orange-400 font-semibold">ruta programada</span>. La
+                    Invita a tus amigos a esta <span className="text-mr-accent-text font-semibold">ruta programada</span>. La
                     invitación llega a su bandeja (icono arriba a la derecha en el inicio) y pueden unirse con el código.
                   </>
                 ) : (
@@ -229,12 +229,12 @@ export default function InviteFriendsModal({
                 )}
               </p>
               {loading ? (
-                <div className="flex flex-col items-center justify-center py-12 gap-3 text-zinc-500">
-                  <Loader2 size={28} className="animate-spin text-orange-500" />
+                <div className="flex flex-col items-center justify-center py-12 gap-3 text-mr-muted">
+                  <Loader2 size={28} className="animate-spin text-mr-accent-text" />
                   <span className="text-sm font-medium">Cargando amigos…</span>
                 </div>
               ) : friends.length === 0 ? (
-                <p className="text-sm text-zinc-500 text-center py-10">
+                <p className="text-sm text-mr-muted text-center py-10">
                   Aún no tienes amigos añadidos. Úsalos desde el botón de amigos en el menú principal.
                 </p>
               ) : (
@@ -248,21 +248,21 @@ export default function InviteFriendsModal({
                       return (
                         <li
                           key={fid}
-                          className="flex items-center gap-3 p-3 rounded-2xl bg-zinc-950/80 border border-zinc-800"
+                          className="flex items-center gap-3 p-3 rounded-[14px] bg-mr-paper border border-mr-line"
                         >
-                          <div className="w-10 h-10 rounded-full overflow-hidden bg-zinc-800 shrink-0 border border-zinc-700">
+                          <div className="w-10 h-10 rounded-full overflow-hidden bg-mr-line shrink-0 border border-mr-line">
                             {f.photoURL ? (
                               <img src={f.photoURL} alt="" className="w-full h-full object-cover" />
                             ) : (
-                              <UserIcon className="w-5 h-5 m-auto mt-2.5 text-zinc-500" />
+                              <UserIcon className="w-5 h-5 m-auto mt-2.5 text-mr-muted" />
                             )}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="font-bold text-white text-sm truncate flex items-center gap-1.5">
+                            <p className="font-bold text-mr-ink text-sm truncate flex items-center gap-1.5">
                               {f.displayName || 'Motero'}
                               {f.isPremium === true ? <PremiumBadge compact /> : null}
                             </p>
-                            <p className="text-[11px] text-zinc-500">
+                            <p className="text-[11px] text-mr-muted">
                               {inRoute
                                 ? 'Ya está en esta ruta'
                                 : sent
@@ -271,13 +271,13 @@ export default function InviteFriendsModal({
                             </p>
                           </div>
                           {inRoute ? (
-                            <span className="text-[11px] font-bold text-emerald-400 shrink-0 px-2">En ruta</span>
+                            <span className="text-[11px] font-bold text-[#1f6b3a] shrink-0 px-2">En ruta</span>
                           ) : (
                             <button
                               type="button"
                               disabled={sendingId === fid}
                               onClick={() => void invite(fid)}
-                              className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl bg-orange-500 hover:bg-orange-400 text-white text-xs font-black disabled:opacity-50"
+                              className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl bg-mr-accent hover:bg-mr-accent-hover text-mr-ink text-xs font-black disabled:opacity-50"
                             >
                               {sendingId === fid ? <Loader2 size={14} className="animate-spin" /> : <UserPlus size={14} />}
                               {sent ? 'Reenviar' : 'Invitar'}
@@ -291,10 +291,10 @@ export default function InviteFriendsModal({
             </div>
 
             {inviteKind === 'scheduled_ride' && (
-              <div className="shrink-0 space-y-3 border-t border-zinc-800 bg-zinc-950/70 px-5 py-4">
-                <p className="text-[11px] leading-relaxed text-zinc-500">
-                  Comparte el <span className="text-zinc-300">código</span> o el{' '}
-                  <span className="text-zinc-300">enlace</span> para que otros se apunten desde MotoRide (mismo formato
+              <div className="shrink-0 space-y-3 border-t border-mr-line bg-mr-page/70 px-5 py-4">
+                <p className="text-[11px] leading-relaxed text-mr-muted">
+                  Comparte el <span className="text-mr-ink">código</span> o el{' '}
+                  <span className="text-mr-ink">enlace</span> para que otros se apunten desde MotoRide (mismo formato
                   que al crear la ruta).
                 </p>
                 <div className="grid grid-cols-2 gap-2">
@@ -310,10 +310,10 @@ export default function InviteFriendsModal({
                         window.prompt('Copia el código:', code);
                       }
                     }}
-                    className="flex items-center justify-center gap-2 rounded-xl bg-zinc-800 py-2.5 text-xs font-bold text-white hover:bg-zinc-700"
+                    className="flex items-center justify-center gap-2 rounded-xl bg-mr-line py-2.5 text-xs font-bold text-mr-ink hover:bg-mr-line"
                   >
                     {scheduleShareCopied === 'code' ? (
-                      <Check size={16} className="text-emerald-400" />
+                      <Check size={16} className="text-[#1f6b3a]" />
                     ) : (
                       <Copy size={16} />
                     )}
@@ -344,10 +344,10 @@ export default function InviteFriendsModal({
                         window.prompt('Copia el texto:', clipboardText);
                       }
                     }}
-                    className="flex items-center justify-center gap-2 rounded-xl bg-orange-500/90 py-2.5 text-xs font-bold text-white hover:bg-orange-500"
+                    className="flex items-center justify-center gap-2 rounded-xl bg-mr-accent/20 py-2.5 text-xs font-bold text-mr-ink hover:bg-mr-accent-hover"
                   >
                     {scheduleShareCopied === 'link' ? (
-                      <Check size={16} className="text-emerald-200" />
+                      <Check size={16} className="text-[#1f6b3a]" />
                     ) : (
                       <Share2 size={16} />
                     )}

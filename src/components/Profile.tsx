@@ -23,11 +23,16 @@ import MedalShowcase from './MedalShowcase';
 import { MEDAL_DEFINITIONS, listUnlockedMedalIds } from '../lib/achievements';
 import { FRAME_CATALOG, getEquippedFrame, getUnlockedFrameIds, sanitizeProfileFrameId } from '../lib/frames';
 import { AvatarFrame } from './AvatarFrame';
+import { Button, Card, Eyebrow, TextField, Title } from './ui';
 
 type Props = {
   onBack: () => void;
   onRepeatRoute: (routeGeoJSON: string) => void;
 };
+
+/** Botón circular de icono sobre papel (tacto 44 px). */
+const ICON_BTN =
+  'mr-focus inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-mr-line-strong bg-mr-paper text-mr-ink transition-colors hover:bg-mr-line';
 
 export default function Profile({ onBack, onRepeatRoute }: Props) {
   const { user } = useAuth();
@@ -213,60 +218,115 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
     return '—';
   };
 
+  const isPremium = user?.isPremium === true || userData?.isPremium === true;
+
   return (
-    <div className="min-h-dvh bg-zinc-950 text-white pl-[max(1.5rem,env(safe-area-inset-left,0px))] pr-[max(1.5rem,env(safe-area-inset-right,0px))] pt-[max(1.5rem,env(safe-area-inset-top,0px))] pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]">
-      <div className="max-w-md mx-auto pt-4 pb-8">
-        <div className="relative flex items-center justify-between gap-3 mb-8 pb-4 after:content-[''] after:absolute after:left-0 after:right-0 after:bottom-0 after:h-0.5 after:bg-[repeating-linear-gradient(90deg,rgb(245_138_31/0.55)_0_7px,transparent_7px_13px)]">
-          <div className="flex items-center gap-4 min-w-0">
-            <button onClick={onBack} className="p-2 bg-zinc-900 rounded-full hover:bg-zinc-800 transition-colors shrink-0">
+    <div className="mr-page min-h-dvh text-mr-ink pl-[max(1.25rem,env(safe-area-inset-left,0px))] pr-[max(1.25rem,env(safe-area-inset-right,0px))] pt-[max(1.25rem,env(safe-area-inset-top,0px))] pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]">
+      <div className="mx-auto max-w-md pt-2 pb-10 sm:max-w-2xl">
+        {/* Cabecera: volver, titular y panel de admin */}
+        <header className="mb-6 flex items-end justify-between gap-3 pb-4 after:absolute after:left-0 after:right-0 after:bottom-0 after:h-0.5 after:bg-[repeating-linear-gradient(90deg,rgb(245_138_31/0.7)_0_7px,transparent_7px_13px)] relative">
+          <div className="flex min-w-0 items-center gap-3">
+            <button onClick={onBack} className={ICON_BTN} aria-label="Volver">
               <ArrowLeft size={20} />
             </button>
-            <h1 className="truncate text-4xl uppercase text-zinc-50">Mi perfil</h1>
+            <div className="min-w-0">
+              <Eyebrow>Tu cuenta</Eyebrow>
+              <Title level={1} size="lg" className="truncate">Mi perfil</Title>
+            </div>
           </div>
           {isAdmin && (
             <button
               type="button"
               onClick={() => setShowAdminPanel(true)}
-              className="p-2.5 bg-zinc-900 border border-zinc-800 rounded-full hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-orange-400 shrink-0"
+              className={ICON_BTN}
               title="Panel de administración"
+              aria-label="Panel de administración"
             >
               <Shield size={20} />
             </button>
           )}
-        </div>
+        </header>
 
-        <div className="mr-surface mr-ticket flex flex-col items-center rounded-[var(--radius-sheet)] p-6 pb-8">
+        {/* Identidad: foto, marco, premium, nivel y estadísticas */}
+        <Card as="section" ticket padding="none" className="flex flex-col items-center p-6 pb-8">
           <div className="relative mb-6 group">
             <AvatarFrame frameId={equippedFrame.id} size={128}>
               <div
-                className={`w-32 h-32 rounded-full overflow-hidden border-4 bg-zinc-800 ${
-                  user?.isPremium === true || userData?.isPremium === true ? 'border-amber-500' : 'border-orange-500'
-                }`}
+                className="h-32 w-32 overflow-hidden rounded-full border-4 border-mr-accent bg-mr-line"
               >
                 {photoURL ? (
-                  <img src={photoURL} alt="Avatar" className="w-full h-full object-cover" />
+                  <img src={photoURL} alt="Avatar" className="h-full w-full object-cover" />
                 ) : (
-                  <div className="w-full h-full flex items-center justify-center text-zinc-500">Sin foto</div>
+                  <div className="flex h-full w-full items-center justify-center text-sm font-semibold text-mr-muted">Sin foto</div>
                 )}
               </div>
             </AvatarFrame>
-            <label className="absolute bottom-0 right-0 bg-orange-500 p-3 rounded-full cursor-pointer hover:bg-orange-600 transition-colors shadow-lg">
-              <Camera size={20} className="text-white" />
+            <label className="absolute bottom-0 right-0 flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border border-mr-ink bg-mr-accent text-mr-on-accent shadow-sm transition-colors hover:bg-mr-accent-hover focus-within:outline-none focus-within:ring-2 focus-within:ring-mr-accent-text">
+              <Camera size={20} aria-hidden="true" />
+              <span className="sr-only">Cambiar foto de perfil</span>
               <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
             </label>
           </div>
 
-          {(user?.isPremium === true || userData?.isPremium === true) && (
+          {isPremium && (
             <div className="mb-4">
               <PremiumBadge />
             </div>
           )}
 
+          {userData &&
+            (() => {
+              const totalPoints = Math.max(0, Number(userData.points || 0));
+              const storedLevel = Math.max(1, Math.floor(Number(userData.level) || 1));
+              const { level, pointsForNextLevel, prevLevelPoints } = calculateLevel(totalPoints, storedLevel);
+              const levelProgress = totalPoints - prevLevelPoints;
+              const levelRequired = pointsForNextLevel - prevLevelPoints;
+              return (
+                <div className="mb-6 w-full">
+                  <div className="mb-2 flex items-end justify-between gap-2">
+                    <span className="font-display text-3xl font-bold uppercase leading-none text-mr-ink">Nivel {level}</span>
+                    <span className="text-sm font-semibold text-mr-muted">
+                      <span className="font-bold text-mr-ink tabular-nums">{totalPoints}</span>
+                      {' / '}
+                      {pointsForNextLevel} pts
+                    </span>
+                  </div>
+                  <div
+                    className="h-3 overflow-hidden rounded-full border border-mr-line-strong bg-mr-page"
+                    role="progressbar"
+                    aria-label="Progreso de nivel"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={Math.round(Math.min((levelProgress / levelRequired) * 100, 100))}
+                  >
+                    <div
+                      className="h-full rounded-full bg-mr-accent transition-all duration-1000 ease-out"
+                      style={{ width: `${Math.min((levelProgress / levelRequired) * 100, 100)}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })()}
+
+          <div className="mb-6 grid w-full grid-cols-2 gap-3">
+            <div className="rounded-[14px] border border-mr-line bg-mr-page px-4 py-3 text-center">
+              <p className="mb-1 text-[0.6875rem] font-extrabold uppercase tracking-[0.12em] text-mr-muted">Km totales</p>
+              <p className="font-display text-3xl font-bold leading-none text-mr-ink tabular-nums">{(userData?.totalDistance || 0).toFixed(1)}</p>
+            </div>
+            <div className="rounded-[14px] border border-mr-line bg-mr-page px-4 py-3 text-center">
+              <p className="mb-1 text-[0.6875rem] font-extrabold uppercase tracking-[0.12em] text-mr-muted">Curvas totales</p>
+              <p className="font-display text-3xl font-bold leading-none text-mr-ink tabular-nums">
+                {(userData?.totalLeftTurns || 0) + (userData?.totalRightTurns || 0)}
+              </p>
+            </div>
+          </div>
+
+          {/* Marco de perfil */}
           {userData && (
             <div className="mb-6 w-full">
-              <div className="mb-2 flex items-baseline justify-between text-xs font-bold text-zinc-400">
-                <span className="uppercase tracking-wider text-orange-500">Marco de perfil</span>
-                <span className="text-zinc-500">
+              <div className="mb-2 flex items-baseline justify-between gap-2 text-xs font-bold text-mr-muted">
+                <span className="text-mr-accent-text">Marco de perfil</span>
+                <span>
                   {unlockedFrameIds.size} / {FRAME_CATALOG.length} desbloqueados
                 </span>
               </div>
@@ -284,16 +344,16 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
                       disabled={!unlocked}
                       onClick={() => unlocked && equipFrame(frame.id)}
                       title={unlocked ? frame.description : `Bloqueado: ${frame.description}`}
-                      className={`flex flex-col items-center gap-1 rounded-xl border p-2 text-[10px] transition-colors ${
+                      className={`mr-focus flex min-h-[44px] flex-col items-center gap-1 rounded-[12px] border p-2 text-[11px] font-semibold leading-tight transition-colors ${
                         selected
-                          ? 'border-orange-500 bg-orange-500/10 text-orange-300'
-                          : 'border-zinc-800 bg-zinc-900 text-zinc-400 hover:border-zinc-700'
-                      } disabled:cursor-not-allowed disabled:opacity-40`}
+                          ? 'border-mr-ink bg-mr-accent text-mr-on-accent'
+                          : 'border-mr-line bg-mr-paper text-mr-muted hover:bg-mr-line'
+                      } disabled:cursor-not-allowed disabled:opacity-45`}
                     >
                       <AvatarFrame frameId={unlocked ? frame.id : 'none'} size={28}>
-                        <span className="h-7 w-7 rounded-full bg-zinc-800" />
+                        <span className="h-7 w-7 rounded-full bg-mr-line" />
                       </AvatarFrame>
-                      <span className="w-full truncate text-center">{frame.name}</span>
+                      <span className="line-clamp-2 w-full text-center leading-tight">{frame.name}</span>
                     </button>
                   );
                 })}
@@ -301,55 +361,16 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
             </div>
           )}
 
-          {userData &&
-            (() => {
-              const totalPoints = Math.max(0, Number(userData.points || 0));
-              const storedLevel = Math.max(1, Math.floor(Number(userData.level) || 1));
-              const { level, pointsForNextLevel, prevLevelPoints } = calculateLevel(totalPoints, storedLevel);
-              const levelProgress = totalPoints - prevLevelPoints;
-              const levelRequired = pointsForNextLevel - prevLevelPoints;
-              return (
-                <div className="w-full mb-6">
-                  <div className="flex justify-between items-center text-xs font-bold text-zinc-400 mb-2">
-                    <span className="text-orange-500 font-black tracking-wider">NIVEL {level}</span>
-                    <span className="text-zinc-500">
-                      <span className="font-bold text-orange-400 tabular-nums">{totalPoints}</span>
-                      {' / '}
-                      {pointsForNextLevel} pts
-                    </span>
-                  </div>
-                  <div className="h-3 bg-zinc-950 rounded-full overflow-hidden border border-zinc-800">
-                    <div
-                      className="h-full bg-orange-500 transition-all duration-1000 ease-out"
-                      style={{ width: `${Math.min((levelProgress / levelRequired) * 100, 100)}%` }}
-                    />
-                  </div>
-                </div>
-              );
-            })()}
-
-          <div className="grid grid-cols-2 gap-4 mb-6 w-full">
-            <div className="bg-zinc-800 px-4 py-3 rounded-2xl text-center border border-zinc-700">
-              <p className="text-[11px] text-zinc-400 uppercase font-bold tracking-wider mb-1">Km Totales</p>
-              <p className="font-black text-xl text-white">{(userData?.totalDistance || 0).toFixed(1)}</p>
-            </div>
-            <div className="bg-zinc-800 px-4 py-3 rounded-2xl text-center border border-zinc-700">
-              <p className="text-[11px] text-zinc-400 uppercase font-bold tracking-wider mb-1">Curvas Totales</p>
-              <p className="font-black text-xl text-white">
-                {(userData?.totalLeftTurns || 0) + (userData?.totalRightTurns || 0)}
-              </p>
-            </div>
-          </div>
-
+          {/* Vitrina de medallas */}
           {user && userData && (
-            <div className="w-full mb-6 rounded-2xl border border-zinc-700/80 bg-zinc-950/50 p-4">
+            <div className="mb-6 w-full rounded-[14px] border border-mr-line bg-mr-page p-4">
               <MedalShowcase user={userData} ownerUid={user.uid} />
               <button
                 type="button"
                 onClick={() => setMedalsCatalogOpen((o) => !o)}
-                className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-zinc-700 py-2 text-xs font-bold text-zinc-400 hover:border-zinc-600 hover:text-zinc-200"
+                className="mr-focus mt-3 flex min-h-[44px] w-full items-center justify-center gap-2 rounded-[12px] border border-mr-line-strong bg-mr-paper py-2 text-sm font-bold text-mr-ink transition-colors hover:bg-mr-line"
               >
-                {medalsCatalogOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                {medalsCatalogOpen ? <ChevronUp size={16} aria-hidden="true" /> : <ChevronDown size={16} aria-hidden="true" />}
                 Catálogo de medallas ({listUnlockedMedalIds(userData).length}/{MEDAL_DEFINITIONS.length})
               </button>
               {medalsCatalogOpen && (
@@ -359,14 +380,14 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
                     return (
                       <li
                         key={m.id}
-                        className={`flex gap-2 rounded-lg border px-2 py-2 text-xs ${
-                          ok ? 'border-emerald-800/60 bg-emerald-950/20' : 'border-zinc-800 bg-zinc-900/40 opacity-70'
+                        className={`flex gap-2 rounded-[10px] border px-3 py-2 text-xs ${
+                          ok ? 'border-mr-accent bg-mr-paper' : 'border-mr-line bg-mr-paper opacity-75'
                         }`}
                       >
-                        <Trophy size={14} className={ok ? 'text-emerald-400 shrink-0 mt-0.5' : 'text-zinc-600 shrink-0 mt-0.5'} />
+                        <Trophy size={14} aria-hidden="true" className={`mt-0.5 shrink-0 ${ok ? 'text-mr-accent-text' : 'text-mr-subtle'}`} />
                         <div className="min-w-0">
-                          <p className="font-bold text-zinc-200">{m.title}</p>
-                          <p className="text-[11px] text-zinc-500 leading-snug">{m.subtitle}</p>
+                          <p className="font-bold text-mr-ink">{m.title}</p>
+                          <p className="text-[0.75rem] leading-snug text-mr-muted">{m.subtitle}</p>
                         </div>
                       </li>
                     );
@@ -376,90 +397,88 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
             </div>
           )}
 
+          {/* Datos del motero */}
           <div className="w-full space-y-4">
-            <div>
-              <label className="block text-sm text-zinc-400 mb-1">Nombre de motero</label>
-              <input
-                type="text"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-orange-500 transition-colors"
-              />
-            </div>
+            <TextField
+              label="Nombre de motero"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+            />
 
-            <div>
-              <label className="block text-sm text-zinc-400 mb-1">Tu moto</label>
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="profile-motorcycle" className="text-sm font-semibold text-mr-ink">
+                Tu moto
+              </label>
               <textarea
+                id="profile-motorcycle"
                 value={motorcycle}
                 onChange={(e) => setMotorcycle(e.target.value.slice(0, 120))}
                 placeholder="Ej: Yamaha MT-07 2022"
                 rows={2}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-orange-500 transition-colors resize-none placeholder:text-zinc-600"
+                className="mr-field resize-none text-sm placeholder:text-mr-subtle"
               />
-              <p className="text-[11px] text-zinc-600 mt-1">{motorcycle.length}/120</p>
+              <p className="text-[0.8125rem] text-mr-muted tabular-nums">{motorcycle.length}/120</p>
             </div>
 
-            <button
-              onClick={saveProfile}
-              disabled={loading}
-              className="w-full bg-orange-500 hover:bg-orange-600 text-white py-3 rounded-xl font-semibold transition-colors disabled:opacity-50 mt-2"
-            >
+            <Button variant="primary" size="lg" fullWidth onClick={saveProfile} disabled={loading} className="mt-2">
               {loading ? 'Guardando...' : 'Guardar Cambios'}
-            </button>
+            </Button>
           </div>
-        </div>
+        </Card>
 
         {/* Historial de rutas (desplegable) */}
-        <div className="mr-surface mt-6 overflow-hidden rounded-[var(--radius-sheet)]">
+        <Card as="section" padding="none" className="mt-6 overflow-hidden">
           <button
             type="button"
             onClick={() => setHistoryOpen((o) => !o)}
-            className="w-full flex items-center justify-between p-4 text-left hover:bg-zinc-800/50 transition-colors"
+            aria-expanded={historyOpen}
+            className="mr-focus flex min-h-[56px] w-full items-center justify-between gap-3 p-4 text-left transition-colors hover:bg-mr-line"
           >
-            <span className="font-bold flex items-center gap-2">
-              <Activity className="text-orange-500" size={18} />
+            <span className="flex items-center gap-2 font-display text-2xl font-bold uppercase leading-none text-mr-ink">
+              <Activity className="text-mr-accent-text" size={20} aria-hidden="true" />
               Historial de rutas
             </span>
-            {historyOpen ? <ChevronUp size={20} className="text-zinc-500" /> : <ChevronDown size={20} className="text-zinc-500" />}
+            {historyOpen ? (
+              <ChevronUp size={20} className="text-mr-muted" aria-hidden="true" />
+            ) : (
+              <ChevronDown size={20} className="text-mr-muted" aria-hidden="true" />
+            )}
           </button>
           {historyOpen && (
-            <div className="border-t border-zinc-800 px-3 sm:px-5 pb-5 pt-4">
+            <div className="border-t border-mr-line px-3 pb-5 pt-4 sm:px-5">
               {indexBuilding && (
-                <div className="bg-blue-500/10 border border-blue-500/20 p-3 rounded-xl flex items-center gap-2 mb-4">
-                  <Clock className="text-blue-400 shrink-0" size={16} />
-                  <p className="text-xs text-blue-400">Cargando historial…</p>
+                <div className="mb-4 flex items-center gap-2 rounded-[12px] border border-mr-line-strong bg-mr-page p-3">
+                  <Clock className="shrink-0 text-mr-ink" size={16} aria-hidden="true" />
+                  <p className="text-sm font-semibold text-mr-ink">Cargando historial…</p>
                 </div>
               )}
-              <div className="space-y-4 max-h-[55vh] overflow-y-auto overflow-x-hidden px-0.5 sm:px-0">
+              <div className="max-h-[55vh] space-y-4 overflow-y-auto overflow-x-hidden px-0.5 sm:px-0">
                 {rideHistory.length > 0 ? (
                   rideHistory.map((ride) => (
-                    <div
-                      key={ride.id}
-                      className="bg-zinc-950 border border-zinc-800 p-4 sm:p-5 rounded-2xl flex flex-col gap-2"
-                    >
+                    <Card key={ride.id} ticket padding="none" className="flex flex-col gap-2 p-4 sm:p-5">
                       <button
                         type="button"
                         onClick={() => setDetailRide(ride)}
-                        className="w-full text-left rounded-xl -m-1 p-1 hover:bg-zinc-900/80 transition-colors"
+                        className="mr-focus -m-1 w-full rounded-[10px] p-1 text-left transition-colors hover:bg-mr-line"
                       >
-                        <h4 className="text-lg font-black text-orange-500 leading-snug tracking-tight pr-2">
+                        <h4 className="pr-2 font-display text-2xl font-bold uppercase leading-tight text-mr-ink">
                           {formatRideCardTitle(ride.groupName, ride.endTime)}
                         </h4>
-                        <p className="text-sm text-zinc-500">{formatRideCardSubtitle(ride.endTime)}</p>
-                        <div className="mt-1 flex flex-wrap items-baseline gap-x-8 gap-y-1 pr-2">
+                        <p className="text-sm text-mr-muted">{formatRideCardSubtitle(ride.endTime)}</p>
+                        <div className="mt-2 flex flex-wrap items-baseline gap-x-8 gap-y-1 pr-2">
                           <span className="text-sm">
-                            <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
+                            <span className="text-[0.6875rem] font-extrabold uppercase tracking-[0.12em] text-mr-muted">
                               Dist.{' '}
                             </span>
-                            <span className="font-semibold text-white tabular-nums">
+                            <span className="font-semibold text-mr-ink tabular-nums">
                               {ride.distance != null ? Number(ride.distance).toFixed(1) : '—'} km
                             </span>
                           </span>
                           <span className="text-sm">
-                            <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
+                            <span className="text-[0.6875rem] font-extrabold uppercase tracking-[0.12em] text-mr-muted">
                               Pts{' '}
                             </span>
-                            <span className="font-bold text-orange-400 tabular-nums">
+                            <span className="font-bold text-mr-accent-text tabular-nums">
                               +{rideHistoryPointsEarned(ride)}
                             </span>
                           </span>
@@ -472,26 +491,26 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
                             e.stopPropagation();
                             repeatFromHistory(ride.routeGeoJSON as string);
                           }}
-                          className="mt-2 flex w-full items-center gap-2 self-start rounded-xl bg-zinc-800 px-3 py-2 text-xs font-bold text-white hover:bg-zinc-700 sm:w-auto"
+                          className="mr-btn-ghost mt-2 w-full self-start sm:w-auto"
                         >
-                          <Play size={14} /> Repetir ruta
+                          <Play size={14} aria-hidden="true" /> Repetir ruta
                         </button>
                       )}
-                    </div>
+                    </Card>
                   ))
                 ) : (
-                  !indexBuilding && <p className="text-sm text-zinc-500 py-6 text-center">Aún no hay rutas guardadas</p>
+                  !indexBuilding && <p className="py-6 text-center text-sm text-mr-muted">Aún no hay rutas guardadas</p>
                 )}
               </div>
             </div>
           )}
-        </div>
+        </Card>
 
         <button
           onClick={logOut}
-          className="w-full mt-8 flex items-center justify-center gap-2 text-red-500 hover:text-red-400 transition-colors py-4"
+          className="mr-focus mt-8 flex min-h-[48px] w-full items-center justify-center gap-2 rounded-[12px] py-3 text-base font-bold text-[#a3261c] transition-colors hover:bg-mr-line"
         >
-          <LogOut size={20} />
+          <LogOut size={20} aria-hidden="true" />
           Cerrar Sesión
         </button>
       </div>
@@ -500,7 +519,7 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
 
       {detailRide && (
         <div
-          className="fixed inset-0 z-[6000] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+          className="mr-scrim-enter fixed inset-0 z-[6000] flex items-end justify-center bg-[#14110e73] p-0 sm:items-center sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="ride-detail-title"
@@ -510,19 +529,21 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
           }}
         >
           <div
-            className="mr-sheet w-full max-w-md max-h-[min(90dvh,640px)] overflow-y-auto p-6"
+            className="mr-sheet mr-sheet-enter flex max-h-[88dvh] w-full flex-col overflow-y-auto p-5 pb-6 sm:max-h-[min(90dvh,640px)] sm:max-w-md sm:rounded-[22px] sm:border"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-start justify-between gap-3 mb-4">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-orange-500/20 text-orange-400">
-                  <Trophy size={24} />
+            <div aria-hidden="true" className="mx-auto mb-3 h-1 w-10 rounded-full bg-mr-line-strong sm:hidden" />
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[14px] border border-mr-ink bg-mr-accent text-mr-on-accent">
+                  <Trophy size={24} aria-hidden="true" />
                 </div>
                 <div className="min-w-0">
-                  <h2 id="ride-detail-title" className="truncate text-3xl uppercase leading-none text-zinc-50">
+                  <Eyebrow>Ruta</Eyebrow>
+                  <h2 id="ride-detail-title" className="mr-title truncate text-3xl uppercase leading-none">
                     {String(detailRide.groupName || 'Ruta')}
                   </h2>
-                  <p className="text-xs text-zinc-500 mt-0.5">
+                  <p className="mt-1 text-sm text-mr-muted">
                     {detailRide.endTime != null
                       ? `${new Date(detailRide.endTime as number).toLocaleDateString()} · ${new Date(
                           detailRide.endTime as number
@@ -537,41 +558,41 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
                   setDeletingId(null);
                   setDetailRide(null);
                 }}
-                className="p-2 rounded-full text-zinc-400 hover:bg-zinc-800 hover:text-white shrink-0"
+                className={ICON_BTN}
                 aria-label="Cerrar"
               >
-                <X size={22} />
+                <X size={22} aria-hidden="true" />
               </button>
             </div>
 
             <div className="grid grid-cols-2 gap-3 text-left">
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-3">
-                <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500">Distancia</p>
-                <p className="text-xl font-black text-white tabular-nums mt-1">
+              <div className="rounded-[14px] border border-mr-line bg-mr-page p-3">
+                <p className="text-[0.6875rem] font-extrabold uppercase tracking-[0.12em] text-mr-muted">Distancia</p>
+                <p className="mt-1 font-display text-2xl font-bold leading-none text-mr-ink tabular-nums">
                   {detailRide.distance != null ? Number(detailRide.distance).toFixed(1) : '—'}{' '}
-                  <span className="text-xs text-zinc-500">km</span>
+                  <span className="text-sm font-semibold text-mr-muted">km</span>
                 </p>
               </div>
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-3">
-                <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500">Tiempo</p>
-                <p className="text-xl font-black text-white tabular-nums mt-1">{formatRideDuration(detailRide)}</p>
+              <div className="rounded-[14px] border border-mr-line bg-mr-page p-3">
+                <p className="text-[0.6875rem] font-extrabold uppercase tracking-[0.12em] text-mr-muted">Tiempo</p>
+                <p className="mt-1 font-display text-2xl font-bold leading-none text-mr-ink tabular-nums">{formatRideDuration(detailRide)}</p>
               </div>
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-3">
-                <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500">Puntos</p>
-                <p className="text-xl font-black text-orange-400 tabular-nums mt-1">
+              <div className="rounded-[14px] border border-mr-line bg-mr-page p-3">
+                <p className="text-[0.6875rem] font-extrabold uppercase tracking-[0.12em] text-mr-muted">Puntos</p>
+                <p className="mt-1 font-display text-2xl font-bold leading-none text-mr-accent-text tabular-nums">
                   +{Math.round(Number(detailRide.score ?? detailRide.pointsEarned ?? 0))}
                 </p>
               </div>
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-3">
-                <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500">Curvas (I / D)</p>
-                <p className="text-xl font-black text-white tabular-nums mt-1">
+              <div className="rounded-[14px] border border-mr-line bg-mr-page p-3">
+                <p className="text-[0.6875rem] font-extrabold uppercase tracking-[0.12em] text-mr-muted">Curvas (I / D)</p>
+                <p className="mt-1 font-display text-2xl font-bold leading-none text-mr-ink tabular-nums">
                   {detailRide.leftTurns != null ? Number(detailRide.leftTurns) : '—'} /{' '}
                   {detailRide.rightTurns != null ? Number(detailRide.rightTurns) : '—'}
                 </p>
               </div>
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-3 col-span-2">
-                <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500">Inclinación máx.</p>
-                <p className="text-lg font-black text-white tabular-nums mt-1">
+              <div className="col-span-2 rounded-[14px] border border-mr-line bg-mr-page p-3">
+                <p className="text-[0.6875rem] font-extrabold uppercase tracking-[0.12em] text-mr-muted">Inclinación máx.</p>
+                <p className="mt-1 font-display text-xl font-bold leading-none text-mr-ink tabular-nums">
                   Izq. {detailRide.maxLeanLeft != null ? Number(detailRide.maxLeanLeft) : '—'}° · Der.{' '}
                   {detailRide.maxLeanRight != null ? Number(detailRide.maxLeanRight) : '—'}°
                 </p>
@@ -579,21 +600,21 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
             </div>
 
             {typeof detailRide.baseScore === 'number' && (
-              <p className="text-xs text-zinc-500 mt-3">
+              <p className="mt-3 text-sm text-mr-muted">
                 Puntos base +{Math.round(detailRide.baseScore)}
                 {typeof detailRide.pointsEarned === 'number' && detailRide.pointsEarned !== detailRide.baseScore && (
-                  <span className="text-zinc-600"> · Total +{Math.round(Number(detailRide.pointsEarned))}</span>
+                  <span> · Total +{Math.round(Number(detailRide.pointsEarned))}</span>
                 )}
               </p>
             )}
 
             {typeof detailRide.foodExpenseEuros === 'number' && detailRide.foodExpenseEuros > 0 && (
-              <div className="mt-4 rounded-2xl border border-amber-500/25 bg-amber-500/10 p-3 text-left">
-                <p className="text-[11px] font-black uppercase tracking-widest text-amber-400/90">Gastos (escote)</p>
-                <p className="text-sm text-amber-100 mt-1 tabular-nums">
+              <div className="mt-4 rounded-[14px] border border-mr-line-strong bg-mr-paper p-3 text-left">
+                <p className="text-[0.6875rem] font-extrabold uppercase tracking-[0.12em] text-mr-accent-text">Gastos (escote)</p>
+                <p className="mt-1 text-sm tabular-nums text-mr-ink">
                   Total {detailRide.foodExpenseEuros.toFixed(2)} €
                   {typeof detailRide.splitPerPersonEuros === 'number' && (
-                    <span className="text-zinc-400">
+                    <span className="text-mr-muted">
                       {' '}
                       · ~{detailRide.splitPerPersonEuros.toFixed(2)} € / persona
                       {typeof detailRide.memberCountForSplit === 'number'
@@ -606,46 +627,45 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
             )}
 
             {detailRide.routeGeoJSON && typeof detailRide.routeGeoJSON === 'string' && (
-              <button
-                type="button"
+              <Button
+                variant="primary"
+                fullWidth
+                size="lg"
+                className="mt-5"
+                icon={<Play size={18} />}
                 onClick={() => {
                   repeatFromHistory(detailRide.routeGeoJSON as string);
                   setDetailRide(null);
                 }}
-                className="mt-5 w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl bg-zinc-800 hover:bg-zinc-700 text-white text-sm font-bold"
               >
-                <Play size={18} /> Repetir esta ruta
-              </button>
+                Repetir esta ruta
+              </Button>
             )}
 
-            <div className="mt-4 border-t border-zinc-800 pt-4">
+            <div className="mt-4 border-t border-mr-line pt-4">
               {deletingId === detailRide.id ? (
                 <div className="flex flex-col gap-2">
-                  <p className="text-xs text-zinc-500 text-center">¿Eliminar esta ruta del historial? No se puede deshacer.</p>
+                  <p className="text-center text-sm text-mr-ink">¿Eliminar esta ruta del historial? No se puede deshacer.</p>
                   <div className="flex gap-2">
                     <button
                       type="button"
                       onClick={() => void confirmDeleteRide(detailRide.id)}
-                      className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-sm font-bold"
+                      className="mr-focus min-h-[44px] flex-1 rounded-[12px] border border-[#a3261c] bg-[#a3261c] text-sm font-bold text-[#fbf8f2] transition-colors hover:bg-[#8a1f17]"
                     >
                       Sí, eliminar
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setDeletingId(null)}
-                      className="flex-1 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-sm font-semibold"
-                    >
+                    <Button variant="ghost" className="flex-1" onClick={() => setDeletingId(null)}>
                       Cancelar
-                    </button>
+                    </Button>
                   </div>
                 </div>
               ) : (
                 <button
                   type="button"
                   onClick={() => deleteRide(detailRide.id)}
-                  className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border border-red-500/35 bg-red-500/10 text-red-300 text-sm font-bold hover:bg-red-500/20 transition-colors"
+                  className="mr-focus flex min-h-[44px] w-full items-center justify-center gap-2 rounded-[12px] border border-[#a3261c] bg-mr-paper py-3 text-sm font-bold text-[#a3261c] transition-colors hover:bg-mr-line"
                 >
-                  <Trash2 size={18} /> Eliminar del historial
+                  <Trash2 size={18} aria-hidden="true" /> Eliminar del historial
                 </button>
               )}
             </div>

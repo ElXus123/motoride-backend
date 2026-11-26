@@ -4107,7 +4107,7 @@ export default function MapView({
   return (
     <div
       ref={containerRef}
-      className="relative w-full min-h-dvh h-dvh flex flex-col bg-zinc-900 overflow-hidden"
+      className="mr-dark relative w-full min-h-dvh h-dvh flex flex-col bg-hud-bg overflow-hidden"
       style={rootContainerStyle}
     >
       {/* Header overlay */}
@@ -4181,7 +4181,7 @@ export default function MapView({
         {(
            <motion.div 
              layout
-             className="flex items-center gap-2 sm:gap-3 hud-land:gap-1.5 mr-surface backdrop-blur-md p-2 hud-land:p-1.5 overflow-hidden min-w-0"
+             className="flex items-center gap-2 sm:gap-3 hud-land:gap-1.5 bg-hud-surface/95 text-hud-ink ring-1 ring-hud-line rounded-[var(--radius-card)] shadow-[var(--shadow-lift)] backdrop-blur-md p-2 hud-land:p-1.5 overflow-hidden min-w-0"
              animate={{ paddingRight: isMoving ? '8px' : '16px' }}
            >
             <button
@@ -4197,11 +4197,11 @@ export default function MapView({
              </button>
              
              <div className="text-white overflow-hidden pr-2 min-w-0">
-               <h2 className="font-display text-xl font-bold uppercase leading-tight tracking-wide break-words line-clamp-2 text-zinc-50">{group?.name || 'Cargando…'}</h2>
-               <div className="flex items-center gap-2 text-xs text-zinc-400 min-w-0 flex-wrap">
+               <h2 className="font-display text-xl font-bold uppercase leading-tight tracking-wide break-words line-clamp-2 text-hud-ink">{group?.name || 'Cargando…'}</h2>
+               <div className="flex items-center gap-2 text-xs text-hud-muted min-w-0 flex-wrap">
                  <span>Código <strong className="font-mono font-semibold text-orange-400">{groupId}</strong></span>
-                 <div className="flex items-center gap-1 bg-zinc-800/50 px-1.5 py-0.5 rounded-md">
-                   <Users size={12} className="text-zinc-400" />
+                 <div className="flex items-center gap-1 bg-hud-raised/50 px-1.5 py-0.5 rounded-md">
+                   <Users size={12} className="text-hud-muted" />
                    <span className="font-bold text-white">{participantCount}</span>
                  </div>
                  <div className="flex items-center gap-1">
@@ -4215,7 +4215,7 @@ export default function MapView({
                      type="button"
                      disabled={inviteBusy || (groupId === 'REPEATED' && !preloadedRoute?.trim())}
                      onClick={() => void openInviteFriendsModal()}
-                     className="hover:text-orange-400 text-zinc-400 transition-colors p-1 disabled:opacity-40 disabled:pointer-events-none"
+                     className="hover:text-orange-400 text-hud-muted transition-colors p-1 disabled:opacity-40 disabled:pointer-events-none"
                      title={
                        groupId === 'REPEATED' && !preloadedRoute?.trim()
                          ? 'Sin ruta para compartir'
@@ -4232,10 +4232,10 @@ export default function MapView({
 
            {/* Navigation Instruction */}
            {effectiveRouteForNav && (
-             <div className={`bg-zinc-950/92 backdrop-blur-md border-l-4 border-sky-brand-500 rounded-2xl shadow-[var(--shadow-sheet)] flex flex-col gap-2 hud-land:gap-1 pointer-events-auto mt-2 hud-land:mt-1 max-w-sm hud-land:max-w-[17rem] ring-1 ring-white/10 transition-all duration-300 ${isCompactUI ? 'p-3 hud-land:p-2' : 'p-4'}`}>
+             <div className={`bg-hud-bg/95 backdrop-blur-md border-l-4 border-hud-accent rounded-2xl shadow-[var(--shadow-sheet)] flex flex-col gap-2 hud-land:gap-1 pointer-events-auto mt-2 hud-land:mt-1 max-w-sm hud-land:max-w-[17rem] ring-1 ring-hud-line text-hud-ink transition-all duration-300 ${isCompactUI ? 'p-3 hud-land:p-2' : 'p-4'}`}>
                <div className={`flex items-center ${isCompactUI ? 'gap-3 hud-land:gap-2' : 'gap-5'}`}>
                  <div
-                   className={`${isCompactUI ? 'w-12 h-12 hud-land:w-10 hud-land:h-10' : 'w-16 h-16'} rounded-2xl flex items-center justify-center text-white shrink-0 shadow-lg shadow-black/40 ring-2 ring-white/25 bg-[#1f7aa0]`}
+                   className={`${isCompactUI ? 'w-12 h-12 hud-land:w-10 hud-land:h-10' : 'w-16 h-16'} rounded-2xl flex items-center justify-center text-hud-accent shrink-0 shadow-lg shadow-black/40 ring-2 ring-hud-accent/50 bg-hud-raised`}
                  >
                    {getDirectionIcon(
                      navState.maneuverType,
@@ -4245,28 +4245,28 @@ export default function MapView({
                    )}
                  </div>
                  <div className="flex-1 min-w-0">
-                   <p className={`${isCompactUI ? 'text-base hud-land:text-sm' : 'text-xl'} text-white font-black leading-tight tracking-tight line-clamp-2 hud-land:line-clamp-1`}>{navState.instruction}</p>
+                   <p className={`${isCompactUI ? 'text-base hud-land:text-sm' : 'text-xl'} text-hud-ink font-black leading-tight tracking-tight line-clamp-2 hud-land:line-clamp-1`}>{navState.instruction}</p>
                    {navState.instructionDetail ? (
-                     <p className={`${isCompactUI ? 'text-xs hud-land:hidden' : 'text-sm'} text-blue-100/90 font-semibold leading-snug mt-1 line-clamp-2`}>
+                     <p className={`${isCompactUI ? 'text-xs hud-land:hidden' : 'text-sm'} text-hud-muted font-semibold leading-snug mt-1 line-clamp-2`}>
                        {navState.instructionDetail}
                      </p>
                    ) : null}
                    {navState.distanceToNext !== null && (
                      <div className="mt-1.5">
                        <div className="flex items-baseline gap-1.5">
-                         <span className={`${isCompactUI ? 'text-xl hud-land:text-lg' : 'text-2xl'} text-blue-400 font-black tabular-nums`}>
+                         <span className={`${isCompactUI ? 'text-3xl hud-land:text-2xl' : 'text-4xl'} font-display text-hud-accent font-bold tabular-nums`}>
                            {formatNavDistanceMeters(navState.distanceToNext)}
                          </span>
                        </div>
                        {!isCompactUI && (
-                         <p className="text-[11px] text-zinc-500 font-medium mt-0.5 leading-snug">
+                         <p className="text-[11px] text-hud-muted font-medium mt-0.5 leading-snug">
                            {navState.isOnRoute ? 'Por el trazado hasta la maniobra' : 'Distancia en línea recta al trazado'}
                          </p>
                        )}
                      </div>
                    )}
                    {navState.isOnRoute && navState.remainingM != null && navState.etaMs != null && (
-                     <p className="mt-1 hud-land:mt-0.5 text-xs text-zinc-300 font-semibold tabular-nums">
+                     <p className="mt-1 hud-land:mt-0.5 text-xs text-hud-ink/90 font-semibold tabular-nums">
                        <span className="hud-land:hidden">
                          {formatNavDistanceMeters(navState.remainingM)} restantes · llegada {formatNavEtaClock(navState.etaMs)}
                          {navState.remainingTimeS != null ? ` (${formatNavDurationS(navState.remainingTimeS)})` : ''}
@@ -4284,7 +4284,7 @@ export default function MapView({
                        className={`mt-2 hud-land:mt-1 flex max-w-full min-w-0 items-start gap-2 rounded-xl px-2.5 py-1.5 hud-land:py-1 text-xs leading-snug font-bold ring-1 ${
                          curveWarn.tooFast
                            ? 'bg-amber-500/15 text-amber-100 ring-amber-400/40'
-                           : 'bg-zinc-900/80 text-zinc-200 ring-white/10'
+                           : 'bg-hud-raised text-hud-ink ring-hud-line'
                        }`}
                      >
                        {curveWarn.direction === 'right' ? (
@@ -4305,7 +4305,7 @@ export default function MapView({
                      </div>
                    )}
                    {ROUTE_STOPS_ENABLED && nextStopAhead && (
-                     <div className="mt-2 hud-land:mt-1 flex max-w-full min-w-0 items-start gap-2 rounded-xl px-2.5 py-1.5 hud-land:py-1 text-xs leading-snug font-bold bg-zinc-900/80 text-zinc-200 ring-1 ring-white/10">
+                     <div className="mt-2 hud-land:mt-1 flex max-w-full min-w-0 items-start gap-2 rounded-xl px-2.5 py-1.5 hud-land:py-1 text-xs leading-snug font-bold bg-hud-raised text-hud-ink ring-1 ring-hud-line">
                        <Fuel size={14} className="text-orange-400 shrink-0 mt-0.5" aria-hidden />
                        <span className="min-w-0 break-words">
                          <span className="hud-land:hidden">
@@ -4323,7 +4323,7 @@ export default function MapView({
                <button
                  type="button"
                  onClick={openRouteStops}
-                 className="w-full flex items-center justify-center gap-2 py-2 hud-land:py-1 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 text-xs font-bold"
+                 className="w-full flex items-center justify-center gap-2 py-2 hud-land:py-1 rounded-xl bg-hud-raised hover:bg-hud-line border border-hud-line text-hud-ink text-xs font-bold"
                >
                  <Fuel size={14} className="text-orange-400 shrink-0" />
                  <span className="hud-land:hidden">Paradas en ruta</span>
@@ -4333,7 +4333,7 @@ export default function MapView({
                <button
                  type="button"
                  onClick={() => void cancelNavigation()}
-                 className="w-full flex items-center justify-center gap-2 py-2 hud-land:py-1 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 text-xs font-bold"
+                 className="w-full flex items-center justify-center gap-2 py-2 hud-land:py-1 rounded-xl bg-hud-raised hover:bg-hud-line border border-hud-line text-hud-ink text-xs font-bold"
                >
                  <Ban size={14} className="text-orange-400 shrink-0" />
                  {isHost ? (
@@ -4364,7 +4364,7 @@ export default function MapView({
            <div className="flex flex-col items-end gap-1 pointer-events-auto">
              <div
                className={`flex flex-col items-end gap-1.5 transition-all duration-300 ${
-                 voiceReconnecting ? 'rounded-2xl border border-amber-500/20 bg-zinc-950/85 backdrop-blur-md px-2 py-2 shadow-lg shadow-black/25 ring-1 ring-amber-400/15' : ''
+                 voiceReconnecting ? 'rounded-2xl border border-amber-500/20 bg-hud-bg/85 backdrop-blur-md px-2 py-2 shadow-lg shadow-black/25 ring-1 ring-amber-400/15' : ''
                }`}
              >
                <button
@@ -4384,14 +4384,14 @@ export default function MapView({
                  }}
                  className={`mr-focus flex h-11 w-11 items-center justify-center rounded-full shadow-[var(--shadow-lift)] ring-1 ring-white/[0.09] transition-all duration-300 ease-out relative shrink-0 ${
                    voiceReconnecting
-                     ? 'bg-zinc-900 text-amber-400 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] ring-2 ring-amber-400/45'
+                     ? 'bg-hud-surface text-amber-400 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] ring-2 ring-amber-400/45'
                      : isVoiceActive
                        ? 'bg-emerald-500 text-white shadow-emerald-900/30 hover:bg-emerald-400'
                        : micError
                          ? 'bg-red-900/80 text-red-200 ring-2 ring-red-500/50'
                          : !voiceAllowed
-                           ? 'bg-zinc-800 text-amber-400 ring-2 ring-amber-500/35'
-                           : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+                           ? 'bg-hud-raised text-amber-400 ring-2 ring-amber-500/35'
+                           : 'bg-hud-raised text-hud-muted hover:bg-zinc-700'
                  }`}
                  title={
                    !voiceAllowed
@@ -4421,7 +4421,7 @@ export default function MapView({
                {voiceReconnecting && (
                  <div className="text-right pr-0.5 pb-0.5 max-w-[10rem]">
                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-200/95">Reconectando</p>
-                   <p className="text-[9px] text-zinc-500 mt-0.5 leading-snug">Restaurando enlace de voz</p>
+                   <p className="text-[9px] text-hud-muted mt-0.5 leading-snug">Restaurando enlace de voz</p>
                  </div>
                )}
              </div>
@@ -4429,7 +4429,7 @@ export default function MapView({
 
            <button
              onClick={() => (isFollowing ? setIsFollowing(false) : recenterMapOnRider())}
-             className={`mr-focus flex h-11 w-11 items-center justify-center rounded-full shadow-[var(--shadow-lift)] ring-1 ring-white/[0.09] backdrop-blur-md transition-colors ${isFollowing ? 'bg-sky-brand-500 text-white' : 'bg-zinc-950/85 text-zinc-300 hover:text-white'}`}
+             className={`mr-focus flex h-11 w-11 items-center justify-center rounded-full shadow-[var(--shadow-lift)] ring-1 ring-white/[0.09] backdrop-blur-md transition-colors ${isFollowing ? 'bg-sky-brand-500 text-white' : 'bg-hud-bg/85 text-hud-ink hover:bg-hud-raised'}`}
              title={isFollowing ? "Dejar de seguir" : "Centrar mapa"}
            >
              <Navigation size={20} />
@@ -4441,27 +4441,27 @@ export default function MapView({
                 setShowSettings(false);
                 setShowAlertMenu(!showAlertMenu);
               }}
-              className={`mr-focus flex h-11 w-11 items-center justify-center rounded-full shadow-[var(--shadow-lift)] ring-1 ring-white/[0.09] backdrop-blur-md transition-colors ${showAlertMenu ? 'bg-red-500 text-white' : 'bg-zinc-950/85 text-zinc-300 hover:text-white'}`}
+              className={`mr-focus flex h-11 w-11 items-center justify-center rounded-full shadow-[var(--shadow-lift)] ring-1 ring-white/[0.09] backdrop-blur-md transition-colors ${showAlertMenu ? 'bg-red-500 text-white' : 'bg-hud-bg/85 text-hud-ink hover:bg-hud-raised'}`}
               title="Avisos rápidos"
             >
               <Bell size={20} />
             </button>
 
             {showAlertMenu && (
-              <div className="absolute top-0 right-14 bg-zinc-950/95 backdrop-blur-xl border border-zinc-800 rounded-3xl p-2 shadow-2xl flex flex-col gap-1 min-w-[220px] max-w-[min(90vw,300px)] z-[2001] animate-in fade-in slide-in-from-right-4 duration-200">
-                <div className="px-4 py-2 border-b border-zinc-800 mb-1">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Alertas</p>
+              <div className="absolute top-0 right-14 bg-hud-surface/95 backdrop-blur-xl border border-hud-line text-hud-ink rounded-3xl p-2 shadow-2xl flex flex-col gap-1 min-w-[220px] max-w-[min(90vw,300px)] z-[2001] animate-in fade-in slide-in-from-right-4 duration-200">
+                <div className="px-4 py-2 border-b border-hud-line mb-1">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-hud-muted">Alertas</p>
                 </div>
                 <div className="grid grid-cols-3 gap-1 px-1">
-                  <button onClick={() => sendAlert('Parado')} className="flex flex-col items-center gap-1 text-white hover:bg-zinc-800 p-2 rounded-xl text-[10px] font-bold transition-colors" title="Parado">
+                  <button onClick={() => sendAlert('Parado')} className="flex flex-col items-center gap-1 text-white hover:bg-hud-raised p-2 rounded-xl text-[10px] font-bold transition-colors" title="Parado">
                     <AlertCircle size={16} className="text-yellow-500" />
                     <span>Parado</span>
                   </button>
-                  <button onClick={() => sendAlert('Averiado')} className="flex flex-col items-center gap-1 text-white hover:bg-zinc-800 p-2 rounded-xl text-[10px] font-bold transition-colors" title="Averiado">
+                  <button onClick={() => sendAlert('Averiado')} className="flex flex-col items-center gap-1 text-white hover:bg-hud-raised p-2 rounded-xl text-[10px] font-bold transition-colors" title="Averiado">
                     <Wrench size={16} className="text-red-500" />
                     <span>Avería</span>
                   </button>
-                  <button onClick={() => sendAlert('Repostando')} className="flex flex-col items-center gap-1 text-white hover:bg-zinc-800 p-2 rounded-xl text-[10px] font-bold transition-colors" title="Repostando">
+                  <button onClick={() => sendAlert('Repostando')} className="flex flex-col items-center gap-1 text-white hover:bg-hud-raised p-2 rounded-xl text-[10px] font-bold transition-colors" title="Repostando">
                     <Fuel size={16} className="text-blue-500" />
                     <span>Repostar</span>
                   </button>
@@ -4476,22 +4476,22 @@ export default function MapView({
                 setShowAlertMenu(false);
                 setShowSettings(!showSettings);
               }}
-               className={`mr-focus flex h-11 w-11 items-center justify-center rounded-full shadow-[var(--shadow-lift)] ring-1 ring-white/[0.09] backdrop-blur-md transition-colors ${showSettings ? 'bg-zinc-100 text-zinc-900' : 'bg-zinc-950/85 text-zinc-300 hover:text-white'}`}
+               className={`mr-focus flex h-11 w-11 items-center justify-center rounded-full shadow-[var(--shadow-lift)] ring-1 ring-white/[0.09] backdrop-blur-md transition-colors ${showSettings ? 'bg-zinc-100 text-zinc-900' : 'bg-hud-bg/85 text-hud-ink hover:bg-hud-raised'}`}
                title="Menú"
              >
                 <Menu size={20} />
               </button>
               
               {showSettings && (
-                <div className="absolute top-0 right-14 bg-zinc-950/95 backdrop-blur-xl border border-zinc-800 rounded-3xl p-2 sm:p-2.5 shadow-2xl flex flex-col gap-1 min-w-[220px] max-w-[min(90vw,300px)] landscape:min-w-[260px] landscape:max-w-[min(92vw,400px)] landscape:gap-1.5 z-[2001] animate-in fade-in slide-in-from-right-4 duration-200 max-h-[min(calc(100dvh-5rem),calc(100svh-5rem),85vh)] landscape:max-h-[min(88dvh,calc(100dvh-2.5rem))] overflow-y-auto overscroll-contain custom-scrollbar">
-                  <div className="px-4 py-2 border-b border-zinc-800 mb-1">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Opciones de Mapa</p>
+                <div className="absolute top-0 right-14 bg-hud-surface/95 backdrop-blur-xl border border-hud-line text-hud-ink rounded-3xl p-2 sm:p-2.5 shadow-2xl flex flex-col gap-1 min-w-[220px] max-w-[min(90vw,300px)] landscape:min-w-[260px] landscape:max-w-[min(92vw,400px)] landscape:gap-1.5 z-[2001] animate-in fade-in slide-in-from-right-4 duration-200 max-h-[min(calc(100dvh-5rem),calc(100svh-5rem),85vh)] landscape:max-h-[min(88dvh,calc(100dvh-2.5rem))] overflow-y-auto overscroll-contain custom-scrollbar">
+                  <div className="px-4 py-2 border-b border-hud-line mb-1">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-hud-muted">Opciones de Mapa</p>
                   </div>
 
                   {isHost && (
                    <button 
                      onClick={() => { setShowSearchModal(true); setShowSettings(false); }}
-                     className="flex items-center gap-3 text-white hover:bg-zinc-800 p-3 rounded-2xl text-sm font-bold transition-colors"
+                     className="flex items-center gap-3 text-white hover:bg-hud-raised p-3 rounded-2xl text-sm font-bold transition-colors"
                    >
                      <div className="w-8 h-8 rounded-xl bg-orange-500/20 flex items-center justify-center text-orange-500">
                        <Search size={18} />
@@ -4507,15 +4507,15 @@ export default function MapView({
                     setCurveWarnEnabled(next);
                     writeStoredFlag(CURVE_WARN_KEY, next);
                   }}
-                  className="flex items-center gap-3 text-white hover:bg-zinc-800 p-3 rounded-2xl text-sm font-bold transition-colors"
+                  className="flex items-center gap-3 text-white hover:bg-hud-raised p-3 rounded-2xl text-sm font-bold transition-colors"
                   aria-pressed={curveWarnEnabled}
                 >
-                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${curveWarnEnabled ? 'bg-sky-500/20 text-sky-brand-400' : 'bg-zinc-800 text-zinc-400'}`}>
+                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${curveWarnEnabled ? 'bg-sky-500/20 text-sky-brand-400' : 'bg-hud-raised text-hud-muted'}`}>
                     <CornerUpRight size={18} />
                   </div>
                   <span className="text-left">
                     Aviso de curvas {curveWarnEnabled ? 'ON' : 'OFF'}
-                    <span className="block text-[10px] font-semibold text-zinc-500">Velocidad recomendada en curvas del trazado</span>
+                    <span className="block text-[10px] font-semibold text-hud-muted">Velocidad recomendada en curvas del trazado</span>
                   </span>
                 </button>
                 {curveWarnEnabled && (
@@ -4526,15 +4526,15 @@ export default function MapView({
                       setCurveVibrateEnabled(next);
                       writeStoredFlag(CURVE_VIBRATE_KEY, next);
                     }}
-                    className="flex items-center gap-3 text-white hover:bg-zinc-800 p-3 rounded-2xl text-sm font-bold transition-colors"
+                    className="flex items-center gap-3 text-white hover:bg-hud-raised p-3 rounded-2xl text-sm font-bold transition-colors"
                     aria-pressed={curveVibrateEnabled}
                   >
-                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${curveVibrateEnabled ? 'bg-sky-500/20 text-sky-brand-400' : 'bg-zinc-800 text-zinc-400'}`}>
+                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${curveVibrateEnabled ? 'bg-sky-500/20 text-sky-brand-400' : 'bg-hud-raised text-hud-muted'}`}>
                       <Activity size={18} />
                     </div>
                     <span className="text-left">
                       Vibración en curva {curveVibrateEnabled ? 'ON' : 'OFF'}
-                      <span className="block text-[10px] font-semibold text-zinc-500">Solo si vas por encima de la velocidad recomendada</span>
+                      <span className="block text-[10px] font-semibold text-hud-muted">Solo si vas por encima de la velocidad recomendada</span>
                     </span>
                   </button>
                 )}
@@ -4554,12 +4554,12 @@ export default function MapView({
                     setShowSettings(false);
                   }}
                   className={`flex items-center gap-3 text-white p-3 rounded-2xl text-sm font-bold transition-colors ${
-                    weatherLayerAllowed ? 'hover:bg-zinc-800' : 'opacity-55 cursor-not-allowed'
+                    weatherLayerAllowed ? 'hover:bg-hud-raised' : 'opacity-55 cursor-not-allowed'
                   }`}
                 >
                   <div
                     className={`w-8 h-8 rounded-xl flex items-center justify-center ${
-                      showWeatherEffective ? 'bg-cyan-500/20 text-cyan-400' : 'bg-zinc-800 text-zinc-400'
+                      showWeatherEffective ? 'bg-cyan-500/20 text-cyan-400' : 'bg-hud-raised text-hud-muted'
                     }`}
                   >
                     <Layers size={18} />
@@ -4577,7 +4577,7 @@ export default function MapView({
                   </p>
                 )}
                 {showWeatherEffective && !weatherFetchFailed && rainRadar && !weatherTilesLoaded && (
-                  <p className="text-[11px] text-zinc-500 px-3 -mt-2 mb-1 leading-snug">
+                  <p className="text-[11px] text-hud-muted px-3 -mt-2 mb-1 leading-snug">
                     Cargando radar de lluvia...
                   </p>
                 )}
@@ -4597,7 +4597,7 @@ export default function MapView({
                     setShowSettings(false);
                     void handleSmartCalibration();
                   }}
-                   className="flex items-center gap-3 text-white hover:bg-zinc-800 p-3 rounded-2xl text-sm font-bold transition-colors"
+                   className="flex items-center gap-3 text-white hover:bg-hud-raised p-3 rounded-2xl text-sm font-bold transition-colors"
                  >
                    <div className="w-8 h-8 rounded-xl bg-green-500/20 flex items-center justify-center text-green-500">
                      <Target size={18} />
@@ -4612,7 +4612,7 @@ export default function MapView({
                        setShowSettings(false);
                        void requestPermission({ manual: true });
                      }}
-                     className="flex items-center gap-3 text-white hover:bg-zinc-800 p-3 rounded-2xl text-sm font-bold transition-colors"
+                     className="flex items-center gap-3 text-white hover:bg-hud-raised p-3 rounded-2xl text-sm font-bold transition-colors"
                    >
                      <div className="w-8 h-8 rounded-xl bg-amber-500/20 flex items-center justify-center text-amber-400">
                        <Target size={18} />
@@ -4623,9 +4623,9 @@ export default function MapView({
 
                  <button 
                    onClick={() => { toggleFullscreen(); setShowSettings(false); }}
-                   className="flex items-center gap-3 text-white hover:bg-zinc-800 p-3 rounded-2xl text-sm font-bold transition-colors"
+                   className="flex items-center gap-3 text-white hover:bg-hud-raised p-3 rounded-2xl text-sm font-bold transition-colors"
                  >
-                   <div className="w-8 h-8 rounded-xl bg-zinc-800 flex items-center justify-center text-zinc-400">
+                   <div className="w-8 h-8 rounded-xl bg-hud-raised flex items-center justify-center text-hud-muted">
                      {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
                    </div>
                    {isFullscreen ? 'Salir Pantalla Completa' : 'Pantalla Completa'}
@@ -4635,7 +4635,7 @@ export default function MapView({
                   onClick={() => {
                     void toggleRotationLock();
                   }}
-                   className="flex items-center gap-3 text-white hover:bg-zinc-800 p-3 rounded-2xl text-sm font-bold transition-colors"
+                   className="flex items-center gap-3 text-white hover:bg-hud-raised p-3 rounded-2xl text-sm font-bold transition-colors"
                  >
                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${rotationLocked ? 'bg-emerald-500/20 text-emerald-400' : 'bg-indigo-500/20 text-indigo-400'}`}>
                      {rotationLocked ? <Lock size={18} /> : <Smartphone size={18} />}
@@ -4648,11 +4648,11 @@ export default function MapView({
                       setShowSettings(false);
                       toggleForcedLandscapeUi();
                     }}
-                    className="flex items-center gap-3 text-white hover:bg-zinc-800 p-3 rounded-2xl text-sm font-bold transition-colors"
+                    className="flex items-center gap-3 text-white hover:bg-hud-raised p-3 rounded-2xl text-sm font-bold transition-colors"
                   >
                     <div
                       className={`w-8 h-8 rounded-xl flex items-center justify-center ${
-                        forceLandscapeUi ? 'bg-emerald-500/20 text-emerald-300' : 'bg-zinc-800 text-zinc-400'
+                        forceLandscapeUi ? 'bg-emerald-500/20 text-emerald-300' : 'bg-hud-raised text-hud-muted'
                       }`}
                     >
                       <RotateCw size={18} />
@@ -4666,9 +4666,9 @@ export default function MapView({
                     setShowSettings(false);
                     enterPocketMode();
                   }}
-                   className="flex items-center gap-3 text-white hover:bg-zinc-800 p-3 rounded-2xl text-sm font-bold transition-colors"
+                   className="flex items-center gap-3 text-white hover:bg-hud-raised p-3 rounded-2xl text-sm font-bold transition-colors"
                  >
-                   <div className="w-8 h-8 rounded-xl bg-zinc-800 flex items-center justify-center text-zinc-400">
+                   <div className="w-8 h-8 rounded-xl bg-hud-raised flex items-center justify-center text-hud-muted">
                      <Lock size={18} />
                    </div>
                    Modo Bolsillo
@@ -4679,7 +4679,7 @@ export default function MapView({
                     setShowSettings(false);
                     enterMirrorLinkMode();
                   }}
-                  className="flex items-center gap-3 text-white hover:bg-zinc-800 p-3 rounded-2xl text-sm font-bold transition-colors"
+                  className="flex items-center gap-3 text-white hover:bg-hud-raised p-3 rounded-2xl text-sm font-bold transition-colors"
                 >
                   <div className="w-8 h-8 rounded-xl bg-indigo-500/20 flex items-center justify-center text-indigo-300">
                     <Monitor size={18} />
@@ -4689,7 +4689,7 @@ export default function MapView({
 
                  <button 
                   onClick={() => { setShowRanking(!showRanking); setShowSettings(false); }}
-                   className="flex items-center gap-3 text-white hover:bg-zinc-800 p-3 rounded-2xl text-sm font-bold transition-colors"
+                   className="flex items-center gap-3 text-white hover:bg-hud-raised p-3 rounded-2xl text-sm font-bold transition-colors"
                  >
                    <div className="w-8 h-8 rounded-xl bg-yellow-500/20 flex items-center justify-center text-yellow-500">
                      <Users size={18} />
@@ -4721,7 +4721,7 @@ export default function MapView({
 
       {needsOrientationUserGesture && leanPermissionGranted === null && (
         <div
-          className="absolute z-[1001] bg-indigo-600 text-white p-3 hud-land:p-2 rounded-xl shadow-xl text-sm hud-land:text-xs flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between hud-land:!left-auto hud-land:!right-[4.5rem] hud-land:max-w-[19rem]"
+          className="absolute z-[1001] bg-hud-surface text-hud-ink ring-1 ring-hud-accent/40 p-3 hud-land:p-2 rounded-xl shadow-xl text-sm hud-land:text-xs flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between hud-land:!left-auto hud-land:!right-[4.5rem] hud-land:max-w-[19rem]"
           style={{
             top: leanIosBannerTop,
             left: 'max(1rem, env(safe-area-inset-left, 0px))',
@@ -4739,7 +4739,7 @@ export default function MapView({
           </span>
           <button
             type="button"
-            className="shrink-0 bg-white text-indigo-700 font-bold px-4 hud-land:px-3 py-2 hud-land:py-1.5 rounded-xl"
+            className="shrink-0 bg-hud-accent text-hud-bg font-bold px-4 hud-land:px-3 py-2 hud-land:py-1.5 rounded-xl"
             onClick={() => void requestPermission()}
           >
             <span className="hud-land:hidden">Permitir inclinómetro</span>
@@ -4817,20 +4817,20 @@ export default function MapView({
           onClick={() => setShowExitConfirm(false)}
         >
           <div
-            className="bg-zinc-900 border border-zinc-700 rounded-3xl p-6 max-w-sm w-full shadow-2xl pointer-events-auto"
+            className="bg-hud-surface border border-zinc-700 rounded-3xl p-6 max-w-sm w-full shadow-2xl pointer-events-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 id="exit-route-title" className="text-lg font-black text-white mb-2">
               ¿Salir de la ruta?
             </h2>
-            <p className="text-sm text-zinc-400 mb-6 leading-relaxed">
+            <p className="text-sm text-hud-muted mb-6 leading-relaxed">
               Dejarás de compartir posición con el grupo en esta sesión. Puedes volver a unirte con el código.
             </p>
             <div className="flex flex-col-reverse sm:flex-row gap-3 sm:justify-end">
               <button
                 type="button"
                 onClick={() => setShowExitConfirm(false)}
-                className="w-full sm:w-auto px-4 py-3 rounded-2xl font-bold text-white bg-zinc-800 hover:bg-zinc-700 transition-colors"
+                className="w-full sm:w-auto px-4 py-3 rounded-2xl font-bold text-white bg-hud-raised hover:bg-zinc-700 transition-colors"
               >
                 Seguir en ruta
               </button>
@@ -4867,7 +4867,7 @@ export default function MapView({
           }}
         >
           <div
-            className="bg-zinc-900 border border-orange-500/40 rounded-3xl p-5 sm:p-6 max-w-md w-full shadow-2xl"
+            className="bg-hud-surface border border-orange-500/40 rounded-3xl p-5 sm:p-6 max-w-md w-full shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center gap-2 mb-3">
@@ -4957,7 +4957,7 @@ export default function MapView({
                   <h2 className="text-2xl font-black text-white uppercase tracking-tighter">
                     {touchLockKind === 'mirrorlink' ? 'MirrorLink' : 'Modo Bolsillo'}
                   </h2>
-                  <p className="text-zinc-400 text-sm max-w-[260px] mx-auto leading-snug">
+                  <p className="text-hud-muted text-sm max-w-[260px] mx-auto leading-snug">
                     {touchLockKind === 'mirrorlink'
                       ? 'Para ver mapa y datos en la pantalla de la moto: guarda el teléfono en el bolsillo. Vista horizontal, 30 s y luego mapa con toques bloqueados. La inclinación se calcula por GPS (el móvil va guardado). Mismo desbloqueo que modo bolsillo.'
                       : 'Guarda el móvil en tu bolsillo. Se bloqueará automáticamente.'}
@@ -4969,7 +4969,7 @@ export default function MapView({
                     releaseOrientationLockUi();
                     setTouchLockKind(null);
                   }}
-                  className="px-6 py-3 bg-zinc-800 text-white rounded-2xl font-bold text-sm"
+                  className="px-6 py-3 bg-hud-raised text-white rounded-2xl font-bold text-sm"
                 >
                   Cancelar
                 </button>
@@ -5016,7 +5016,7 @@ export default function MapView({
                     </div>
                   )}
                 </motion.div>
-                <p className="text-[9px] font-bold text-white/32 uppercase tracking-wider max-w-[130px] leading-tight">
+                <p className="text-[9px] font-bold text-hud-muted uppercase tracking-wider max-w-[130px] leading-tight">
                   3 toques + mantener
                 </p>
               </div>
@@ -5045,13 +5045,13 @@ export default function MapView({
                     </div>
                   ) : (
                     <div className="flex flex-col items-center gap-4">
-                      <Lock size={64} className="text-zinc-700" />
+                      <Lock size={64} className="text-hud-muted" />
                       <div className="flex gap-2">
                         {[1, 2, 3].map((i) => (
                           <div
                             key={i}
                             className={`w-3 h-3 rounded-full transition-colors duration-200 ${
-                              pocketTaps >= i ? 'bg-orange-500' : 'bg-zinc-800'
+                              pocketTaps >= i ? 'bg-orange-500' : 'bg-hud-raised'
                             }`}
                           />
                         ))}
@@ -5060,7 +5060,7 @@ export default function MapView({
                   )}
                 </motion.div>
 
-                <p className="text-zinc-800 text-[10px] font-black uppercase tracking-[0.3em] absolute bottom-12">
+                <p className="text-hud-muted text-[10px] font-black uppercase tracking-[0.3em] absolute bottom-12">
                   3 toques + 1 largo para desbloquear
                 </p>
               </div>
@@ -5077,7 +5077,7 @@ export default function MapView({
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -20 }}
-            className={`absolute z-[1001] bg-zinc-950/95 backdrop-blur-md border border-zinc-800 rounded-2xl p-4 shadow-2xl w-64 pointer-events-auto transition-all duration-500 ${
+            className={`absolute z-[1001] bg-hud-bg/95 backdrop-blur-md border border-hud-line rounded-2xl p-4 shadow-2xl w-64 pointer-events-auto transition-all duration-500 ${
               isLandscapeUi
                 ? 'bottom-40 flex flex-col max-h-[46vh]' 
                 : ''
@@ -5094,7 +5094,7 @@ export default function MapView({
               </h3>
               <button 
                 onClick={() => setShowRanking(false)}
-                className="text-zinc-500 hover:text-white transition-colors p-1"
+                className="text-hud-muted hover:text-white transition-colors p-1"
               >
                 <X size={18} />
               </button>
@@ -5102,8 +5102,8 @@ export default function MapView({
             <div className="flex flex-col gap-2 max-h-[40vh] landscape:max-h-none landscape:flex-1 overflow-y-auto pr-1 custom-scrollbar">
               {rankingLocations
                 .map((loc, index) => (
-                  <div key={loc.uid} className={`flex items-center gap-3 p-2 rounded-xl border ${loc.uid === user?.uid ? 'bg-orange-500/10 border-orange-500/30' : 'bg-zinc-900 border-zinc-800'}`}>
-                    <div className="w-6 text-xs font-black text-zinc-500">#{index + 1}</div>
+                  <div key={loc.uid} className={`flex items-center gap-3 p-2 rounded-xl border ${loc.uid === user?.uid ? 'bg-orange-500/10 border-orange-500/30' : 'bg-hud-surface border-hud-line'}`}>
+                    <div className="w-6 text-xs font-black text-hud-muted">#{index + 1}</div>
                     <div className="relative shrink-0">
                       <AvatarFrame frameId={loc.profileFrameId} size={36}>
                         <div
@@ -5112,7 +5112,7 @@ export default function MapView({
                           <img
                             src={loc.photoURL || 'https://via.placeholder.com/32'}
                             alt=""
-                            className="w-8 h-8 rounded-full block bg-zinc-800"
+                            className="w-8 h-8 rounded-full block bg-hud-raised"
                           />
                         </div>
                       </AvatarFrame>
@@ -5125,7 +5125,7 @@ export default function MapView({
                         <span className="min-w-0 break-words">{loc.displayName}</span>
                         {loc.isPremium ? <PremiumBadge compact /> : null}
                       </p>
-                      <p className="text-[10px] text-zinc-500 font-mono">
+                      <p className="text-[10px] text-hud-muted font-mono">
                         {loc.waitingGps ? 'Esperando señal GPS…' : `${loc.score || 0} pts`}
                       </p>
                     </div>
@@ -5138,10 +5138,10 @@ export default function MapView({
 
       {/* HUD Overlay */}
       <div className={`absolute left-0 right-0 z-[1000] pointer-events-none flex justify-center px-2 sm:px-4 landscape:justify-start landscape:left-4 landscape:right-auto ${isLandscapeUi ? 'landscape:bottom-3' : 'bottom-5'}`}>
-        <div className="mr-sheet backdrop-blur-2xl rounded-[1.5rem] sm:rounded-[1.75rem] p-1.5 flex items-center gap-1 sm:gap-1.5 pointer-events-auto max-w-[min(100%,calc(100vw-1rem))] min-w-0 overflow-visible landscape:scale-90 landscape:origin-bottom-left">
+        <div className="bg-hud-bg/95 text-hud-ink border border-hud-line shadow-[var(--shadow-sheet)] backdrop-blur-2xl rounded-[1.5rem] sm:rounded-[1.75rem] p-1.5 flex items-center gap-1 sm:gap-1.5 pointer-events-auto max-w-[min(100%,calc(100vw-1rem))] min-w-0 overflow-visible landscape:scale-90 landscape:origin-bottom-left">
           
           {/* Speed + tiempo en ubicación — ancho fijo para no empujar Pausa/Finalizar fuera del viewport */}
-          <div className="flex flex-col items-center justify-center w-[5rem] sm:w-[6.25rem] shrink-0 py-2 sm:py-3 px-2 sm:px-4 bg-black/25 rounded-[var(--radius-card)] ring-1 ring-white/[0.06] landscape:w-[5rem] landscape:px-2 hud-land:w-[4.25rem] hud-land:py-1.5 hud-land:px-1.5">
+          <div className="flex flex-col items-center justify-center w-[5rem] sm:w-[6.25rem] shrink-0 py-2 sm:py-3 px-2 sm:px-4 bg-hud-surface rounded-[var(--radius-card)] ring-1 ring-hud-line landscape:w-[5rem] landscape:px-2 hud-land:w-[4.25rem] hud-land:py-1.5 hud-land:px-1.5">
             {showHudWeather && (
               <div
                 className="flex items-center justify-center gap-1 mb-0.5 sm:mb-1 min-h-[18px] sm:min-h-[20px] w-full hud-land:hidden"
@@ -5165,11 +5165,11 @@ export default function MapView({
                     </span>
                     <span className="text-[9px] sm:text-[10px] font-black tabular-nums text-cyan-100/95 leading-none tracking-tight">
                       {Math.round(mapWeather.windSpeedKmh)}
-                      <span className="text-[9px] font-semibold text-zinc-400 ml-0.5">km/h</span>
+                      <span className="text-[9px] font-semibold text-hud-muted ml-0.5">km/h</span>
                     </span>
                   </>
                 ) : (
-                  <span className="text-[9px] text-zinc-600 tabular-nums">—</span>
+                  <span className="text-[9px] text-hud-muted tabular-nums">—</span>
                 )}
               </div>
             )}
@@ -5192,7 +5192,7 @@ export default function MapView({
                       strokeWidth={2.25}
                       aria-hidden
                     />
-                    <span className="text-[11px] sm:text-sm font-black tabular-nums text-zinc-100 leading-none">
+                    <span className="text-[11px] sm:text-sm font-black tabular-nums text-hud-ink leading-none">
                       {mapWeather.tempC != null ? `${Math.round(mapWeather.tempC)}°` : '—'}
                     </span>
                   </>
@@ -5204,7 +5204,7 @@ export default function MapView({
                 </span>
               )}
             </div>
-            <span className="font-display text-4xl sm:text-6xl hud-land:text-[2.25rem] font-bold leading-none tracking-tight text-zinc-50 tabular-nums inline-block min-w-[3ch] text-center">{currentSpeedKmh}</span>
+            <span className="font-display text-4xl sm:text-6xl hud-land:text-[2.25rem] font-bold leading-none tracking-tight text-hud-ink tabular-nums inline-block min-w-[3ch] text-center">{currentSpeedKmh}</span>
             <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-[0.14em] text-sky-brand-400 mt-0.5 sm:mt-1 hud-land:mt-0">km/h</span>
           </div>
 
@@ -5217,13 +5217,13 @@ export default function MapView({
                   <span className="text-blue-400" title="Máxima inclinación a la izquierda">
                     <span className="hud-land:hidden">Izq. </span>{maxLeanLeft}°
                   </span>
-                  <span className="text-zinc-500">{leftTurnsRef.current}</span>
+                  <span className="text-hud-muted">{leftTurnsRef.current}</span>
                 </div>
                 <div className="flex flex-col items-center">
                   <span className="text-red-500" title="Máxima inclinación a la derecha">
                     <span className="hud-land:hidden">Der. </span>{maxLeanRight}°
                   </span>
-                  <span className="text-zinc-500">{rightTurnsRef.current}</span>
+                  <span className="text-hud-muted">{rightTurnsRef.current}</span>
                 </div>
               </div>
 
@@ -5234,7 +5234,7 @@ export default function MapView({
                   </div>
                 </div>
                 <div className="mt-1 flex flex-col items-center">
-                  <span className="font-display text-2xl sm:text-3xl hud-land:text-xl font-bold leading-none text-zinc-50 tabular-nums">
+                  <span className="font-display text-2xl sm:text-3xl hud-land:text-xl font-bold leading-none text-hud-ink tabular-nums">
                     {Math.round(Math.abs(leanAngle))}°
                   </span>
                 </div>
@@ -5301,10 +5301,10 @@ export default function MapView({
       {/* Search Modal */}
       {showSearchModal && (
         <div className="absolute inset-0 z-[2000] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <div className="bg-zinc-900 border border-zinc-800 w-full max-w-md rounded-3xl overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-200">
-            <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+          <div className="bg-hud-surface border border-hud-line w-full max-w-md rounded-3xl overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-200">
+            <div className="p-6 border-b border-hud-line flex items-center justify-between">
               <h2 className="text-xl font-bold text-white">Modificar Ruta</h2>
-              <button onClick={() => setShowSearchModal(false)} className="p-2 hover:bg-zinc-800 rounded-full transition-colors text-zinc-400">
+              <button onClick={() => setShowSearchModal(false)} className="p-2 hover:bg-hud-raised rounded-full transition-colors text-hud-muted">
                 <X size={20} />
               </button>
             </div>
@@ -5312,13 +5312,13 @@ export default function MapView({
             <div className="p-6 space-y-6">
               <div className="space-y-4">
                 <div>
-                  <label className="block text-xs font-bold text-zinc-500 uppercase mb-2 ml-1">Buscar destino</label>
-                  <p className="text-[10px] text-zinc-500 mb-2 leading-relaxed">
+                  <label className="block text-xs font-bold text-hud-muted uppercase mb-2 ml-1">Buscar destino</label>
+                  <p className="text-[10px] text-hud-muted mb-2 leading-relaxed">
                     Escribe ciudad y región (ej. Huesca, Aragón) y elige la sugerencia que coincida con el municipio. Así evitamos que el buscador te lleve a un punto suelto lejos del centro.
                   </p>
                   <div className="flex gap-2">
                     <div className="relative flex-1">
-                      <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" size={16} />
+                      <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-hud-muted" size={16} />
                       <input 
                         placeholder="¿A dónde quieres ir?" 
                         value={searchDestination}
@@ -5331,7 +5331,7 @@ export default function MapView({
                           }
                         }}
                         onKeyDown={(e) => e.key === 'Enter' && generateRouteFromSearch()}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-3 text-sm text-white outline-none focus:border-orange-500 transition-all"
+                        className="w-full bg-hud-bg border border-hud-line rounded-xl pl-10 pr-4 py-3 text-sm text-white outline-none focus:border-orange-500 transition-all"
                       />
                     </div>
                     <button 
@@ -5343,7 +5343,7 @@ export default function MapView({
                     </button>
                   </div>
                   {searchSuggestions.length > 0 && (
-                    <div className="mt-2 max-h-40 overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-950/80">
+                    <div className="mt-2 max-h-40 overflow-y-auto rounded-xl border border-hud-line bg-hud-bg/80">
                       {searchSuggestions.map((item, idx) => (
                         <button
                           key={`${item.place_id || idx}`}
@@ -5359,14 +5359,14 @@ export default function MapView({
                               selectedSearchSuggestionRef.current = null;
                             }
                           }}
-                          className="w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800 transition-colors"
+                          className="w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-hud-raised transition-colors"
                         >
                           {(() => {
                             const sug = formatNominatimSuggestion(item);
                             return (
                               <>
-                                <span className="block font-semibold text-zinc-100">{sug.title}</span>
-                                {sug.subtitle && <span className="block text-[11px] text-zinc-500">{sug.subtitle}</span>}
+                                <span className="block font-semibold text-hud-ink">{sug.title}</span>
+                                {sug.subtitle && <span className="block text-[11px] text-hud-muted">{sug.subtitle}</span>}
                               </>
                             );
                           })()}
@@ -5378,17 +5378,17 @@ export default function MapView({
 
                 <div className="relative">
                   <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-zinc-800"></div>
+                    <div className="w-full border-t border-hud-line"></div>
                   </div>
                   <div className="relative flex justify-center text-xs uppercase">
-                    <span className="bg-zinc-900 px-2 text-zinc-500">O sube un archivo</span>
+                    <span className="bg-hud-surface px-2 text-hud-muted">O sube un archivo</span>
                   </div>
                 </div>
 
-                <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-zinc-800 rounded-2xl cursor-pointer hover:bg-zinc-800/30 transition-all">
+                <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-hud-line rounded-2xl cursor-pointer hover:bg-hud-raised/30 transition-all">
                   <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                    <Upload className="w-8 h-8 mb-2 text-zinc-500" />
-                    <p className="text-sm text-zinc-400 font-medium">Cargar archivo .gpx</p>
+                    <Upload className="w-8 h-8 mb-2 text-hud-muted" />
+                    <p className="text-sm text-hud-muted font-medium">Cargar archivo .gpx</p>
                   </div>
                   <input type="file" className="hidden" accept=".gpx" onChange={handleFileUpload} />
                 </label>
@@ -5651,11 +5651,11 @@ export default function MapView({
               animate={{ scale: 1, y: 0 }}
               className="relative w-full max-w-md rounded-[2.5rem] p-[1px] my-auto bg-gradient-to-br from-orange-500/50 via-zinc-700/40 to-blue-600/30 shadow-2xl shadow-black/50"
             >
-            <div className="relative bg-zinc-950 rounded-[2.45rem] overflow-hidden p-6 sm:p-8 text-center ring-1 ring-white/5">
+            <div className="relative bg-hud-bg rounded-[2.45rem] overflow-hidden p-6 sm:p-8 text-center ring-1 ring-white/5">
               <button
                 onClick={shareSummaryImage}
                 disabled={isSharingSummary}
-                className="absolute top-5 right-5 w-11 h-11 rounded-full bg-zinc-800/90 hover:bg-zinc-700 disabled:opacity-50 text-white flex items-center justify-center transition-colors z-10"
+                className="absolute top-5 right-5 w-11 h-11 rounded-full bg-hud-raised/90 hover:bg-zinc-700 disabled:opacity-50 text-white flex items-center justify-center transition-colors z-10"
                 title={isSharingSummary ? 'Generando imagen...' : 'Compartir resumen'}
               >
                 <Share2 size={18} />
@@ -5665,55 +5665,55 @@ export default function MapView({
               </div>
               
               <h2 className="text-2xl font-black text-white mb-1 tracking-tight">¡Ruta finalizada!</h2>
-              <p className="text-zinc-400 font-medium mb-6 text-sm">Resumen de tu sesión en MotoRide</p>
+              <p className="text-hud-muted font-medium mb-6 text-sm">Resumen de tu sesión en MotoRide</p>
               
               <div className="grid grid-cols-2 gap-3 mb-6">
-                <div className="bg-gradient-to-b from-zinc-900/90 to-zinc-950 p-3 rounded-2xl border border-zinc-800/80 text-left">
-                  <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500 mb-0.5">Distancia</p>
-                  <p className="text-xl font-black text-white tabular-nums">{summaryData.distance} <span className="text-xs text-zinc-500">km</span></p>
+                <div className="bg-gradient-to-b from-hud-surface/90 to-hud-bg p-3 rounded-2xl border border-hud-line/80 text-left">
+                  <p className="text-[9px] font-black uppercase tracking-widest text-hud-muted mb-0.5">Distancia</p>
+                  <p className="text-xl font-black text-white tabular-nums">{summaryData.distance} <span className="text-xs text-hud-muted">km</span></p>
                 </div>
-                <div className="bg-gradient-to-b from-zinc-900/90 to-zinc-950 p-3 rounded-2xl border border-zinc-800/80 text-left">
-                  <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500 mb-0.5">Tiempo</p>
+                <div className="bg-gradient-to-b from-hud-surface/90 to-hud-bg p-3 rounded-2xl border border-hud-line/80 text-left">
+                  <p className="text-[9px] font-black uppercase tracking-widest text-hud-muted mb-0.5">Tiempo</p>
                   <p className="text-xl font-black text-white tabular-nums">
-                    {Math.floor(summaryData.duration / 60000)}<span className="text-xs text-zinc-500">m</span> {Math.floor((summaryData.duration % 60000) / 1000)}<span className="text-xs text-zinc-500">s</span>
+                    {Math.floor(summaryData.duration / 60000)}<span className="text-xs text-hud-muted">m</span> {Math.floor((summaryData.duration % 60000) / 1000)}<span className="text-xs text-hud-muted">s</span>
                   </p>
                 </div>
-                <div className="bg-gradient-to-b from-zinc-900/90 to-zinc-950 p-3 rounded-2xl border border-zinc-800/80 text-left">
-                  <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500 mb-0.5">Vel. Media</p>
+                <div className="bg-gradient-to-b from-hud-surface/90 to-hud-bg p-3 rounded-2xl border border-hud-line/80 text-left">
+                  <p className="text-[9px] font-black uppercase tracking-widest text-hud-muted mb-0.5">Vel. Media</p>
                   <p className="text-xl font-black text-white tabular-nums">
-                    {summaryData.duration > 0 ? Math.round(summaryData.distance / (summaryData.duration / 3600000)) : 0} <span className="text-xs text-zinc-500">km/h</span>
+                    {summaryData.duration > 0 ? Math.round(summaryData.distance / (summaryData.duration / 3600000)) : 0} <span className="text-xs text-hud-muted">km/h</span>
                   </p>
                 </div>
-                <div className="bg-gradient-to-b from-zinc-900/90 to-zinc-950 p-3 rounded-2xl border border-zinc-800/80 text-left">
-                  <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500 mb-0.5">Curvas Izq./Der.</p>
+                <div className="bg-gradient-to-b from-hud-surface/90 to-hud-bg p-3 rounded-2xl border border-hud-line/80 text-left">
+                  <p className="text-[9px] font-black uppercase tracking-widest text-hud-muted mb-0.5">Curvas Izq./Der.</p>
                   <p className="text-lg font-black text-white tabular-nums">{summaryData.leftTurns} / {summaryData.rightTurns}</p>
                 </div>
-                <div className="bg-gradient-to-b from-zinc-900/90 to-zinc-950 p-3 rounded-2xl border border-zinc-800/80 text-left">
-                  <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500 mb-0.5">Puntos Base</p>
+                <div className="bg-gradient-to-b from-hud-surface/90 to-hud-bg p-3 rounded-2xl border border-hud-line/80 text-left">
+                  <p className="text-[9px] font-black uppercase tracking-widest text-hud-muted mb-0.5">Puntos Base</p>
                   <p className="text-xl font-black text-white tabular-nums">+{summaryData.baseScore ?? summaryData.score}</p>
                 </div>
-                <div className="bg-gradient-to-b from-zinc-900/90 to-zinc-950 p-3 rounded-2xl border border-zinc-800/80 text-left">
-                  <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500 mb-0.5">Total + bonus</p>
+                <div className="bg-gradient-to-b from-hud-surface/90 to-hud-bg p-3 rounded-2xl border border-hud-line/80 text-left">
+                  <p className="text-[9px] font-black uppercase tracking-widest text-hud-muted mb-0.5">Total + bonus</p>
                   <p className="text-xl font-black text-orange-400 tabular-nums">+{summaryData.score}</p>
                   {summaryData.distanceBonus > 0 && (
                     <p className="text-[10px] text-emerald-400 font-bold mt-1">Bonus distancia: +{summaryData.distanceBonus}</p>
                   )}
                 </div>
-                <div className="bg-gradient-to-b from-zinc-900/90 to-zinc-950 p-3 rounded-2xl border border-zinc-800/80 col-span-2 text-left">
-                  <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500 mb-0.5">Inclinación máx.</p>
+                <div className="bg-gradient-to-b from-hud-surface/90 to-hud-bg p-3 rounded-2xl border border-hud-line/80 col-span-2 text-left">
+                  <p className="text-[9px] font-black uppercase tracking-widest text-hud-muted mb-0.5">Inclinación máx.</p>
                   <p className="text-2xl font-black text-white tabular-nums">Izq. {summaryData.maxLeanLeft}° / Der. {summaryData.maxLeanRight}°</p>
                 </div>
               </div>
 
               {isHost && (
-                <div className="mb-6 rounded-2xl border border-zinc-800/80 bg-zinc-950/60 p-4 text-left">
+                <div className="mb-6 rounded-2xl border border-hud-line/80 bg-hud-bg/60 p-4 text-left">
                   <div className="mb-2 flex items-center gap-2">
                     <Coffee size={16} className="text-amber-500/90 shrink-0" aria-hidden />
-                    <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-hud-muted">
                       Gastos comida / bebida (€)
                     </p>
                   </div>
-                  <p className="mb-3 text-[11px] text-zinc-500 leading-snug">
+                  <p className="mb-3 text-[11px] text-hud-muted leading-snug">
                     Opcional. No se incluye en la imagen al compartir. Reparto a escote entre {memberCountForSplit}{' '}
                     {memberCountForSplit === 1 ? 'persona' : 'personas'} del grupo.
                   </p>
@@ -5724,7 +5724,7 @@ export default function MapView({
                     placeholder="Ej. 24,50"
                     value={foodExpenseInput}
                     onChange={(e) => setFoodExpenseInput(e.target.value)}
-                    className="w-full rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500/80"
+                    className="w-full rounded-xl border border-zinc-700 bg-hud-surface px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500/80"
                   />
                   {foodExpenseEurosParsed != null && foodExpenseEurosParsed > 0 && splitPerPersonEuros != null && (
                     <p className="mt-2 text-xs text-emerald-400/95 font-semibold tabular-nums">
@@ -5737,7 +5737,7 @@ export default function MapView({
                 </div>
               )}
 
-              <p className="mb-4 text-[11px] leading-relaxed text-zinc-500">
+              <p className="mb-4 text-[11px] leading-relaxed text-hud-muted">
                 Historial solo para rutas mayores a {MIN_KM_TO_SAVE_RIDE_HISTORY} km. Puntos y distancia total en tu perfil
                 siempre.
               </p>

@@ -17,16 +17,10 @@ export default function AppLogoSplash({
 
   return (
     <div
-      className={`fixed inset-0 ${zClassName} flex flex-col items-center justify-center overflow-hidden bg-zinc-950 px-6 ${className}`}
+      className={`fixed inset-0 ${zClassName} flex flex-col items-center justify-center overflow-hidden bg-mr-page px-6 ${className}`}
       role="status"
       aria-live="polite"
     >
-      {/* Horizonte tenue: un resplandor ámbar bajo el logo, sin gradientes de plantilla */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 bottom-0 h-1/2 bg-[radial-gradient(ellipse_70%_60%_at_50%_100%,rgba(245,138,31,0.14),transparent_70%)]"
-      />
-
       <div className="relative flex flex-col items-center">
         <img
           src={src}
@@ -39,13 +33,16 @@ export default function AppLogoSplash({
           className="mr-logo-breathe h-28 w-28 rounded-[1.75rem] object-cover"
         />
 
-        <svg
-          className="mt-9 h-8 w-56"
-          viewBox="0 0 224 32"
-          fill="none"
-          aria-hidden
-        >
-          <path d="M4 22 C 40 22, 52 6, 92 10 S 150 28, 220 8" stroke="rgb(39 38 35)" strokeWidth="3" strokeLinecap="round" />
+        {/* Línea de ruta: base discontinua en tinta suave y trazo ámbar que avanza */}
+        <svg className="mt-9 h-8 w-56" viewBox="0 0 224 32" fill="none" aria-hidden>
+          <path
+            d="M4 22 C 40 22, 52 6, 92 10 S 150 28, 220 8"
+            stroke="rgb(20 17 14 / 0.16)"
+            strokeWidth="3"
+            strokeLinecap="round"
+            className="mr-route-line"
+            strokeDasharray="6 9"
+          />
           <path
             d="M4 22 C 40 22, 52 6, 92 10 S 150 28, 220 8"
             stroke="#f58a1f"
@@ -57,8 +54,8 @@ export default function AppLogoSplash({
           />
         </svg>
 
-        <p className="mr-display mt-1 text-lg uppercase tracking-[0.18em] text-zinc-300">MotoRide</p>
-        <p className="mr-eyebrow mt-3 text-[0.625rem] text-orange-400/80">Preparando la ruta…</p>
+        <p className="mr-title mt-1 text-xl uppercase tracking-[0.18em] text-mr-ink">MotoRide</p>
+        <p className="mr-eyebrow mt-3">Preparando la ruta…</p>
       </div>
     </div>
   );

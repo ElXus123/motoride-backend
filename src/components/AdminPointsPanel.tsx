@@ -76,28 +76,28 @@ function ToggleRow({
   icon: React.ReactNode;
 }) {
   return (
-    <label className="flex items-start gap-3 rounded-2xl border border-zinc-800 bg-zinc-950/60 p-3 cursor-pointer hover:border-zinc-700 transition-colors">
+    <label className="flex items-start gap-3 rounded-2xl border border-mr-line bg-mr-page/60 p-3 cursor-pointer hover:border-mr-line transition-colors">
       <button
         type="button"
         role="switch"
         aria-checked={checked}
         onClick={() => onChange(!checked)}
         className={`mt-0.5 relative h-7 w-12 shrink-0 rounded-full transition-colors ${
-          checked ? 'bg-orange-500' : 'bg-zinc-700'
+          checked ? 'bg-mr-accent' : 'bg-mr-line-strong'
         }`}
       >
         <span
-          className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+          className={`absolute top-1 h-5 w-5 rounded-full bg-mr-paper shadow transition-transform ${
             checked ? 'left-6' : 'left-1'
           }`}
         />
       </button>
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-bold text-white flex items-center gap-2">
-          <span className="text-orange-400 shrink-0">{icon}</span>
+        <p className="text-sm font-bold text-mr-ink flex items-center gap-2">
+          <span className="text-mr-accent-text shrink-0">{icon}</span>
           {title}
         </p>
-        <p className="text-xs text-zinc-500 mt-1 leading-relaxed">{description}</p>
+        <p className="text-xs text-mr-muted mt-1 leading-relaxed">{description}</p>
       </div>
     </label>
   );
@@ -423,33 +423,33 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-[90] bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4"
+      className="mr-scrim-enter fixed inset-0 z-[90] flex items-end justify-center bg-[#14110e73] p-0 backdrop-blur-sm sm:items-center sm:p-4"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-4xl max-h-[min(92dvh,900px)] bg-zinc-900 border border-zinc-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col"
+        className="mr-sheet mr-sheet-enter flex max-h-[92dvh] w-full max-w-4xl flex-col overflow-hidden shadow-2xl sm:max-h-[min(92dvh,900px)] sm:rounded-[22px] sm:border"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-4 sm:px-5 py-4 border-b border-zinc-800 flex items-center justify-between gap-3 shrink-0 flex-wrap">
-          <div className="flex items-center gap-3 min-w-0 flex-1">
-            <h2 className="text-lg font-bold text-white flex items-center gap-2 min-w-0">
-              <Shield size={18} className="text-orange-400 shrink-0" />
-              <span className="truncate">Administración</span>
+        <div className="px-4 sm:px-5 py-4 border-b border-mr-line flex items-center justify-between gap-3 shrink-0 flex-wrap">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-2">
+            <h2 className="mr-title flex min-w-0 items-center gap-2 text-[1.75rem] uppercase">
+              <Shield size={18} className="text-mr-accent-text shrink-0" />
+              <span>Administración</span>
             </h2>
             <div
-              className="flex items-center gap-2 rounded-2xl border border-zinc-700 bg-zinc-950/80 px-3 py-1.5 text-sm"
+              className="flex items-center gap-2 rounded-2xl border border-mr-line bg-mr-page/80 px-3 py-1.5 text-sm"
               title="Cuentas en la colección users de Firestore"
             >
-              <Users size={16} className="text-zinc-400 shrink-0" aria-hidden />
-              <span className="text-zinc-500 font-medium">Registrados</span>
-              <span className="font-black tabular-nums text-orange-300 min-w-[2.5rem] text-right">
+              <Users size={16} className="text-mr-muted shrink-0" aria-hidden />
+              <span className="text-mr-muted font-medium">Registrados</span>
+              <span className="font-black tabular-nums text-mr-accent-text min-w-[2.5rem] text-right">
                 {totalUsersLoading ? '…' : totalUsers != null ? totalUsers : '—'}
               </span>
               <button
                 type="button"
                 onClick={() => void refreshTotalUsers()}
                 disabled={totalUsersLoading}
-                className="p-1 rounded-lg text-zinc-500 hover:text-orange-400 hover:bg-zinc-800 disabled:opacity-50"
+                className="p-1 rounded-lg text-mr-muted hover:text-mr-accent-text hover:bg-mr-line disabled:opacity-50"
                 title="Actualizar contador"
                 aria-label="Actualizar contador de usuarios"
               >
@@ -457,17 +457,17 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
               </button>
             </div>
           </div>
-          <button type="button" onClick={onClose} className="p-2 rounded-full hover:bg-zinc-800 text-zinc-300 shrink-0">
+          <button type="button" onClick={onClose} className="p-2 rounded-full hover:bg-mr-line text-mr-ink shrink-0">
             <X size={18} />
           </button>
         </div>
 
         <div className="flex flex-1 flex-col sm:flex-row min-h-0">
           <nav
-            className="shrink-0 border-b sm:border-b-0 sm:border-r border-zinc-800 bg-zinc-950/50 flex sm:flex-col gap-1 p-2 overflow-x-auto sm:w-52 sm:py-3"
+            className="shrink-0 border-b sm:border-b-0 sm:border-r border-mr-line bg-mr-page/50 flex sm:flex-col gap-1 p-2 overflow-x-auto sm:w-52 sm:py-3"
             aria-label="Secciones admin"
           >
-            <p className="hidden sm:flex items-center gap-2 px-2 pb-2 text-[10px] font-black uppercase tracking-wider text-zinc-600">
+            <p className="mr-eyebrow hidden px-2 pb-2 sm:flex sm:items-center sm:gap-2">
               <LayoutGrid size={12} />
               Menú
             </p>
@@ -478,8 +478,8 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
                 onClick={() => setSection(s.id)}
                 className={`flex items-center gap-2 whitespace-nowrap rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition-colors ${
                   section === s.id
-                    ? 'bg-orange-500/15 text-orange-300 ring-1 ring-orange-500/30'
-                    : 'text-zinc-400 hover:bg-zinc-800/80 hover:text-zinc-200'
+                    ? 'bg-mr-accent/20 text-mr-accent-text ring-1 ring-orange-500/30'
+                    : 'text-mr-muted hover:bg-mr-line/80 hover:text-mr-ink'
                 }`}
               >
                 <span className="opacity-90">{s.icon}</span>
@@ -492,10 +492,10 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
             {section === 'gps' && (
               <div className="space-y-4 max-w-xl">
                 <div>
-                  <h3 className="text-white font-bold text-base">Mapa y Premium</h3>
-                  <p className="text-xs text-zinc-500 mt-1 leading-relaxed">
+                  <h3 className="text-mr-ink font-bold text-base">Mapa y Premium</h3>
+                  <p className="text-xs text-mr-muted mt-1 leading-relaxed">
                     Con todo desactivado, el comportamiento es el de siempre (mismas funciones para todos). Si activas una opción,
-                    solo los usuarios con <span className="text-amber-400/95">Premium</span> reciben esa ventaja; el resto usa la
+                    solo los usuarios con <span className="text-mr-accent-text">Premium</span> reciben esa ventaja; el resto usa la
                     alternativa básica o no ve la función.
                   </p>
                 </div>
@@ -539,7 +539,7 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
                 <button
                   type="button"
                   onClick={() => void savePremiumGps()}
-                  className="w-full sm:w-auto bg-orange-500 hover:bg-orange-600 text-white font-bold px-5 py-2.5 rounded-xl inline-flex items-center justify-center gap-2"
+                  className="w-full sm:w-auto bg-mr-accent hover:bg-mr-accent-hover text-mr-ink font-bold px-5 py-2.5 rounded-xl inline-flex items-center justify-center gap-2"
                 >
                   <Save size={16} /> Guardar política
                 </button>
@@ -548,43 +548,43 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
 
             {section === 'accounts' && (
               <div className="space-y-6">
-                <div className="border border-zinc-800 rounded-2xl p-4 space-y-3 bg-zinc-950/50">
-                  <h3 className="text-white font-bold flex items-center gap-2">
-                    <Crown size={16} className="text-amber-400" />
+                <div className="border border-mr-line rounded-2xl p-4 space-y-3 bg-mr-page/50">
+                  <h3 className="text-mr-ink font-bold flex items-center gap-2">
+                    <Crown size={16} className="text-mr-accent-text" />
                     Buscar usuario
                   </h3>
-                  <p className="text-xs text-zinc-500">
+                  <p className="text-xs text-mr-muted">
                     Busca por nombre (mín. 2 caracteres). Los cambios se guardan en la cuenta en Firestore.
                   </p>
                   <div className="flex gap-2">
                     <div className="relative flex-1">
-                      <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                      <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-mr-muted" />
                       <input
                         value={userSearchQuery}
                         onChange={(e) => setUserSearchQuery(e.target.value)}
                         placeholder="Nombre de usuario…"
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-3 py-2 text-sm text-white"
+                        className="w-full bg-mr-page border border-mr-line rounded-xl pl-9 pr-3 py-2 text-sm text-mr-ink"
                       />
                     </div>
-                    {userSearchLoading && <span className="text-xs text-zinc-500 self-center">Buscando…</span>}
+                    {userSearchLoading && <span className="text-xs text-mr-muted self-center">Buscando…</span>}
                   </div>
                   {userSearchResults.length > 0 && (
                     <ul className="space-y-2 max-h-52 overflow-y-auto">
                       {userSearchResults.map((u) => (
                         <li
                           key={u.id}
-                          className="flex items-center justify-between gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2"
+                          className="flex items-center justify-between gap-2 bg-mr-paper border border-mr-line rounded-xl px-3 py-2"
                         >
                           <div className="min-w-0">
-                            <p className="text-sm font-semibold text-white truncate">{u.displayName || u.id}</p>
-                            <p className="text-[10px] text-zinc-500 truncate">{u.id}</p>
+                            <p className="text-sm font-semibold text-mr-ink truncate">{u.displayName || u.id}</p>
+                            <p className="text-[11px] text-mr-muted truncate">{u.id}</p>
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
                             {u.isPremium ? (
                               <button
                                 type="button"
                                 onClick={() => void setUserPremium(u.id, false)}
-                                className="text-[11px] font-bold px-2 py-1 rounded-lg bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                                className="text-[11px] font-bold px-2 py-1 rounded-lg bg-mr-line text-mr-ink hover:bg-mr-line"
                               >
                                 Quitar
                               </button>
@@ -592,7 +592,7 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
                               <button
                                 type="button"
                                 onClick={() => void setUserPremium(u.id, true)}
-                                className="text-[11px] font-bold px-2 py-1 rounded-lg bg-amber-500/20 text-amber-300 hover:bg-amber-500/30"
+                                className="text-[11px] font-bold px-2 py-1 rounded-lg bg-mr-accent/20 text-mr-accent-text hover:bg-mr-accent-hover/30"
                               >
                                 Premium
                               </button>
@@ -604,20 +604,20 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
                   )}
                 </div>
 
-                <div className="border border-amber-500/20 rounded-2xl p-4 space-y-3 bg-amber-500/5">
-                  <h3 className="text-white font-bold text-sm">Candidatos Ko-fi (modal donación ≥10 s)</h3>
+                <div className="border border-mr-accent/60 rounded-2xl p-4 space-y-3 bg-mr-accent/5">
+                  <h3 className="text-mr-ink font-bold text-sm">Candidatos Ko-fi (modal donación ≥10 s)</h3>
                   {premiumCandidates.length === 0 ? (
-                    <p className="text-xs text-zinc-500">Nadie en la lista todavía.</p>
+                    <p className="text-xs text-mr-muted">Nadie en la lista todavía.</p>
                   ) : (
                     <ul className="space-y-2 max-h-52 overflow-y-auto">
                       {premiumCandidates.map((c) => (
                         <li
                           key={c.id}
-                          className="flex items-center justify-between gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2"
+                          className="flex items-center justify-between gap-2 bg-mr-paper border border-mr-line rounded-xl px-3 py-2"
                         >
                           <div className="min-w-0">
-                            <p className="text-sm font-semibold text-white truncate">{c.displayName || c.email || c.id}</p>
-                            <p className="text-[10px] text-zinc-500 truncate">
+                            <p className="text-sm font-semibold text-mr-ink truncate">{c.displayName || c.email || c.id}</p>
+                            <p className="text-[11px] text-mr-muted truncate">
                               {c.email || 'sin email'} ·{' '}
                               {typeof c.updatedAt === 'number' && Number.isFinite(c.updatedAt)
                                 ? new Date(c.updatedAt).toLocaleString()
@@ -628,14 +628,14 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
                             <button
                               type="button"
                               onClick={() => void setUserPremium(c.id, true)}
-                              className="text-[11px] font-bold px-2 py-1 rounded-lg bg-amber-500/20 text-amber-300 hover:bg-amber-500/30"
+                              className="text-[11px] font-bold px-2 py-1 rounded-lg bg-mr-accent/20 text-mr-accent-text hover:bg-mr-accent-hover/30"
                             >
                               Marcar premium
                             </button>
                             <button
                               type="button"
                               onClick={() => void removePremiumCandidate(c.id)}
-                              className="p-1.5 rounded-lg bg-zinc-800 text-zinc-400 hover:text-red-300"
+                              className="p-1.5 rounded-lg bg-mr-line text-mr-muted hover:text-[#a3261c]"
                               title="Quitar de candidatos"
                             >
                               <Trash2 size={14} />
@@ -652,38 +652,38 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
             {section === 'userstats' && (
               <div className="space-y-6 max-w-xl">
                 <div>
-                  <h3 className="text-white font-bold flex items-center gap-2">
-                    <Award size={18} className="text-amber-400" />
+                  <h3 className="text-mr-ink font-bold flex items-center gap-2">
+                    <Award size={18} className="text-mr-accent-text" />
                     Puntos y nivel por usuario
                   </h3>
-                  <p className="text-xs text-zinc-500 mt-1 leading-relaxed">
+                  <p className="text-xs text-mr-muted mt-1 leading-relaxed">
                     Busca por nombre (mín. 2 caracteres), elige un usuario y edita puntos y nivel. La app usa 1000 puntos por
                     nivel; puedes alinear nivel con puntos con los botones de ayuda.
                   </p>
                 </div>
-                <div className="border border-zinc-800 rounded-2xl p-4 space-y-3 bg-zinc-950/50">
+                <div className="border border-mr-line rounded-2xl p-4 space-y-3 bg-mr-page/50">
                   <div className="flex gap-2">
                     <div className="relative flex-1">
-                      <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                      <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-mr-muted" />
                       <input
                         value={userSearchQuery}
                         onChange={(e) => setUserSearchQuery(e.target.value)}
                         placeholder="Nombre de usuario…"
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-3 py-2 text-sm text-white"
+                        className="w-full bg-mr-page border border-mr-line rounded-xl pl-9 pr-3 py-2 text-sm text-mr-ink"
                       />
                     </div>
-                    {userSearchLoading && <span className="text-xs text-zinc-500 self-center">Buscando…</span>}
+                    {userSearchLoading && <span className="text-xs text-mr-muted self-center">Buscando…</span>}
                   </div>
                   {userSearchResults.length > 0 && (
                     <ul className="space-y-2 max-h-56 overflow-y-auto">
                       {userSearchResults.map((u) => (
                         <li
                           key={u.id}
-                          className="flex items-center justify-between gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2"
+                          className="flex items-center justify-between gap-2 bg-mr-paper border border-mr-line rounded-xl px-3 py-2"
                         >
                           <div className="min-w-0">
-                            <p className="text-sm font-semibold text-white truncate">{u.displayName || u.id}</p>
-                            <p className="text-[10px] text-zinc-500 truncate">
+                            <p className="text-sm font-semibold text-mr-ink truncate">{u.displayName || u.id}</p>
+                            <p className="text-[11px] text-mr-muted truncate">
                               {u.id} · pts {u.points != null ? Math.round(Number(u.points)) : '—'} · nv{' '}
                               {u.level != null ? Math.round(Number(u.level)) : '—'}
                             </p>
@@ -691,7 +691,7 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
                           <button
                             type="button"
                             onClick={() => void openStatsEditor(u)}
-                            className="shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-lg bg-orange-500/20 text-orange-300 hover:bg-orange-500/30"
+                            className="shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-lg bg-mr-accent/20 text-mr-accent-text hover:bg-mr-accent-hover/20"
                           >
                             Editar
                           </button>
@@ -705,33 +705,33 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
 
             {section === 'points' && (
               <div className="space-y-4 max-w-lg">
-                <h3 className="text-white font-bold">Multiplicadores globales</h3>
+                <h3 className="text-mr-ink font-bold">Multiplicadores globales</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <label className="text-sm text-zinc-300">
+                  <label className="text-sm text-mr-ink">
                     Multiplicador base
                     <input
                       value={baseMultiplier}
                       onChange={(e) => setBaseMultiplier(Number(e.target.value))}
                       type="number"
                       step="0.1"
-                      className="w-full mt-1 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2"
+                      className="w-full mt-1 bg-mr-page border border-mr-line rounded-xl px-3 py-2"
                     />
                   </label>
-                  <label className="text-sm text-zinc-300">
+                  <label className="text-sm text-mr-ink">
                     Multiplicador distancia
                     <input
                       value={distanceMultiplier}
                       onChange={(e) => setDistanceMultiplier(Number(e.target.value))}
                       type="number"
                       step="0.1"
-                      className="w-full mt-1 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2"
+                      className="w-full mt-1 bg-mr-page border border-mr-line rounded-xl px-3 py-2"
                     />
                   </label>
                 </div>
                 <button
                   type="button"
                   onClick={() => void saveConfig()}
-                  className="bg-orange-500 hover:bg-orange-600 text-white font-bold px-4 py-2 rounded-xl inline-flex items-center gap-2"
+                  className="bg-mr-accent hover:bg-mr-accent-hover text-mr-ink font-bold px-4 py-2 rounded-xl inline-flex items-center gap-2"
                 >
                   <Save size={16} /> Guardar configuración
                 </button>
@@ -741,13 +741,13 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
             {section === 'events' && (
               <div className="space-y-5 max-w-2xl">
                 <div className="space-y-3">
-                  <h3 className="text-white font-bold">Crear evento global de puntos</h3>
+                  <h3 className="text-mr-ink font-bold">Crear evento global de puntos</h3>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <input
                       value={eventName}
                       onChange={(e) => setEventName(e.target.value)}
                       placeholder="Nombre evento"
-                      className="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-sm"
+                      className="bg-mr-page border border-mr-line rounded-xl px-3 py-2 text-sm"
                     />
                     <input
                       value={eventMultiplier}
@@ -755,7 +755,7 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
                       type="number"
                       step="0.1"
                       placeholder="x1.5"
-                      className="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-sm"
+                      className="bg-mr-page border border-mr-line rounded-xl px-3 py-2 text-sm"
                     />
                     <input
                       value={eventHours}
@@ -763,27 +763,27 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
                       type="number"
                       min={1}
                       placeholder="Horas"
-                      className="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-sm"
+                      className="bg-mr-page border border-mr-line rounded-xl px-3 py-2 text-sm"
                     />
                   </div>
                   <button
                     type="button"
                     onClick={() => void createEvent()}
-                    className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-xl inline-flex items-center gap-2"
+                    className="bg-[#1d4f8a] hover:bg-[#163d6e] text-mr-paper font-bold px-4 py-2 rounded-xl inline-flex items-center gap-2"
                   >
                     <PlusCircle size={16} /> Crear evento
                   </button>
                 </div>
                 <div className="space-y-2">
-                  <h4 className="text-sm font-bold text-zinc-400">Eventos activos / histórico</h4>
+                  <h4 className="text-sm font-bold text-mr-muted">Eventos activos / histórico</h4>
                   {events.map((event) => (
                     <div
                       key={event.id}
-                      className="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 flex items-center justify-between gap-2"
+                      className="bg-mr-page border border-mr-line rounded-xl px-3 py-2 flex items-center justify-between gap-2"
                     >
                       <div className="min-w-0">
-                        <p className="text-sm font-semibold text-white truncate">{event.name}</p>
-                        <p className="text-xs text-zinc-500">
+                        <p className="text-sm font-semibold text-mr-ink truncate">{event.name}</p>
+                        <p className="text-xs text-mr-muted">
                           x{event.multiplier} • {new Date(event.startAt).toLocaleString()} — {new Date(event.endAt).toLocaleString()}
                         </p>
                       </div>
@@ -791,7 +791,7 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
                         type="button"
                         onClick={() => void toggleEvent(event)}
                         className={`shrink-0 px-3 py-1 rounded-lg text-xs font-bold ${
-                          event.active ? 'bg-emerald-500/20 text-emerald-300' : 'bg-zinc-700 text-zinc-300'
+                          event.active ? 'bg-[#1f6b3a]/20 text-[#1f6b3a]' : 'bg-mr-line text-mr-ink'
                         }`}
                       >
                         {event.active ? 'Activo' : 'Inactivo'}
@@ -806,13 +806,13 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
 
             {section === 'danger' && (
               <div className="space-y-3 max-w-md">
-                <p className="text-sm text-zinc-400">
+                <p className="text-sm text-mr-muted">
                   Acción destructiva. Solo grupos en Firestore; no borra usuarios ni rutas guardadas en perfiles.
                 </p>
                 <button
                   type="button"
                   onClick={() => void resetGroupsOnly()}
-                  className="bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-2.5 rounded-xl w-full sm:w-auto"
+                  className="bg-[#a3261c] hover:bg-[#8a1f17] text-mr-paper font-bold px-4 py-2.5 rounded-xl w-full sm:w-auto"
                 >
                   Reset global: solo grupos
                 </button>
@@ -824,28 +824,28 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
 
       {statsEditUid && (
         <div
-          className="fixed inset-0 z-[95] flex items-center justify-center p-4 bg-black/70"
+          className="fixed inset-0 z-[95] flex items-center justify-center p-4 bg-[#14110e73]"
           role="dialog"
           aria-modal="true"
           aria-labelledby="admin-stats-title"
           onClick={() => !statsSaveLoading && !statsEditLoading && setStatsEditUid(null)}
         >
           <div
-            className="w-full max-w-md rounded-2xl border border-zinc-700 bg-zinc-900 p-5 shadow-2xl"
+            className="w-full max-w-md rounded-2xl border border-mr-line bg-mr-paper p-5 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 id="admin-stats-title" className="text-lg font-bold text-white mb-1">
+            <h3 id="admin-stats-title" className="text-lg font-bold text-mr-ink mb-1">
               Editar puntos y nivel
             </h3>
-            <p className="text-xs text-zinc-500 mb-4 truncate" title={statsEditName}>
+            <p className="text-xs text-mr-muted mb-4 truncate" title={statsEditName}>
               {statsEditName}
             </p>
             {statsEditLoading ? (
-              <p className="text-sm text-zinc-400 py-8 text-center">Cargando datos…</p>
+              <p className="text-sm text-mr-muted py-8 text-center">Cargando datos…</p>
             ) : (
               <>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
-                  <label className="text-sm text-zinc-300">
+                  <label className="text-sm text-mr-ink">
                     Puntos totales
                     <input
                       type="number"
@@ -853,10 +853,10 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
                       step={1}
                       value={statsPointsInput}
                       onChange={(e) => setStatsPointsInput(e.target.value)}
-                      className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-white tabular-nums"
+                      className="mt-1 w-full bg-mr-page border border-mr-line rounded-xl px-3 py-2 text-mr-ink tabular-nums"
                     />
                   </label>
-                  <label className="text-sm text-zinc-300">
+                  <label className="text-sm text-mr-ink">
                     Nivel
                     <input
                       type="number"
@@ -864,7 +864,7 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
                       step={1}
                       value={statsLevelInput}
                       onChange={(e) => setStatsLevelInput(e.target.value)}
-                      className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-white tabular-nums"
+                      className="mt-1 w-full bg-mr-page border border-mr-line rounded-xl px-3 py-2 text-mr-ink tabular-nums"
                     />
                   </label>
                 </div>
@@ -872,14 +872,14 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
                   <button
                     type="button"
                     onClick={applyLevelFromPoints}
-                    className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                    className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-mr-line text-mr-ink hover:bg-mr-line"
                   >
                     Nivel según puntos (1000 pts / nivel)
                   </button>
                   <button
                     type="button"
                     onClick={applyPointsFromLevel}
-                    className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                    className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-mr-line text-mr-ink hover:bg-mr-line"
                   >
                     Puntos mínimos del nivel
                   </button>
@@ -889,7 +889,7 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
                     type="button"
                     disabled={statsSaveLoading}
                     onClick={() => setStatsEditUid(null)}
-                    className="px-4 py-2 rounded-xl text-sm font-semibold text-zinc-400 hover:bg-zinc-800"
+                    className="px-4 py-2 rounded-xl text-sm font-semibold text-mr-muted hover:bg-mr-line"
                   >
                     Cancelar
                   </button>
@@ -897,7 +897,7 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
                     type="button"
                     disabled={statsSaveLoading}
                     onClick={() => void saveUserStats()}
-                    className="px-4 py-2 rounded-xl text-sm font-bold bg-orange-500 hover:bg-orange-600 text-white disabled:opacity-50"
+                    className="px-4 py-2 rounded-xl text-sm font-bold bg-mr-accent hover:bg-mr-accent-hover text-mr-ink disabled:opacity-50"
                   >
                     {statsSaveLoading ? 'Guardando…' : 'Guardar'}
                   </button>

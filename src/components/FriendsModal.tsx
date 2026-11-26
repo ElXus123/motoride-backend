@@ -237,22 +237,22 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
   return (
     <>
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+      className="mr-scrim-enter fixed inset-0 z-50 flex items-end justify-center bg-[#14110e73] p-0 backdrop-blur-sm sm:items-center sm:p-4"
       onClick={onClose}
     >
       <div
-        className="mr-sheet flex h-[80vh] w-full max-w-2xl flex-col overflow-hidden animate-in fade-in zoom-in duration-200"
+        className="mr-sheet mr-sheet-enter flex h-[88dvh] w-full max-w-2xl flex-col overflow-hidden sm:h-[80vh] sm:rounded-[22px] sm:border"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="p-6 border-b border-zinc-800 flex items-center justify-between shrink-0">
-          <h2 className="flex items-center gap-2 text-2xl uppercase text-zinc-50">
+        <div className="p-6 border-b border-mr-line flex items-center justify-between shrink-0">
+          <h2 className="mr-title flex items-center gap-2 text-[2rem] uppercase">
             {selectedUser ? (
-              <button onClick={() => setSelectedUser(null)} className="text-orange-500 hover:text-orange-400 mr-2">
+              <button onClick={() => setSelectedUser(null)} className="text-mr-accent-text hover:text-mr-accent-text mr-2">
                 &larr; Volver
               </button>
             ) : 'Comunidad y Amigos'}
           </h2>
-          <button onClick={onClose} className="p-2 hover:bg-zinc-800 rounded-full transition-colors">
+          <button onClick={onClose} className="p-2 hover:bg-mr-line rounded-full transition-colors">
             <X size={20} />
           </button>
         </div>
@@ -263,15 +263,15 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
               <div className="flex items-center gap-4">
                 <AvatarFrame frameId={resolvePeerFrameId(selectedUser.profileFrameId)} size={80} className="shrink-0">
                   <div
-                    className={`w-20 h-20 rounded-full overflow-hidden border-2 bg-zinc-800 ${
-                      selectedUser.isPremium === true ? 'border-amber-500' : 'border-orange-500'
+                    className={`w-20 h-20 rounded-full overflow-hidden border-2 bg-mr-line ${
+                      selectedUser.isPremium === true ? 'border-mr-accent' : 'border-mr-accent'
                     }`}
                   >
                     {selectedUser.photoURL ? (
                       <img src={selectedUser.photoURL} alt="Avatar" className="w-full h-full object-cover" />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center">
-                        <UserIcon size={32} className="text-zinc-500" />
+                        <UserIcon size={32} className="text-mr-muted" />
                       </div>
                     )}
                   </div>
@@ -281,25 +281,25 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                     {selectedUser.displayName}
                     {selectedUser.isPremium === true ? <PremiumBadge /> : null}
                   </h3>
-                  <p className="text-zinc-400">
+                  <p className="text-mr-muted">
                     Nivel {selectedUser.level || 1} •{' '}
-                    <span className="font-bold text-orange-400 tabular-nums">{selectedUser.points || 0}</span> pts
+                    <span className="font-bold text-mr-accent-text tabular-nums">{selectedUser.points || 0}</span> pts
                   </p>
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
-                <div className="bg-zinc-800 px-4 py-3 rounded-2xl text-center border border-zinc-700">
-                  <p className="text-[11px] text-zinc-400 uppercase font-bold tracking-wider mb-1">Km Totales</p>
-                  <p className="font-black text-xl text-white">{(selectedUser.totalDistance || 0).toFixed(1)}</p>
+                <div className="bg-mr-paper px-4 py-3 rounded-[14px] text-center border border-mr-line">
+                  <p className="text-[11px] text-mr-muted uppercase font-bold tracking-wider mb-1">Km Totales</p>
+                  <p className="font-black text-xl text-mr-ink">{(selectedUser.totalDistance || 0).toFixed(1)}</p>
                 </div>
-                <div className="bg-zinc-800 px-4 py-3 rounded-2xl text-center border border-zinc-700">
-                  <p className="text-[11px] text-zinc-400 uppercase font-bold tracking-wider mb-1">Curvas Totales</p>
-                  <p className="font-black text-xl text-white">{(selectedUser.totalLeftTurns || 0) + (selectedUser.totalRightTurns || 0)}</p>
+                <div className="bg-mr-paper px-4 py-3 rounded-[14px] text-center border border-mr-line">
+                  <p className="text-[11px] text-mr-muted uppercase font-bold tracking-wider mb-1">Curvas Totales</p>
+                  <p className="font-black text-xl text-mr-ink">{(selectedUser.totalLeftTurns || 0) + (selectedUser.totalRightTurns || 0)}</p>
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-zinc-700 bg-zinc-950/50 p-4">
+              <div className="rounded-2xl border border-mr-line bg-mr-page/50 p-4">
                 <MedalShowcase user={selectedUser} readOnly />
               </div>
 
@@ -312,7 +312,7 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                       name: String(selectedUser.displayName || 'Amigo').slice(0, 80),
                     })
                   }
-                  className="flex w-full items-center justify-center gap-2 rounded-2xl border border-orange-500/40 bg-orange-500/15 py-3 text-sm font-black text-orange-300 hover:bg-orange-500/25"
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl border border-mr-accent bg-mr-accent/20 py-3 text-sm font-black text-mr-accent-text hover:bg-mr-accent-hover/20"
                 >
                   <MessageCircle size={18} />
                   Chat privado
@@ -322,7 +322,7 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
               <div>
                 <h4 className="font-bold text-lg mb-4">Historial de Rutas</h4>
                 {historyBlockedMessage && (
-                  <div className="mb-3 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-400">
+                  <div className="mb-3 bg-mr-page border border-mr-line rounded-xl px-3 py-2 text-sm text-mr-muted">
                     {historyBlockedMessage}
                   </div>
                 )}
@@ -331,26 +331,26 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                     selectedUserHistory.map((ride) => (
                       <div
                         key={ride.id}
-                        className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 flex flex-col gap-2"
+                        className="bg-mr-page border border-mr-line rounded-2xl p-4 flex flex-col gap-2"
                       >
-                        <h5 className="text-lg font-black text-orange-500 leading-snug tracking-tight">
+                        <h5 className="text-lg font-black text-mr-accent-text leading-snug tracking-tight">
                           {formatRideCardTitle(ride.groupName, ride.endTime)}
                         </h5>
-                        <p className="text-sm text-zinc-500">{formatRideCardSubtitle(ride.endTime)}</p>
+                        <p className="text-sm text-mr-muted">{formatRideCardSubtitle(ride.endTime)}</p>
                         <div className="flex flex-wrap items-baseline gap-x-8 gap-y-1 mt-1">
                           <span className="text-sm">
-                            <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
+                            <span className="text-[11px] font-bold uppercase tracking-wider text-mr-muted">
                               Dist.{' '}
                             </span>
-                            <span className="font-semibold text-white tabular-nums">
+                            <span className="font-semibold text-mr-ink tabular-nums">
                               {ride.distance != null ? Number(ride.distance).toFixed(1) : '—'} km
                             </span>
                           </span>
                           <span className="text-sm">
-                            <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
+                            <span className="text-[11px] font-bold uppercase tracking-wider text-mr-muted">
                               Pts{' '}
                             </span>
-                            <span className="font-bold text-orange-400 tabular-nums">
+                            <span className="font-bold text-mr-accent-text tabular-nums">
                               +{rideHistoryPointsEarned(ride)}
                             </span>
                           </span>
@@ -359,7 +359,7 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                           <button
                             type="button"
                             onClick={() => repeatRoute(ride.routeGeoJSON)}
-                            className="mt-2 flex items-center justify-center gap-2 text-xs font-bold bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2.5 rounded-xl transition-all w-full sm:w-auto sm:self-start"
+                            className="mt-2 flex items-center justify-center gap-2 text-xs font-bold bg-mr-line hover:bg-mr-line text-mr-ink px-4 py-2.5 rounded-xl transition-all w-full sm:w-auto sm:self-start"
                           >
                             <Play size={14} /> Repetir ruta
                           </button>
@@ -367,7 +367,7 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                       </div>
                     ))
                   ) : (
-                    <p className="text-zinc-500 text-sm italic">Este usuario no tiene rutas públicas.</p>
+                    <p className="text-mr-muted text-sm italic">Este usuario no tiene rutas públicas.</p>
                   )}
                 </div>
               </div>
@@ -378,19 +378,19 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
               <div>
                 <div className="flex gap-2 mb-4">
                   <div className="relative flex-1">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-mr-muted" size={18} />
                     <input 
                       type="text"
                       placeholder="Buscar moteros por nombre..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-3 text-white focus:outline-none focus:border-orange-500 transition-colors"
+                      className="w-full bg-mr-page border border-mr-line rounded-xl pl-10 pr-4 py-3 text-mr-ink focus:outline-none focus:border-mr-accent transition-colors"
                     />
                   </div>
                   <button 
                     onClick={handleSearch}
-                    className="bg-orange-500 hover:bg-orange-600 text-white px-6 rounded-xl font-bold transition-colors"
+                    className="mr-btn-primary min-h-[48px] px-6 rounded-xl font-bold"
                   >
                     Buscar
                   </button>
@@ -398,43 +398,43 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
 
                 {searchResults.length > 0 && (
                   <div className="space-y-2 mb-8">
-                    <h3 className="text-sm font-bold text-zinc-500 uppercase mb-3">Resultados</h3>
+                    <h3 className="text-sm font-bold text-mr-muted uppercase mb-3">Resultados</h3>
                   {searchResults.map(res => {
                       const rid = res.uid || res.id;
                       const isFriend = friendsIds.includes(rid);
                       const isIncoming = incomingIds.includes(rid);
                       const isOutgoing = outgoingIds.includes(rid);
                       return (
-                        <div key={rid} className="flex items-center justify-between bg-zinc-950 border border-zinc-800 p-3 rounded-xl">
+                        <div key={rid} className="flex items-center justify-between bg-mr-page border border-mr-line p-3 rounded-xl">
                           <div className="flex items-center gap-3 cursor-pointer" onClick={() => viewProfile({ ...res, uid: rid })}>
-                            <div className="w-10 h-10 rounded-full overflow-hidden bg-zinc-800">
-                              {res.photoURL ? <img src={res.photoURL} alt="" className="w-full h-full object-cover" /> : <UserIcon size={20} className="m-auto h-full text-zinc-500" />}
+                            <div className="w-10 h-10 rounded-full overflow-hidden bg-mr-line">
+                              {res.photoURL ? <img src={res.photoURL} alt="" className="w-full h-full object-cover" /> : <UserIcon size={20} className="m-auto h-full text-mr-muted" />}
                             </div>
                             <div>
                               <p className="font-bold flex items-center gap-2 flex-wrap">
                                 {res.displayName}
                                 {res.isPremium === true ? <PremiumBadge compact /> : null}
                               </p>
-                              <p className="text-xs text-zinc-500">Nivel {res.level || 1}</p>
+                              <p className="text-xs text-mr-muted">Nivel {res.level || 1}</p>
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
                             {isIncoming ? (
                               <>
-                                <button onClick={() => acceptFriendRequest(rid)} className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"><Check size={18} /></button>
-                                <button onClick={() => rejectFriendRequest(rid)} className="p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20"><Ban size={18} /></button>
+                                <button onClick={() => acceptFriendRequest(rid)} className="p-2 rounded-lg bg-[#1f6b3a]/10 text-[#1f6b3a] hover:bg-[#1f6b3a]/20"><Check size={18} /></button>
+                                <button onClick={() => rejectFriendRequest(rid)} className="p-2 rounded-lg bg-[#a3261c]/10 text-[#a3261c] hover:bg-[#8a1f17]/20"><Ban size={18} /></button>
                               </>
                             ) : isFriend ? (
                               <button 
                                 onClick={() => removeFriend(rid)}
-                                className="p-2 rounded-lg transition-colors bg-red-500/10 text-red-500 hover:bg-red-500/20"
+                                className="p-2 rounded-lg transition-colors bg-[#a3261c]/10 text-[#a3261c] hover:bg-[#8a1f17]/20"
                               >
                                 <UserMinus size={18} />
                               </button>
                             ) : isOutgoing ? (
                               <button
                                 onClick={() => cancelFriendRequest(rid)}
-                                className="p-2 rounded-lg transition-colors bg-amber-500/10 text-amber-400 hover:bg-amber-500/20"
+                                className="p-2 rounded-lg transition-colors bg-mr-accent/10 text-mr-accent-text hover:bg-mr-accent-hover/20"
                                 title="Solicitud pendiente"
                               >
                                 <Clock size={18} />
@@ -442,7 +442,7 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                             ) : (
                               <button 
                                 onClick={() => sendFriendRequest(rid)}
-                                className="p-2 rounded-lg transition-colors bg-blue-500/10 text-blue-500 hover:bg-blue-500/20"
+                                className="p-2 rounded-lg transition-colors bg-[#1d4f8a]/10 text-[#1d4f8a] hover:bg-[#1d4f8a]/20"
                               >
                                 <UserPlus size={18} />
                               </button>
@@ -457,17 +457,17 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
 
               {incomingIds.length > 0 && (
                 <div>
-                  <h3 className="text-sm font-bold text-zinc-500 uppercase mb-3">Solicitudes recibidas</h3>
+                  <h3 className="text-sm font-bold text-mr-muted uppercase mb-3">Solicitudes recibidas</h3>
                   <div className="space-y-2">
                     {incomingUsers.map((u) => (
-                        <div key={`incoming-${u.uid || u.id}`} className="flex items-center justify-between bg-zinc-950 border border-zinc-800 p-3 rounded-xl">
+                        <div key={`incoming-${u.uid || u.id}`} className="flex items-center justify-between bg-mr-page border border-mr-line p-3 rounded-xl">
                           <p className="text-sm font-semibold flex items-center gap-2">
                             {u.displayName}
                             {u.isPremium === true ? <PremiumBadge compact /> : null}
                           </p>
                           <div className="flex gap-2">
-                            <button onClick={() => acceptFriendRequest(u.uid)} className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"><Check size={18} /></button>
-                            <button onClick={() => rejectFriendRequest(u.uid)} className="p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20"><Ban size={18} /></button>
+                            <button onClick={() => acceptFriendRequest(u.uid)} className="p-2 rounded-lg bg-[#1f6b3a]/10 text-[#1f6b3a] hover:bg-[#1f6b3a]/20"><Check size={18} /></button>
+                            <button onClick={() => rejectFriendRequest(u.uid)} className="p-2 rounded-lg bg-[#a3261c]/10 text-[#a3261c] hover:bg-[#8a1f17]/20"><Ban size={18} /></button>
                           </div>
                         </div>
                       ))}
@@ -478,7 +478,7 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
               {/* Friends List */}
               <div>
                 <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
-                  <UserIcon className="text-orange-500" size={20} />
+                  <UserIcon className="text-mr-accent-text" size={20} />
                   Mis Amigos
                 </h3>
                 {friends.length > 0 ? (
@@ -486,17 +486,17 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                     {friends.map(friend => {
                       const fid = friend.uid || friend.id;
                       return (
-                      <div key={fid} className="flex items-center justify-between rounded-[var(--radius-control)] border border-white/[0.07] bg-white/[0.03] p-3 transition-colors hover:border-orange-500/40">
+                      <div key={fid} className="flex items-center justify-between rounded-[var(--radius-control)] border border-mr-line bg-mr-paper p-3 transition-colors hover:border-mr-accent">
                         <div className="flex items-center gap-3 cursor-pointer flex-1" onClick={() => viewProfile({ ...friend, uid: fid })}>
-                          <div className="w-10 h-10 rounded-full overflow-hidden bg-zinc-800 shrink-0">
-                            {friend.photoURL ? <img src={friend.photoURL} alt="" className="w-full h-full object-cover" /> : <UserIcon size={20} className="m-auto h-full text-zinc-500" />}
+                          <div className="w-10 h-10 rounded-full overflow-hidden bg-mr-line shrink-0">
+                            {friend.photoURL ? <img src={friend.photoURL} alt="" className="w-full h-full object-cover" /> : <UserIcon size={20} className="m-auto h-full text-mr-muted" />}
                           </div>
                           <div className="min-w-0">
                             <p className="font-bold truncate flex items-center gap-2">
                               <span className="truncate">{friend.displayName}</span>
                               {friend.isPremium === true ? <PremiumBadge compact /> : null}
                             </p>
-                            <p className="text-xs text-zinc-500">Nivel {friend.level || 1}</p>
+                            <p className="text-xs text-mr-muted">Nivel {friend.level || 1}</p>
                           </div>
                         </div>
                         <div className="flex shrink-0 items-center gap-1">
@@ -506,7 +506,7 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                               e.stopPropagation();
                               setDmPeer({ uid: fid, name: String(friend.displayName || 'Amigo').slice(0, 80) });
                             }}
-                            className="p-2 text-zinc-500 hover:text-orange-400 transition-colors"
+                            className="mr-focus inline-flex h-11 w-11 items-center justify-center rounded-full text-mr-muted transition-colors hover:bg-mr-line hover:text-mr-accent-text"
                             title="Chat privado"
                           >
                             <MessageCircle size={18} />
@@ -517,7 +517,7 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                               e.stopPropagation();
                               void removeFriend(fid);
                             }}
-                            className="p-2 text-zinc-600 hover:text-red-500 transition-colors"
+                            className="mr-focus inline-flex h-11 w-11 items-center justify-center rounded-full text-mr-subtle transition-colors hover:bg-mr-line hover:text-[#a3261c]"
                             title="Eliminar amigo"
                           >
                             <UserMinus size={18} />
@@ -528,8 +528,8 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                     })}
                   </div>
                 ) : (
-                  <div className="text-center py-8 bg-zinc-950 rounded-2xl border border-zinc-800">
-                    <p className="text-zinc-500 text-sm">Aún no has añadido amigos.</p>
+                  <div className="text-center py-8 bg-mr-page rounded-2xl border border-mr-line">
+                    <p className="text-mr-muted text-sm">Aún no has añadido amigos.</p>
                   </div>
                 )}
               </div>

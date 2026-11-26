@@ -96,7 +96,7 @@ export default function WhatsNewModal() {
               </div>
             </div>
           </div>
-          <h2 id="whats-new-title" className="text-center text-xl font-black text-white tracking-tight">
+          <h2 id="whats-new-title" className="text-center text-xl font-black text-mr-ink tracking-tight">
             Novedades
           </h2>
           <p className="text-center text-sm text-zinc-500 mt-2 leading-relaxed px-1">
@@ -111,7 +111,7 @@ export default function WhatsNewModal() {
                 key={i}
                 className="flex gap-3 rounded-2xl border border-zinc-800/80 bg-zinc-950/50 px-3.5 py-2.5"
               >
-                <Check className="mt-0.5 h-[18px] w-[18px] shrink-0 text-orange-400" strokeWidth={2.5} aria-hidden />
+                <Check className="mt-0.5 h-[18px] w-[18px] shrink-0 text-mr-accent-text" strokeWidth={2.5} aria-hidden />
                 <p className="text-sm text-zinc-300 leading-relaxed">{text}</p>
               </li>
             ))}
@@ -122,7 +122,7 @@ export default function WhatsNewModal() {
           <button
             type="button"
             onClick={dismiss}
-            className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl text-sm font-black bg-orange-500 hover:bg-orange-400 text-zinc-950 shadow-lg shadow-orange-500/25 transition-colors"
+            className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl text-sm font-black bg-mr-accent hover:bg-mr-accent-hover text-mr-on-accent shadow-lg shadow-orange-500/25 transition-colors"
           >
             <Check size={18} strokeWidth={2.5} />
             Entendido

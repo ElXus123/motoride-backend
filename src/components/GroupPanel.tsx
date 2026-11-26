@@ -116,7 +116,7 @@ export const GroupPanel: React.FC<GroupPanelProps> = ({ currentGroup, setCurrent
           
           <button 
             onClick={() => fileInputRef.current?.click()}
-            className="mr-focus flex flex-1 items-center justify-center gap-2 rounded-[var(--radius-control)] bg-orange-500 px-4 py-2 font-bold text-zinc-950 transition-colors hover:bg-orange-400"
+            className="mr-focus flex flex-1 items-center justify-center gap-2 rounded-[var(--radius-control)] bg-orange-500 px-4 py-2 font-bold text-mr-on-accent transition-colors hover:bg-orange-400"
           >
             <Upload size={18} />
             <span>Subir GPX</span>
@@ -142,7 +142,7 @@ export const GroupPanel: React.FC<GroupPanelProps> = ({ currentGroup, setCurrent
           <>
             <button 
               onClick={() => setIsCreating(true)}
-              className="mr-focus flex w-full items-center justify-center gap-2 rounded-[var(--radius-control)] bg-orange-500 py-3 font-bold text-zinc-950 transition-colors hover:bg-orange-400"
+              className="mr-focus flex w-full items-center justify-center gap-2 rounded-[var(--radius-control)] bg-orange-500 py-3 font-bold text-mr-on-accent transition-colors hover:bg-orange-400"
             >
               <Plus size={20} />
               Crear grupo
@@ -173,7 +173,7 @@ export const GroupPanel: React.FC<GroupPanelProps> = ({ currentGroup, setCurrent
               </button>
               <button 
                 onClick={handleCreateGroup}
-                className="mr-focus flex-1 rounded-[var(--radius-control)] bg-orange-500 py-3 font-bold text-zinc-950 transition-colors hover:bg-orange-400"
+                className="mr-focus flex-1 rounded-[var(--radius-control)] bg-orange-500 py-3 font-bold text-mr-on-accent transition-colors hover:bg-orange-400"
               >
                 Crear
               </button>
@@ -197,7 +197,7 @@ export const GroupPanel: React.FC<GroupPanelProps> = ({ currentGroup, setCurrent
               </button>
               <button 
                 onClick={handleJoinGroup}
-                className="mr-focus flex-1 rounded-[var(--radius-control)] bg-orange-500 py-3 font-bold text-zinc-950 transition-colors hover:bg-orange-400"
+                className="mr-focus flex-1 rounded-[var(--radius-control)] bg-orange-500 py-3 font-bold text-mr-on-accent transition-colors hover:bg-orange-400"
               >
                 Unirse
               </button>

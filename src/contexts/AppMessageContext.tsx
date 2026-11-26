@@ -31,7 +31,7 @@ export function AppMessageProvider({ children }: { children: React.ReactNode }) 
           aria-labelledby={open.title ? 'app-msg-title' : 'app-msg-body'}
           onClick={(e) => e.target === e.currentTarget && close()}
         >
-          <div className="w-full max-w-md overflow-hidden rounded-3xl border border-white/[0.08] bg-zinc-900/95 text-white shadow-[0_24px_80px_-12px_rgba(0,0,0,0.65)] ring-1 ring-white/[0.04]">
+          <div className="w-full max-w-md overflow-hidden rounded-3xl border border-mr-line bg-mr-paper text-mr-ink shadow-[0_24px_80px_-12px_rgba(0,0,0,0.65)] ring-1 ring-mr-line">
             <div className="p-5 sm:p-6">
               <div className="flex items-start gap-3">
                 {open.variant === 'error' ? (
@@ -43,24 +43,24 @@ export function AppMessageProvider({ children }: { children: React.ReactNode }) 
                 )}
                 <div className="min-w-0 flex-1">
                   {open.title ? (
-                    <h2 id="app-msg-title" className="font-black text-lg leading-tight text-white mb-2">
+                    <h2 id="app-msg-title" className="font-black text-lg leading-tight text-mr-ink mb-2">
                       {open.title}
                     </h2>
                   ) : null}
                   <p
                     id="app-msg-body"
-                    className={`text-sm leading-relaxed whitespace-pre-wrap ${open.title ? 'text-zinc-300' : 'text-white font-semibold'}`}
+                    className={`text-sm leading-relaxed whitespace-pre-wrap ${open.title ? 'text-mr-muted' : 'text-mr-ink font-semibold'}`}
                   >
                     {open.message}
                   </p>
                 </div>
               </div>
             </div>
-            <div className="border-t border-white/[0.06] bg-zinc-950/40 px-5 pb-5 pt-4 sm:px-6 sm:pb-6">
+            <div className="border-t border-mr-line bg-mr-page/60 px-5 pb-5 pt-4 sm:px-6 sm:pb-6">
               <button
                 type="button"
                 onClick={close}
-                className="w-full rounded-2xl bg-gradient-to-r from-amber-500 to-orange-600 py-3 font-black text-white shadow-lg shadow-orange-500/20 transition-all hover:brightness-105 active:scale-[0.99]"
+                className="w-full rounded-2xl bg-gradient-to-r from-amber-500 to-orange-600 py-3 font-black shadow-lg shadow-orange-500/20 transition-all hover:brightness-105 active:scale-[0.99] text-mr-on-accent"
               >
                 Aceptar
               </button>

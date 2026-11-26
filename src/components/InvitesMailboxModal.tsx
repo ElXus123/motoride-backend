@@ -199,7 +199,7 @@ export default function InvitesMailboxModal({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[5000] flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm"
+          className="fixed inset-0 z-[5000] flex items-end justify-center bg-[#14110e73] p-0 backdrop-blur-sm sm:items-center sm:p-4"
           onClick={onClose}
         >
           <motion.div
@@ -207,17 +207,17 @@ export default function InvitesMailboxModal({
             animate={{ y: 0, opacity: 1, scale: 1 }}
             exit={{ y: 12, opacity: 0, scale: 0.98 }}
             onClick={(e) => e.stopPropagation()}
-            className="mr-sheet flex max-h-[min(85dvh,640px)] w-full max-w-md flex-col overflow-hidden"
+            className="mr-sheet flex max-h-[88dvh] w-full max-w-md flex-col overflow-hidden sm:max-h-[min(85dvh,640px)] sm:rounded-[22px] sm:border"
           >
-            <div className="p-4 border-b border-zinc-800 flex items-center justify-between shrink-0">
+            <div className="p-4 border-b border-mr-line flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2">
-                <Inbox className="text-orange-400" size={22} />
-                <h2 className="text-3xl uppercase text-zinc-50">Bandeja</h2>
+                <Inbox className="text-mr-accent-text" size={22} />
+                <h2 className="mr-title text-[2.25rem] uppercase">Bandeja</h2>
               </div>
               <button
                 type="button"
                 onClick={onClose}
-                className="p-2 rounded-full hover:bg-zinc-800 text-zinc-400"
+                className="p-2 rounded-full hover:bg-mr-line text-mr-muted"
                 aria-label="Cerrar"
               >
                 <X size={20} />
@@ -226,7 +226,7 @@ export default function InvitesMailboxModal({
             <div className="overflow-y-auto flex-1 p-4 space-y-4">
               {(unreadPlanChats.length > 0 || unreadDmChats.length > 0) && (
                 <div className="space-y-2">
-                  <p className="text-[11px] font-black uppercase tracking-wider text-orange-500">Mensajes sin leer</p>
+                  <p className="text-[11px] font-black uppercase tracking-wider text-mr-accent-text">Mensajes sin leer</p>
                   {unreadPlanChats.map((row) => (
                     <button
                       key={`plan-${row.groupId}`}
@@ -235,11 +235,11 @@ export default function InvitesMailboxModal({
                         onOpenPlanChat?.(row.groupId, row.groupName);
                         onClose();
                       }}
-                      className="w-full text-left rounded-2xl border border-sky-500/40 bg-sky-500/10 p-3 hover:bg-sky-500/20"
+                      className="w-full text-left rounded-2xl border border-[#1d4f8a]/40 bg-[#1d4f8a]/10 p-3 hover:bg-[#1d4f8a]/20"
                     >
-                      <p className="text-xs font-black text-sky-300">Chat plan · {row.groupName}</p>
-                      <p className="text-[11px] text-zinc-500 font-mono mt-0.5">{row.groupId}</p>
-                      <p className="text-xs text-zinc-300 mt-1 line-clamp-2">{row.preview || 'Nuevo mensaje'}</p>
+                      <p className="text-xs font-black text-[#1d4f8a]">Chat plan · {row.groupName}</p>
+                      <p className="text-[11px] text-mr-muted font-mono mt-0.5">{row.groupId}</p>
+                      <p className="text-xs text-mr-ink mt-1 line-clamp-2">{row.preview || 'Nuevo mensaje'}</p>
                     </button>
                   ))}
                   {unreadDmChats.map((row) => (
@@ -250,41 +250,41 @@ export default function InvitesMailboxModal({
                         onOpenDmChat?.(row.peerUid, row.peerLabel);
                         onClose();
                       }}
-                      className="w-full text-left rounded-2xl border border-orange-500/35 bg-orange-500/10 p-3 hover:bg-orange-500/18 flex gap-2"
+                      className="w-full text-left rounded-2xl border border-mr-accent bg-mr-accent/20 p-3 hover:bg-mr-accent-hover/20 flex gap-2"
                     >
-                      <MessageCircle size={18} className="shrink-0 text-orange-400 mt-0.5" />
+                      <MessageCircle size={18} className="shrink-0 text-mr-accent-text mt-0.5" />
                       <div className="min-w-0">
-                        <p className="text-xs font-black text-orange-200">Chat · {row.peerLabel}</p>
-                        <p className="text-xs text-zinc-300 mt-1 line-clamp-2">{row.preview || 'Nuevo mensaje'}</p>
+                        <p className="text-xs font-black text-mr-accent-text">Chat · {row.peerLabel}</p>
+                        <p className="text-xs text-mr-ink mt-1 line-clamp-2">{row.preview || 'Nuevo mensaje'}</p>
                       </div>
                     </button>
                   ))}
                 </div>
               )}
               <div className="space-y-2">
-                <p className="text-[11px] font-black uppercase tracking-wider text-zinc-500">Invitaciones</p>
+                <p className="text-[11px] font-black uppercase tracking-wider text-mr-muted">Invitaciones</p>
                 {loading ? (
-                  <div className="flex justify-center py-12 text-zinc-500">
+                  <div className="flex justify-center py-12 text-mr-muted">
                     <Loader2 className="animate-spin" size={28} />
                   </div>
                 ) : items.length === 0 ? (
-                  <p className="text-sm text-zinc-500 text-center py-6">
+                  <p className="text-sm text-mr-muted text-center py-6">
                     No hay invitaciones. Cuando un amigo te invite a una ruta, aparecerá aquí.
                   </p>
                 ) : (
                   items.map((inv) => (
                   <div
                     key={inv.id}
-                    className="bg-zinc-950 border border-zinc-800 rounded-2xl p-3 flex flex-col gap-2"
+                    className="mr-card mr-ticket flex flex-col gap-3 rounded-[14px] p-4"
                   >
                     <div className="flex justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="font-bold text-white truncate">{inv.groupName || 'Ruta'}</p>
-                        <p className="text-[11px] text-zinc-500 font-mono">Código {inv.groupId}</p>
+                        <p className="font-display text-2xl font-bold uppercase leading-tight text-mr-ink truncate">{inv.groupName || 'Ruta'}</p>
+                        <p className="text-xs text-mr-muted font-mono">Código {inv.groupId}</p>
                         {inv.kind === 'scheduled_ride' && (
-                          <p className="text-[11px] font-bold text-sky-400 mt-1">Ruta programada</p>
+                          <p className="text-[11px] font-bold text-[#1d4f8a] mt-1">Ruta programada</p>
                         )}
-                        <p className="text-[11px] text-zinc-600 mt-1">
+                        <p className="text-[11px] text-mr-subtle mt-1">
                           {inv.sentAt
                             ? new Date(inv.sentAt).toLocaleString([], {
                                 dateStyle: 'short',
@@ -297,7 +297,7 @@ export default function InvitesMailboxModal({
                         type="button"
                         disabled={removingId === inv.id}
                         onClick={() => void removeInvite(inv)}
-                        className="shrink-0 p-2 text-zinc-500 hover:text-red-400"
+                        className="shrink-0 p-2 text-mr-muted hover:text-[#a3261c]"
                         title="Descartar"
                       >
                         {removingId === inv.id ? (
@@ -311,7 +311,7 @@ export default function InvitesMailboxModal({
                       type="button"
                       disabled={joiningId === inv.id}
                       onClick={() => void join(inv)}
-                      className="w-full py-2.5 rounded-xl bg-orange-500 hover:bg-orange-400 disabled:opacity-60 text-zinc-950 text-sm font-black flex items-center justify-center gap-2 shadow-lg shadow-orange-500/20"
+                      className="mr-btn-primary w-full text-sm font-black disabled:opacity-60"
                     >
                       {joiningId === inv.id ? (
                         <Loader2 size={18} className="animate-spin" />

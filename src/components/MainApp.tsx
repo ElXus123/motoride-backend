@@ -492,30 +492,30 @@ export default function MainApp() {
           aria-modal="true"
           aria-labelledby="scheduled-join-title"
         >
-          <div className="w-full max-w-md rounded-3xl border border-white/[0.08] bg-zinc-900 p-6 shadow-2xl ring-1 ring-white/[0.05]">
+          <div className="w-full max-w-md rounded-3xl border border-mr-line bg-mr-paper text-mr-ink p-6 shadow-2xl ring-1 ring-mr-line">
             <div className="mb-4 flex items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-orange-500/20 text-orange-400">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-orange-500/20 text-mr-accent-text">
                 <Calendar size={22} aria-hidden />
               </div>
               <div className="min-w-0">
-                <h2 id="scheduled-join-title" className="text-lg font-black leading-tight text-white">
+                <h2 id="scheduled-join-title" className="text-lg font-black leading-tight text-mr-ink">
                   {scheduledJoinPrompt.variant === 'alreadyMember'
                     ? 'Ya estás apuntado'
                     : '¿Apuntarte a esta ruta programada?'}
                 </h2>
-                <p className="mt-1 font-semibold text-zinc-100">{scheduledJoinPrompt.name}</p>
+                <p className="mt-1 font-semibold text-mr-ink">{scheduledJoinPrompt.name}</p>
                 {dayLabel ? (
-                  <p className="mt-1 text-sm text-zinc-400">Salida: {dayLabel}</p>
+                  <p className="mt-1 text-sm text-mr-muted">Salida: {dayLabel}</p>
                 ) : null}
               </div>
             </div>
             {scheduledJoinPrompt.variant === 'confirm' ? (
-              <p className="mb-6 text-sm leading-relaxed text-zinc-400">
+              <p className="mb-6 text-sm leading-relaxed text-mr-muted">
                 Si te apuntas, la ruta aparecerá en tu inicio. El mapa en vivo solo está disponible desde 1 h antes de la
                 hora acordada.
               </p>
             ) : (
-              <p className="mb-6 text-sm leading-relaxed text-zinc-400">
+              <p className="mb-6 text-sm leading-relaxed text-mr-muted">
                 Este enlace es para unirse a la lista. Ya figurabas como apuntado; no hace falta hacer nada más hasta la
                 hora de salida.
               </p>
@@ -535,7 +535,7 @@ export default function MainApp() {
                     type="button"
                     onClick={() => void acceptScheduledRsvp()}
                     disabled={rsvpBusy}
-                    className="w-full rounded-2xl bg-orange-500 py-3.5 font-black text-zinc-950 hover:bg-orange-400 disabled:opacity-50 sm:w-auto sm:min-w-[140px]"
+                    className="w-full rounded-2xl bg-orange-500 py-3.5 font-black text-mr-on-accent hover:bg-orange-400 disabled:opacity-50 sm:w-auto sm:min-w-[140px]"
                   >
                     {rsvpBusy ? 'Guardando…' : 'Sí, apuntarme'}
                   </button>
@@ -544,7 +544,7 @@ export default function MainApp() {
                 <button
                   type="button"
                   onClick={() => setScheduledJoinPrompt(null)}
-                  className="w-full rounded-2xl bg-orange-500 py-3.5 font-black text-zinc-950 hover:bg-orange-400 sm:ml-auto sm:w-auto sm:min-w-[140px]"
+                  className="w-full rounded-2xl bg-orange-500 py-3.5 font-black text-mr-on-accent hover:bg-orange-400 sm:ml-auto sm:w-auto sm:min-w-[140px]"
                 >
                   Entendido
                 </button>

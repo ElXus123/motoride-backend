@@ -154,19 +154,19 @@ const AppContent = () => {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center p-6 text-center">
+      <div className="mr-page min-h-screen flex flex-col items-center justify-center p-6 text-center">
         <div className="w-20 h-20 bg-orange-500/10 rounded-full flex items-center justify-center mb-6">
           <AlertTriangle size={40} className="text-orange-500" />
         </div>
-        <h1 className="text-2xl font-bold text-white mb-2">App en Mantenimiento</h1>
-        <p className="text-zinc-400 max-w-md mb-8">
+        <h1 className="mr-title text-[2.5rem] mb-3">App en Mantenimiento</h1>
+        <p className="text-mr-muted max-w-md mb-8">
           {error === 'quota' 
             ? "La cuota gratuita de la base de datos se ha agotado por hoy. El servicio se restablecerá automáticamente mañana."
             : "No se pudo conectar con el servidor. Por favor, comprueba tu conexión a internet o asegúrate de que no tienes un bloqueador de anuncios interfiriendo."}
         </p>
-        <button 
+        <button
           onClick={() => window.location.reload()}
-          className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-6 py-3 rounded-xl transition-colors font-semibold"
+          className="mr-btn-primary px-6"
         >
           <RefreshCcw size={18} />
           Reintentar
@@ -176,10 +176,10 @@ const AppContent = () => {
   }
   
   return (
-    <>
+    <div className="mr-page h-full">
       {showInstallNotice && user && (
-        <div className="fixed inset-0 z-[6000] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-zinc-950 border border-zinc-800 rounded-3xl p-5 sm:p-6 shadow-2xl text-white">
+        <div className="fixed inset-0 z-[6000] bg-[#14110e73] flex items-center justify-center p-4">
+          <div className="mr-card w-full max-w-md rounded-[22px] p-5 sm:p-6 text-mr-ink">
             <div className="flex items-start gap-3 mb-4">
               <div className="w-10 h-10 rounded-xl bg-orange-500/20 text-orange-400 flex items-center justify-center shrink-0">
                 <Download size={20} />
@@ -232,14 +232,14 @@ const AppContent = () => {
               {deferredPrompt ? (
                 <button
                   onClick={handleInstall}
-                  className="flex-1 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl py-3 transition-colors"
+                  className="mr-btn-primary flex-1"
                 >
                   Instalar app
                 </button>
               ) : null}
               <button
                 onClick={dismissInstallNotice}
-                className={`rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-100 font-semibold transition-colors py-3 px-4 ${deferredPrompt ? '' : 'w-full'}`}
+                className={`mr-btn-ghost ${deferredPrompt ? '' : 'w-full'}`}
               >
                 Continuar web
               </button>
@@ -248,7 +248,7 @@ const AppContent = () => {
         </div>
       )}
       {user ? <MainApp /> : <Login />}
-    </>
+    </div>
   );
 };
 

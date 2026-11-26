@@ -6,32 +6,120 @@
 @custom-variant hud-land (@media (orientation: landscape) and (max-height: 500px));
 
 /*
- * MotoRide — sistema visual
- * ------------------------------------------------------------
- * Acento: ámbar de la marca (la burbuja naranja del icono). Neutros cálidos (tinta, no zinc frío).
- * Display: Barlow Condensed (carácter de cuentakilómetros / señalética). Texto: Plus Jakarta Sans.
- * Radios: 10 controles · 16 tarjetas · 24 hojas/modales · 32 hero.
- * Sombras: elevación en tres niveles, siempre con sombra tintada oscura y sin brillos de neón.
- * Movimiento: 180–320 ms, curva “expo out”. Sin rebotes salvo el logo. Respeta prefers-reduced-motion.
+ * MotoRide — sistema visual «mapa de carretera impreso» (claro y cálido)
+ * ------------------------------------------------------------------------
+ * Fondo crema, tinta casi negra, ámbar de marca como único acento.
+ * Display: Barlow Condensed (títulos grandes). Texto: Plus Jakarta Sans.
+ * Radios: 14 tarjetas · 999 píldoras · 12 botones · 22 hojas inferiores.
+ * Bordes: 1 px en tinta al 13 %. Sin gradientes, sin sombras pesadas, sin blobs.
+ * Movimiento: 180–320 ms, curva “expo out”. Respeta prefers-reduced-motion.
+ *
+ * REGLA DE SUPERFICIES OSCURAS
+ * - El tema es CLARO por defecto. Los neutros zinc-* están INVERTIDOS a propósito:
+ *   bg-zinc-950 = crema de página, text-zinc-100 = tinta, bg-zinc-900 = papel de tarjeta.
+ *   Así el código heredado sigue siendo legible sin tocarlo.
+ * - Las superficies oscuras (HUD de navegación, mapa, popups y modales oscuros) van
+ *   dentro de un ámbito `.mr-dark` (o usan tokens `hud-*`). Dentro de `.mr-dark` vuelven
+ *   los zinc originales (oscuros) y el texto claro es legal.
+ * - Fuera de `.mr-dark` NO uses text-white ni bg-black/xx sobre fondos claros:
+ *   usa text-mr-ink / text-mr-muted / bg-mr-paper.
+ * - Texto sobre ámbar: siempre tinta (#14110E), nunca blanco (contraste 2,5:1).
  */
 @theme {
   --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Barlow Condensed", "Arial Narrow", ui-sans-serif, sans-serif;
 
-  /* Acento de marca (sobrescribe la escala naranja de Tailwind en todo el proyecto) */
-  --color-orange-50: #fff7ec;
-  --color-orange-100: #ffecd0;
-  --color-orange-200: #ffd69e;
-  --color-orange-300: #ffbb67;
-  --color-orange-400: #ffa23d;
+  /* ── Acento de marca (ámbar). En claro: relleno #F58A1F, texto #A44E08 ── */
+  --color-orange-50: #fff5e8;
+  --color-orange-100: #ffe7c9;
+  --color-orange-200: #ffd29a;
+  --color-orange-300: #ffb766;
+  --color-orange-400: #c4620b;
   --color-orange-500: #f58a1f;
   --color-orange-600: #d9700f;
-  --color-orange-700: #b25a0e;
-  --color-orange-800: #8c4612;
-  --color-orange-900: #6d3814;
-  --color-orange-950: #2e1805;
+  --color-orange-700: #a44e08;
+  --color-orange-800: #7e3a06;
+  --color-orange-900: #5c2b05;
+  --color-orange-950: #2e1503;
 
-  /* Neutros cálidos: tinta de asfalto (zinc sobrescrito para toda la app) */
+  /* ── Neutros legacy zinc-* (INVERTIDOS para tema claro; ver regla arriba) ── */
+  --color-zinc-50: #14110e;
+  --color-zinc-100: #1d1915;
+  --color-zinc-200: #2b2722;
+  --color-zinc-300: #3e3931;
+  --color-zinc-400: #574f44;
+  --color-zinc-500: #6a6257;
+  --color-zinc-600: #6f675c;
+  --color-zinc-700: #cfc7b9;
+  --color-zinc-800: #e0d9cc;
+  --color-zinc-900: #fbf8f2;
+  --color-zinc-950: #f4efe6;
+
+  /* ── Tokens semánticos de marca (usar en código nuevo) ── */
+  --color-mr-page: #f4efe6;
+  --color-mr-paper: #fbf8f2;
+  --color-mr-ink: #14110e;
+  --color-mr-muted: #5c5548;
+  --color-mr-subtle: #6f675c;
+  --color-mr-line: #14110e21;
+  --color-mr-line-strong: #14110e66;
+  --color-mr-accent: #f58a1f;
+  --color-mr-accent-hover: #e77a12;
+  --color-mr-accent-text: #a44e08;
+  --color-mr-on-accent: #14110e;
+
+  /* ── HUD oscuro de navegación y mapa (siempre oscuro, legible de noche) ── */
+  --color-hud-bg: #0d0c0b;
+  --color-hud-surface: #171614;
+  --color-hud-raised: #272623;
+  --color-hud-ink: #efebe3;
+  --color-hud-muted: #a8a195;
+  --color-hud-line: #efebe31a;
+  --color-hud-accent: #f58a1f;
+
+  /* Acentos secundarios tomados del icono: cielo (social/info) y menta (confirmado) */
+  --color-sky-brand-400: #7cc8e4;
+  --color-sky-brand-500: #3fa9d1;
+  --color-mint-brand-400: #6fd3a6;
+
+  --radius-control: 0.75rem;
+  --radius-card: 0.875rem;
+  --radius-sheet: 1.375rem;
+  --radius-hero: 1.75rem;
+
+  --shadow-lift: 0 1px 0 rgb(20 17 14 / 0.04), 0 8px 24px -18px rgb(20 17 14 / 0.25);
+  --shadow-sheet: 0 -10px 40px -20px rgb(20 17 14 / 0.35);
+  --shadow-ember: 0 8px 20px -12px rgb(245 138 31 / 0.6);
+
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Variables de escena: claro por defecto; .mr-dark las redefine */
+:root {
+  --app-vh: 1vh;
+  --motoride-safe-top: env(safe-area-inset-top, 0px);
+  --motoride-safe-right: env(safe-area-inset-right, 0px);
+  --motoride-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --motoride-safe-left: env(safe-area-inset-left, 0px);
+  color-scheme: light;
+
+  --mr-page: #f4efe6;
+  --mr-paper: #fbf8f2;
+  --mr-ink: #14110e;
+  --mr-muted: #5c5548;
+  --mr-subtle: #6f675c;
+  --mr-line: #14110e21;
+  --mr-line-strong: #14110e66;
+  --mr-accent: #f58a1f;
+  --mr-accent-hover: #e77a12;
+  --mr-accent-text: #a44e08;
+  --mr-on-accent: #14110e;
+}
+
+/* Ámbito oscuro: HUD, mapa, popups y modales oscuros. Restaura los zinc originales
+   (dark) y los tokens semánticos. Úsalo envolviendo el bloque, p. ej. <div class="mr-dark">. */
+.mr-dark {
+  color-scheme: dark;
   --color-zinc-50: #faf8f4;
   --color-zinc-100: #efebe3;
   --color-zinc-200: #ddd8cd;
@@ -43,35 +131,29 @@
   --color-zinc-800: #272623;
   --color-zinc-900: #171614;
   --color-zinc-950: #0d0c0b;
-
-  /* Acentos secundarios tomados del icono: cielo (social/info) y menta (confirmado) */
-  --color-sky-brand-400: #7cc8e4;
-  --color-sky-brand-500: #3fa9d1;
-  --color-mint-brand-400: #6fd3a6;
-
-  --radius-control: 0.625rem;
-  --radius-card: 1rem;
-  --radius-sheet: 1.5rem;
-  --radius-hero: 2rem;
-
-  --shadow-lift: 0 1px 0 rgb(255 255 255 / 0.04) inset, 0 10px 30px -12px rgb(0 0 0 / 0.65);
-  --shadow-sheet: 0 1px 0 rgb(255 255 255 / 0.05) inset, 0 30px 80px -24px rgb(0 0 0 / 0.8);
-  --shadow-ember: 0 10px 28px -12px rgb(245 138 31 / 0.55);
-
-  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-:root {
-  --app-vh: 1vh;
-  --motoride-safe-top: env(safe-area-inset-top, 0px);
-  --motoride-safe-right: env(safe-area-inset-right, 0px);
-  --motoride-safe-bottom: env(safe-area-inset-bottom, 0px);
-  --motoride-safe-left: env(safe-area-inset-left, 0px);
-  color-scheme: dark;
-  --mr-ink: #0d0c0b;
-  --mr-paper: #efebe3;
+  --color-orange-400: #ffa23d;
+  --color-orange-300: #ffbb67;
+  --color-orange-200: #ffd69e;
+  --color-orange-100: #ffecd0;
+  --color-orange-50: #fff7ec;
+  --color-mr-page: #0d0c0b;
+  --color-mr-paper: #171614;
+  --color-mr-ink: #efebe3;
+  --color-mr-muted: #9b958a;
+  --color-mr-subtle: #8a8378;
+  --color-mr-line: #efebe325;
+  --color-mr-line-strong: #efebe366;
+  --color-mr-accent-text: #ffa23d;
+  --mr-page: #0d0c0b;
+  --mr-paper: #171614;
+  --mr-ink: #efebe3;
   --mr-muted: #9b958a;
-  --mr-line: rgb(239 235 227 / 0.08);
+  --mr-subtle: #8a8378;
+  --mr-line: #efebe325;
+  --mr-line-strong: #efebe366;
+  --mr-accent-text: #ffa23d;
+  --mr-on-accent: #14110e;
+  color: var(--mr-ink);
 }
 
 html {
@@ -86,8 +168,8 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
-  background-color: var(--mr-ink);
-  color: var(--mr-paper);
+  background-color: var(--mr-page);
+  color: var(--mr-ink);
   touch-action: manipulation;
   -webkit-touch-callout: none;
 }
@@ -105,13 +187,15 @@ body,
   box-sizing: border-box;
 }
 
-/* Titulares con carácter: display condensado, peso alto, interlineado apretado */
+/* Titulares: display condensado, peso alto, interlineado apretado */
 h1,
 h2,
-.mr-display {
+.mr-display,
+.mr-title {
   font-family: var(--font-display);
-  letter-spacing: 0.01em;
+  letter-spacing: 0.005em;
   font-weight: 700;
+  line-height: 0.98;
 }
 
 @media (max-width: 420px), (max-height: 760px) {
@@ -121,28 +205,180 @@ h2,
 }
 
 @layer components {
-  /* Utilidades de marca (usar en componentes nuevos o rediseñados) */
+  /* Fondo de página: crema plano (sin textura ni gradientes) */
+  .mr-page {
+    background-color: var(--mr-page);
+    color: var(--mr-ink);
+    min-height: 100%;
+  }
+
+  /* Titular grande en condensada. Mayúsculas solo si el titular es una etiqueta corta. */
+  .mr-title {
+    color: var(--mr-ink);
+    font-size: clamp(2.25rem, 6vw + 1rem, 3.5rem);
+  }
+
+  /* Eyebrow: etiqueta en mayúsculas sobre un titular */
   .mr-eyebrow {
     font-family: var(--font-sans);
     font-size: 0.6875rem;
-    font-weight: 700;
+    font-weight: 800;
+    line-height: 1.2;
     letter-spacing: 0.14em;
     text-transform: uppercase;
-    color: var(--color-orange-400);
+    color: var(--mr-accent-text);
   }
 
+  /* Tarjeta tipo ficha: papel, borde de 1 px al 13 % y radio 14 px */
+  .mr-card {
+    background-color: var(--mr-paper);
+    border: 1px solid var(--mr-line);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-lift);
+    color: var(--mr-ink);
+  }
+
+  /* Superficie legacy: misma tarjeta de papel (ya no es oscura) */
   .mr-surface {
-    background: linear-gradient(180deg, rgb(39 38 35 / 0.7), rgb(23 22 20 / 0.92));
+    background-color: var(--mr-paper);
     border: 1px solid var(--mr-line);
     box-shadow: var(--shadow-lift);
     border-radius: var(--radius-card);
+    color: var(--mr-ink);
   }
 
+  /* Hoja inferior: en móvil ocupa la parte baja con radio superior; en PC la gestiona Sheet.tsx */
   .mr-sheet {
-    background: linear-gradient(180deg, rgb(33 31 28 / 0.98), rgb(19 18 16 / 0.99));
-    border: 1px solid rgb(239 235 227 / 0.09);
+    background-color: var(--mr-paper);
+    border: 1px solid var(--mr-line);
     box-shadow: var(--shadow-sheet);
-    border-radius: var(--radius-sheet);
+    border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
+    color: var(--mr-ink);
+  }
+
+  /* Botón principal: ámbar con texto en tinta. 44 px mínimo para tacto. */
+  .mr-btn-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-height: 44px;
+    padding: 0.625rem 1.25rem;
+    border-radius: var(--radius-control);
+    border: 1px solid transparent;
+    background-color: var(--mr-accent);
+    color: var(--mr-on-accent);
+    font-family: var(--font-sans);
+    font-weight: 700;
+    font-size: 0.9375rem;
+    line-height: 1.2;
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 180ms var(--ease-out-expo), transform 180ms var(--ease-out-expo);
+  }
+  .mr-btn-primary:hover {
+    background-color: var(--mr-accent-hover);
+  }
+  .mr-btn-primary:active {
+    transform: scale(0.98);
+  }
+  .mr-btn-primary:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  /* Botón secundario: contorno de tinta al 15 %, sin relleno */
+  .mr-btn-ghost {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-height: 44px;
+    padding: 0.625rem 1.25rem;
+    border-radius: var(--radius-control);
+    border: 1px solid var(--mr-line-strong);
+    background-color: transparent;
+    color: var(--mr-ink);
+    font-family: var(--font-sans);
+    font-weight: 700;
+    font-size: 0.9375rem;
+    line-height: 1.2;
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 180ms var(--ease-out-expo), transform 180ms var(--ease-out-expo);
+  }
+  .mr-btn-ghost:hover {
+    background-color: var(--mr-line);
+  }
+  .mr-btn-ghost:active {
+    transform: scale(0.98);
+  }
+  .mr-btn-ghost:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  /* Píldora: filtro, estado o etiqueta. Interactiva: 44 px de alto; de solo lectura: 28 px */
+  .mr-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    min-height: 28px;
+    padding: 0.25rem 0.75rem;
+    border-radius: 999px;
+    border: 1px solid var(--mr-line);
+    background-color: var(--mr-paper);
+    color: var(--mr-ink);
+    font-family: var(--font-sans);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+  button.mr-chip,
+  a.mr-chip {
+    min-height: 44px;
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 180ms var(--ease-out-expo);
+  }
+  button.mr-chip:hover,
+  a.mr-chip:hover {
+    background-color: var(--mr-line);
+  }
+  .mr-chip[aria-pressed="true"],
+  .mr-chip[data-active="true"] {
+    background-color: var(--mr-ink);
+    border-color: var(--mr-ink);
+    color: var(--mr-page);
+  }
+
+  /* Campo de texto: borde de 1 px que se vuelve ámbar al enfocar. 48 px para tacto. */
+  .mr-field {
+    width: 100%;
+    min-height: 48px;
+    padding: 0.625rem 0.875rem;
+    border-radius: var(--radius-control);
+    border: 1px solid var(--mr-line-strong);
+    background-color: var(--mr-paper);
+    color: var(--mr-ink);
+    font-family: var(--font-sans);
+    font-size: 1rem;
+    line-height: 1.3;
+    transition: border-color 180ms var(--ease-out-expo), box-shadow 180ms var(--ease-out-expo);
+  }
+  .mr-field::placeholder {
+    color: var(--mr-subtle);
+    opacity: 1;
+  }
+  .mr-field:focus {
+    outline: none;
+    border-color: var(--mr-accent);
+    box-shadow: 0 0 0 3px rgb(245 138 31 / 0.25);
+  }
+  .mr-field:disabled {
+    opacity: 0.55;
   }
 
   /* Trazo de ruta decorativo: línea discontinua que “se dibuja” al entrar */
@@ -151,17 +387,17 @@ h2,
     stroke-linecap: round;
   }
 
-  /* Firma de marca: “perforación de billete”. Es el mismo trazo discontinuo de la ruta,
-     en ámbar, usado como separador horizontal (splash, login, perfil, tarjetas de ruta). */
+  /* Firma de marca: “perforación de billete”. Mismo trazo discontinuo de la ruta, en ámbar,
+     usado como separador horizontal. */
   .mr-perf {
     height: 2px;
     width: 100%;
-    background-image: repeating-linear-gradient(90deg, rgb(245 138 31 / 0.55) 0 7px, transparent 7px 13px);
+    background-image: repeating-linear-gradient(90deg, rgb(245 138 31 / 0.7) 0 7px, transparent 7px 13px);
     border-radius: 2px;
   }
 
   /* Tarjeta de ruta como billete: filo ámbar a la izquierda y perforación en el pie.
-     Sin cambios de tamaño ni de contenido: solo decoración (pointer-events: none). */
+     Solo decoración (pointer-events: none en el pseudo-elemento). */
   .mr-ticket {
     position: relative;
     box-shadow: inset 3px 0 0 var(--color-orange-500), var(--shadow-lift);
@@ -174,16 +410,16 @@ h2,
     bottom: 0.5rem;
     height: 2px;
     pointer-events: none;
-    background-image: repeating-linear-gradient(90deg, rgb(245 138 31 / 0.3) 0 6px, transparent 6px 11px);
+    background-image: repeating-linear-gradient(90deg, rgb(245 138 31 / 0.45) 0 6px, transparent 6px 11px);
   }
 
   .mr-focus:focus-visible {
-    outline: 2px solid var(--color-orange-400);
+    outline: 2px solid var(--mr-accent-text);
     outline-offset: 2px;
   }
 }
 
-/* Leaflet: fondo de mapa y popups con la misma tinta */
+/* Leaflet: el mapa conserva su fondo claro de teselas; los popups son HUD oscuro */
 .leaflet-container {
   font-family: inherit;
   background: #dfe0e6 !important;
@@ -224,16 +460,16 @@ h2,
 }
 
 .custom-popup .leaflet-popup-content-wrapper {
-  background: #171614 !important;
-  color: var(--mr-paper) !important;
+  background: var(--color-hud-surface) !important;
+  color: var(--color-hud-ink) !important;
   border-radius: var(--radius-card);
   padding: 4px;
-  border: 1px solid rgb(239 235 227 / 0.1);
+  border: 1px solid var(--color-hud-line);
   box-shadow: var(--shadow-sheet);
 }
 
 .custom-popup .leaflet-popup-tip {
-  background: #171614 !important;
+  background: var(--color-hud-surface) !important;
 }
 
 /* Scrollbars discretas */
@@ -254,12 +490,16 @@ h2,
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: #3a3834;
+  background: #cfc7b9;
   border-radius: 10px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: #55514a;
+  background: #6f675c;
+}
+
+.mr-dark .custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #3a3834;
 }
 
 .current-user-icon {
@@ -277,7 +517,7 @@ h2,
   animation: float 3s ease-in-out infinite;
 }
 
-/* Logo de marca: “respiración” lenta y brillo de luz que cruza una vez cada 5 s */
+/* Logo de marca: “respiración” lenta (halo ámbar suave, sin brillos) */
 @keyframes mr-logo-breathe {
   0%,
   100% {
@@ -362,6 +602,53 @@ h2,
 /* Entrada suave de bloques y tarjetas (CSS puro: sin coste de JS) */
 .mr-enter {
   animation: mr-fade-up 320ms var(--ease-out-expo) both;
+}
+
+/* Entrada de hojas y modales (Sheet.tsx) */
+@keyframes mr-sheet-up {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes mr-sheet-center {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes mr-scrim-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.mr-sheet-enter {
+  animation: mr-sheet-up 260ms var(--ease-out-expo) both;
+}
+
+/* Desde 640 px el modal se centra y entra con escala suave en vez de deslizarse */
+@media (min-width: 640px) {
+  .mr-sheet-enter {
+    animation: mr-sheet-center 260ms var(--ease-out-expo) both;
+  }
+}
+
+.mr-scrim-enter {
+  animation: mr-scrim-in 200ms ease-out both;
 }
 
 @media (prefers-reduced-motion: reduce) {

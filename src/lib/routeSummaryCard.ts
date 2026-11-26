@@ -4,7 +4,8 @@
  * Privacidad: solo muestra datos de la ruta (nombre del grupo, distancia, tiempo, curvas, inclinacion
  * maxima, puntos y el trazado). No incluye email, nombre completo ni gastos.
  *
- * Paleta y tipografia tomadas de src/index.css (tokens zinc/orange, Barlow Condensed / Plus Jakarta Sans).
+ * Paleta y tipografia tomadas de src/index.css (sistema «mapa de carretera impreso»: crema, tinta y ambar;
+ * Barlow Condensed / Plus Jakarta Sans).
  */
 
 export type RouteSummaryInput = {
@@ -33,18 +34,21 @@ export type RouteSummaryCardParams = {
 const DISPLAY_FONT = '"Barlow Condensed", "Arial Narrow", system-ui, sans-serif';
 const BODY_FONT = '"Plus Jakarta Sans", system-ui, "Segoe UI", Roboto, sans-serif';
 
+/** Paleta crema y ambar (tokens --color-mr-*). El ambar de texto usa la variante oscura para contraste sobre crema. */
 const C = {
-  bgTop: '#0d0c0b',
-  bgMid: '#171614',
-  bgBottom: '#0d0c0b',
+  bgTop: '#f4efe6',
+  bgMid: '#fbf8f2',
+  bgBottom: '#f4efe6',
+  paper: '#fbf8f2',
   orange: '#f58a1f',
-  orangeSoft: '#ffa23d',
-  text: '#fafaf9',
-  textSoft: '#efebe3',
-  muted: '#9b958a',
-  fill: 'rgba(39, 38, 35, 0.85)',
-  line: 'rgba(239, 235, 227, 0.09)',
-  mint: '#6fd3a6',
+  orangeText: '#a44e08',
+  orangeSoft: '#f58a1f',
+  text: '#14110e',
+  textSoft: '#14110e',
+  muted: '#5c5548',
+  fill: 'rgba(20, 17, 14, 0.04)',
+  line: 'rgba(20, 17, 14, 0.13)',
+  mint: '#1f7a52',
 };
 
 async function ensureFonts(): Promise<void> {
@@ -156,15 +160,15 @@ export async function renderRouteSummaryCard(params: RouteSummaryCardParams): Pr
   const cardW = width - pad * 2;
   const cardH = height - pad * 2;
 
-  ctx.shadowColor = 'rgba(0,0,0,0.5)';
+  ctx.shadowColor = 'rgba(20, 17, 14, 0.18)';
   ctx.shadowBlur = 48;
   ctx.shadowOffsetY = 18;
-  ctx.fillStyle = 'rgba(23, 22, 20, 0.96)';
+  ctx.fillStyle = C.paper;
   roundRectPath(ctx, cardX, cardY, cardW, cardH, 44);
   ctx.fill();
   ctx.shadowBlur = 0;
   ctx.shadowOffsetY = 0;
-  ctx.strokeStyle = 'rgba(255, 162, 61, 0.3)';
+  ctx.strokeStyle = 'rgba(20, 17, 14, 0.13)';
   ctx.lineWidth = 2;
   roundRectPath(ctx, cardX, cardY, cardW, cardH, 44);
   ctx.stroke();
@@ -182,7 +186,7 @@ export async function renderRouteSummaryCard(params: RouteSummaryCardParams): Pr
   }
 
   const titleX = hasLogo ? cardX + 220 : cardX + 72;
-  ctx.fillStyle = C.orange;
+  ctx.fillStyle = C.orangeText;
   ctx.font = `700 26px ${DISPLAY_FONT}`;
   ctx.fillText('RUTA COMPLETADA', titleX, headerY + 26);
   ctx.fillStyle = C.text;
@@ -247,7 +251,7 @@ export async function renderRouteSummaryCard(params: RouteSummaryCardParams): Pr
   ctx.fillText(`Izq. ${data.maxLeanLeft}°   ·   Der. ${data.maxLeanRight}°`, gx + 28, gy + 110);
 
   gy += wideH + 36;
-  ctx.fillStyle = C.orange;
+  ctx.fillStyle = C.orangeText;
   ctx.font = `700 64px ${DISPLAY_FONT}`;
   ctx.fillText(`+${score} puntos`, gx, gy + 12);
 
@@ -255,7 +259,7 @@ export async function renderRouteSummaryCard(params: RouteSummaryCardParams): Pr
   const trackY = gy + 48;
   const trackBottom = cardY + cardH - 120;
   if (routeCoords.length >= 2 && trackBottom - trackY > 200) {
-    ctx.fillStyle = 'rgba(13, 12, 11, 0.6)';
+    ctx.fillStyle = 'rgba(245, 138, 31, 0.06)';
     roundRectPath(ctx, gx, trackY, wideW, trackBottom - trackY, 28);
     ctx.fill();
     ctx.strokeStyle = C.line;

@@ -49,7 +49,7 @@ const EMPTY_DRAFT: Draft = {
 };
 
 const fieldClass =
-  'mt-1 w-full rounded-[var(--radius-control)] border border-white/[0.1] bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 mr-focus';
+  'mt-1 w-full rounded-[var(--radius-control)] border border-mr-line bg-mr-page px-3 py-2 text-sm text-mr-ink placeholder:text-mr-subtle mr-focus';
 
 function draftFrom(c: WeeklyChallengeConfig): Draft {
   return {
@@ -124,35 +124,35 @@ function ChallengePreview({ draft }: { draft: Draft }) {
     <section className="mr-surface p-5 sm:p-6" aria-label="Vista previa del reto">
       <header>
         <p className="mr-eyebrow">Reto de la semana</p>
-        <h4 className="mr-display mt-1 text-3xl uppercase leading-none text-zinc-50 break-words">
+        <h4 className="mr-display mt-1 text-3xl uppercase leading-none text-mr-ink break-words">
           {c.title || 'Título del reto'}
         </h4>
       </header>
-      <p className="mt-3 text-sm leading-relaxed text-zinc-400">{c.description || 'Descripción del reto.'}</p>
+      <p className="mt-3 text-sm leading-relaxed text-mr-muted">{c.description || 'Descripción del reto.'}</p>
       <div className="mt-5">
-        <p className="font-mono text-sm tabular-nums text-zinc-100">
-          <span className="text-2xl font-bold text-amber-400">0</span>
-          <span className="text-zinc-500"> / {target} {unit}</span>
+        <p className="font-mono text-sm tabular-nums text-mr-ink">
+          <span className="text-2xl font-bold text-mr-accent-text">0</span>
+          <span className="text-mr-muted"> / {target} {unit}</span>
         </p>
         {parts.length > 1 && (
-          <ul className="mt-1.5 flex flex-wrap gap-x-4 font-mono text-xs tabular-nums text-zinc-400">
+          <ul className="mt-1.5 flex flex-wrap gap-x-4 font-mono text-xs tabular-nums text-mr-muted">
             {parts.map((p) => (
               <li key={p.label}>
-                <span className="text-zinc-200">0</span> / {p.target} {p.unit}
+                <span className="text-mr-ink">0</span> / {p.target} {p.unit}
               </li>
             ))}
           </ul>
         )}
-        <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-white/[0.06]" aria-hidden>
-          <div className="h-full w-0 rounded-full bg-amber-500" />
+        <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-mr-line" aria-hidden>
+          <div className="h-full w-0 rounded-full bg-mr-accent" />
         </div>
       </div>
-      <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.06] pt-4">
-        <p className="text-xs text-zinc-400">
-          Recompensa <span className="font-semibold text-zinc-200">{Number.isFinite(c.rewardPoints) ? c.rewardPoints : 0} pts</span>
+      <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-mr-line pt-4">
+        <p className="text-xs text-mr-muted">
+          Recompensa <span className="font-semibold text-mr-ink">{Number.isFinite(c.rewardPoints) ? c.rewardPoints : 0} pts</span>
           {c.seasonFrameId ? ' y progreso de marco de temporada' : ''}
         </p>
-        <span className="rounded-[var(--radius-control)] bg-white/[0.06] px-4 py-2 text-sm font-bold text-zinc-500">
+        <span className="rounded-[var(--radius-control)] bg-mr-line px-4 py-2 text-sm font-bold text-mr-muted">
           Sigue rodando
         </span>
       </div>
@@ -270,39 +270,39 @@ export default function AdminWeeklyChallenges() {
   return (
     <div className="space-y-5">
       <div>
-        <h3 className="mr-display text-2xl uppercase leading-none text-zinc-50">Retos semanales</h3>
-        <p className="mt-2 text-xs leading-relaxed text-zinc-500">
+        <h3 className="mr-display text-2xl uppercase leading-none text-mr-ink">Retos semanales</h3>
+        <p className="mt-2 text-xs leading-relaxed text-mr-muted">
           Cada semana se elige uno de los retos activos (siempre el mismo para todos en esa semana). Si cambias la lista a mitad
           de semana, el reto de esa semana puede cambiar. Si desactivas todos, la app usa los retos por defecto.
         </p>
-        <p className="mt-2 text-xs text-zinc-400">
-          Activos ahora: <span className="font-semibold text-amber-300">{activeNow.length}</span>
-          {usingDefaults && <span className="text-zinc-500"> (valores por defecto)</span>}
-          {invalidCount > 0 && <span className="text-red-400"> · {invalidCount} documento(s) no válidos, ignorados</span>}
+        <p className="mt-2 text-xs text-mr-muted">
+          Activos ahora: <span className="font-semibold text-mr-accent-text">{activeNow.length}</span>
+          {usingDefaults && <span className="text-mr-muted"> (valores por defecto)</span>}
+          {invalidCount > 0 && <span className="text-[#a3261c]"> · {invalidCount} documento(s) no válidos, ignorados</span>}
         </p>
       </div>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-2">
-            <h4 className="text-sm font-bold text-zinc-300">Lista</h4>
+            <h4 className="text-sm font-bold text-mr-ink">Lista</h4>
             <button
               type="button"
               onClick={openNew}
-              className="mr-focus inline-flex items-center gap-1.5 rounded-[var(--radius-control)] bg-amber-500 px-3 py-2 text-xs font-bold text-zinc-950 hover:bg-amber-400"
+              className="mr-focus inline-flex items-center gap-1.5 rounded-[var(--radius-control)] bg-mr-accent px-3 py-2 text-xs font-bold text-mr-on-accent hover:bg-mr-accent-hover"
             >
               <Plus size={14} aria-hidden /> Nuevo reto
             </button>
           </div>
 
-          {!loaded && <p className="text-xs text-zinc-500">Cargando retos…</p>}
+          {!loaded && <p className="text-xs text-mr-muted">Cargando retos…</p>}
           {loaded && items.length === 0 && (
-            <div className="rounded-2xl border border-white/[0.08] bg-zinc-950/50 p-4 space-y-3">
-              <p className="text-xs text-zinc-400">No hay retos en Firestore. La app usa los 7 retos por defecto.</p>
+            <div className="rounded-2xl border border-mr-line bg-mr-page/50 p-4 space-y-3">
+              <p className="text-xs text-mr-muted">No hay retos en Firestore. La app usa los 7 retos por defecto.</p>
               <button
                 type="button"
                 onClick={() => void createDefaults()}
-                className="mr-focus rounded-[var(--radius-control)] border border-amber-500/40 px-3 py-2 text-xs font-bold text-amber-300 hover:bg-amber-500/10"
+                className="mr-focus rounded-[var(--radius-control)] border border-mr-accent/60 px-3 py-2 text-xs font-bold text-mr-accent-text hover:bg-mr-accent-hover/10"
               >
                 Crear retos por defecto en Firestore
               </button>
@@ -317,20 +317,20 @@ export default function AdminWeeklyChallenges() {
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="text-sm font-bold text-zinc-100 break-words">{c.title}</p>
-                    <p className="mt-0.5 text-xs text-zinc-500 break-words">{c.description}</p>
+                    <p className="text-sm font-bold text-mr-ink break-words">{c.title}</p>
+                    <p className="mt-0.5 text-xs text-mr-muted break-words">{c.description}</p>
                   </div>
                   <span
-                    className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold ${
+                    className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-bold ${
                       c.enabled
-                        ? 'border-amber-400/40 bg-amber-400/15 text-amber-300'
-                        : 'border-white/[0.1] bg-white/[0.04] text-zinc-400'
+                        ? 'border-mr-accent/60 bg-mr-accent/15 text-mr-accent-text'
+                        : 'border-mr-line bg-mr-line text-mr-muted'
                     }`}
                   >
                     {c.enabled ? 'Activo' : 'Inactivo'}
                   </span>
                 </div>
-                <p className="mt-2 font-mono text-[11px] tabular-nums text-zinc-500">
+                <p className="mt-2 font-mono text-[11px] tabular-nums text-mr-muted">
                   {metricLabel(c.metric)} · objetivo {c.target}
                   {c.metric === 'kmAndCurves' ? ` km / ${c.targetCurves} curvas` : ` ${weeklyChallengeUnit(c.metric)}`} · {c.rewardPoints} pts
                 </p>
@@ -338,7 +338,7 @@ export default function AdminWeeklyChallenges() {
                   <button
                     type="button"
                     onClick={() => openEdit(c)}
-                    className="mr-focus inline-flex items-center gap-1.5 rounded-[var(--radius-control)] bg-zinc-800 px-3 py-1.5 text-xs font-bold text-zinc-200 hover:bg-zinc-700"
+                    className="mr-focus inline-flex items-center gap-1.5 rounded-[var(--radius-control)] bg-mr-line px-3 py-1.5 text-xs font-bold text-mr-ink hover:bg-mr-line"
                   >
                     <Pencil size={13} aria-hidden /> Editar
                   </button>
@@ -346,7 +346,7 @@ export default function AdminWeeklyChallenges() {
                     type="button"
                     onClick={() => void toggle(c)}
                     aria-pressed={c.enabled}
-                    className="mr-focus inline-flex items-center gap-1.5 rounded-[var(--radius-control)] bg-zinc-800 px-3 py-1.5 text-xs font-bold text-zinc-200 hover:bg-zinc-700"
+                    className="mr-focus inline-flex items-center gap-1.5 rounded-[var(--radius-control)] bg-mr-line px-3 py-1.5 text-xs font-bold text-mr-ink hover:bg-mr-line"
                   >
                     <Power size={13} aria-hidden /> {c.enabled ? 'Desactivar' : 'Activar'}
                   </button>
@@ -360,20 +360,20 @@ export default function AdminWeeklyChallenges() {
           <div className="space-y-4">
             <div className="mr-surface p-4 sm:p-5 space-y-4" role="form" aria-label={draft.id ? 'Editar reto' : 'Nuevo reto'}>
               <div className="flex items-center justify-between gap-2">
-                <h4 className="mr-display text-xl uppercase leading-none text-zinc-50">
+                <h4 className="mr-display text-xl uppercase leading-none text-mr-ink">
                   {draft.id ? 'Editar reto' : 'Nuevo reto'}
                 </h4>
                 <button
                   type="button"
                   onClick={() => setDraft(null)}
-                  className="mr-focus rounded-full p-2 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                  className="mr-focus rounded-full p-2 text-mr-muted hover:bg-mr-line hover:text-mr-ink"
                   aria-label="Cerrar editor"
                 >
                   <X size={16} />
                 </button>
               </div>
 
-              <label className="block text-sm text-zinc-300">
+              <label className="block text-sm text-mr-ink">
                 Título
                 <input
                   value={draft.title}
@@ -382,10 +382,10 @@ export default function AdminWeeklyChallenges() {
                   placeholder="Ej. Semana de curvas"
                   className={fieldClass}
                 />
-                <span className="text-[10px] text-zinc-600">{draft.title.length}/{L.titleMax}</span>
+                <span className="text-[11px] text-mr-subtle">{draft.title.length}/{L.titleMax}</span>
               </label>
 
-              <label className="block text-sm text-zinc-300">
+              <label className="block text-sm text-mr-ink">
                 Descripción
                 <textarea
                   value={draft.description}
@@ -395,10 +395,10 @@ export default function AdminWeeklyChallenges() {
                   placeholder="Qué tiene que hacer el usuario"
                   className={fieldClass}
                 />
-                <span className="text-[10px] text-zinc-600">{draft.description.length}/{L.descriptionMax}</span>
+                <span className="text-[11px] text-mr-subtle">{draft.description.length}/{L.descriptionMax}</span>
               </label>
 
-              <label className="block text-sm text-zinc-300">
+              <label className="block text-sm text-mr-ink">
                 Tipo de métrica
                 <select
                   value={draft.metric}
@@ -411,13 +411,13 @@ export default function AdminWeeklyChallenges() {
                     </option>
                   ))}
                 </select>
-                <span className="text-[10px] text-zinc-600">
+                <span className="text-[11px] text-mr-subtle">
                   {WEEKLY_CHALLENGE_METRICS.find((m) => m.id === draft.metric)?.hint}
                 </span>
               </label>
 
               <div className="grid grid-cols-2 gap-3">
-                <label className="text-sm text-zinc-300">
+                <label className="text-sm text-mr-ink">
                   {draft.metric === 'kmAndCurves'
                     ? 'Objetivo de km'
                     : `Objetivo (${weeklyChallengeUnit(draft.metric)})`}
@@ -431,7 +431,7 @@ export default function AdminWeeklyChallenges() {
                     className={fieldClass}
                   />
                 </label>
-                <label className="text-sm text-zinc-300">
+                <label className="text-sm text-mr-ink">
                   Recompensa (pts)
                   <input
                     type="number"
@@ -446,7 +446,7 @@ export default function AdminWeeklyChallenges() {
               </div>
 
               {draft.metric === 'kmAndCurves' && (
-                <label className="block text-sm text-zinc-300">
+                <label className="block text-sm text-mr-ink">
                   Curvas totales
                   <input
                     type="number"
@@ -460,7 +460,7 @@ export default function AdminWeeklyChallenges() {
                 </label>
               )}
               {draft.metric === 'leanRides' && (
-                <label className="block text-sm text-zinc-300">
+                <label className="block text-sm text-mr-ink">
                   Inclinación mínima por ruta (grados)
                   <input
                     type="number"
@@ -474,7 +474,7 @@ export default function AdminWeeklyChallenges() {
                 </label>
               )}
               {draft.metric === 'longRides' && (
-                <label className="block text-sm text-zinc-300">
+                <label className="block text-sm text-mr-ink">
                   Km mínimos por ruta
                   <input
                     type="number"
@@ -488,7 +488,7 @@ export default function AdminWeeklyChallenges() {
                 </label>
               )}
 
-              <label className="block text-sm text-zinc-300">
+              <label className="block text-sm text-mr-ink">
                 Marco de temporada que promociona (opcional)
                 <input
                   value={draft.seasonFrameId}
@@ -499,7 +499,7 @@ export default function AdminWeeklyChallenges() {
                 />
               </label>
 
-              <label className="flex items-center gap-3 text-sm text-zinc-300">
+              <label className="flex items-center gap-3 text-sm text-mr-ink">
                 <input
                   type="checkbox"
                   checked={draft.enabled}
@@ -510,7 +510,7 @@ export default function AdminWeeklyChallenges() {
               </label>
 
               {formError && (
-                <p role="alert" className="text-xs text-red-400">
+                <p role="alert" className="text-xs text-[#a3261c]">
                   {formError}
                 </p>
               )}
@@ -520,7 +520,7 @@ export default function AdminWeeklyChallenges() {
                   type="button"
                   onClick={() => setDraft(null)}
                   disabled={saving}
-                  className="mr-focus rounded-[var(--radius-control)] px-4 py-2 text-sm font-semibold text-zinc-400 hover:bg-zinc-800"
+                  className="mr-focus rounded-[var(--radius-control)] px-4 py-2 text-sm font-semibold text-mr-muted hover:bg-mr-line"
                 >
                   Cancelar
                 </button>
@@ -528,7 +528,7 @@ export default function AdminWeeklyChallenges() {
                   type="button"
                   onClick={() => void save()}
                   disabled={saving}
-                  className="mr-focus inline-flex items-center gap-2 rounded-[var(--radius-control)] bg-amber-500 px-4 py-2 text-sm font-bold text-zinc-950 hover:bg-amber-400 disabled:opacity-50"
+                  className="mr-focus inline-flex items-center gap-2 rounded-[var(--radius-control)] bg-mr-accent px-4 py-2 text-sm font-bold text-mr-on-accent hover:bg-mr-accent-hover disabled:opacity-50"
                 >
                   <Save size={15} aria-hidden /> {saving ? 'Guardando…' : 'Guardar reto'}
                 </button>
@@ -536,7 +536,7 @@ export default function AdminWeeklyChallenges() {
             </div>
 
             <div>
-              <p className="mb-2 text-[10px] font-black uppercase tracking-wider text-zinc-600">Vista previa</p>
+              <p className="mb-2 text-[11px] font-black uppercase tracking-wider text-mr-subtle">Vista previa</p>
               <ChallengePreview draft={draft} />
             </div>
           </div>

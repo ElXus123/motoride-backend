@@ -115,27 +115,27 @@ export default function ScheduledRouteAttendees({
     typeof document !== 'undefined' &&
     createPortal(
       <div
-        className="fixed inset-0 z-[85] flex items-center justify-center p-4 bg-zinc-950/92"
+        className="fixed inset-0 z-[85] flex items-center justify-center p-4 bg-mr-page/92"
         role="dialog"
         aria-modal="true"
         aria-labelledby="attendees-modal-title"
         onClick={closeModal}
       >
         <div
-          className="w-full max-w-md max-h-[min(85dvh,560px)] flex flex-col bg-zinc-900 border border-zinc-800 rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200"
+          className="w-full max-w-md max-h-[min(85dvh,560px)] flex flex-col bg-mr-paper border border-mr-line rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200"
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-zinc-800 bg-gradient-to-b from-orange-500/10 to-transparent shrink-0">
+          <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-mr-line bg-mr-page shrink-0">
             <div className="flex items-center gap-2 min-w-0">
-              <ListOrdered size={20} className="text-orange-400 shrink-0" />
-              <h2 id="attendees-modal-title" className="text-lg font-black text-white truncate">
+              <ListOrdered size={20} className="text-mr-accent-text shrink-0" />
+              <h2 id="attendees-modal-title" className="mr-title truncate text-[1.75rem] uppercase">
                 Apuntados ({count})
               </h2>
             </div>
             <button
               type="button"
               onClick={closeModal}
-              className="p-2 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors shrink-0"
+              className="p-2 rounded-xl text-mr-muted hover:text-mr-ink hover:bg-mr-line transition-colors shrink-0"
               aria-label="Cerrar"
             >
               <X size={22} />
@@ -143,19 +143,19 @@ export default function ScheduledRouteAttendees({
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-4 space-y-2 [transform:translateZ(0)]">
             {loading ? (
-              <div className="flex flex-col items-center justify-center gap-2 py-12 text-zinc-500">
-                <Loader2 size={28} className="animate-spin text-orange-500" />
+              <div className="flex flex-col items-center justify-center gap-2 py-12 text-mr-muted">
+                <Loader2 size={28} className="animate-spin text-mr-accent-text" />
                 <span className="text-sm">Cargando…</span>
               </div>
             ) : count === 0 ? (
-              <p className="text-center text-sm text-zinc-500 py-10">Nadie se ha apuntado aún.</p>
+              <p className="text-center text-sm text-mr-muted py-10">Nadie se ha apuntado aún.</p>
             ) : (
               rows.map((r) => (
                 <div
                   key={r.uid}
-                  className="rounded-2xl border border-zinc-800 bg-zinc-950/80 px-3 py-3 text-sm flex gap-3 items-start"
+                  className="rounded-2xl border border-mr-line bg-mr-page/80 px-3 py-3 text-sm flex gap-3 items-start"
                 >
-                  <div className="w-11 h-11 shrink-0 rounded-full overflow-hidden bg-zinc-800 border border-zinc-700 ring-1 ring-zinc-700/50">
+                  <div className="w-11 h-11 shrink-0 rounded-full overflow-hidden bg-mr-line border border-mr-line">
                     {r.photoURL ? (
                       <img
                         src={r.photoURL}
@@ -165,19 +165,19 @@ export default function ScheduledRouteAttendees({
                       />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center">
-                        <UserIcon size={22} className="text-zinc-500" />
+                        <UserIcon size={22} className="text-mr-muted" />
                       </div>
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-2">
-                      <p className="font-bold text-white truncate min-w-0">{r.displayName}</p>
-                      <span className="shrink-0 font-black text-orange-400 bg-orange-500/15 rounded-full px-2.5 py-0.5 text-xs">
+                      <p className="font-bold text-mr-ink truncate min-w-0">{r.displayName}</p>
+                      <span className="shrink-0 font-black text-mr-accent-text bg-mr-accent/20 rounded-full px-2.5 py-0.5 text-xs">
                         Lv.{r.level}
                       </span>
                     </div>
                     {r.motorcycle && (
-                      <p className="text-zinc-400 mt-1.5 text-xs leading-snug line-clamp-2">{r.motorcycle}</p>
+                      <p className="text-mr-muted mt-1.5 text-xs leading-snug line-clamp-2">{r.motorcycle}</p>
                     )}
                   </div>
                 </div>

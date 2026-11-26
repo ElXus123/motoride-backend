@@ -95,14 +95,14 @@ export default function MedalShowcase({ user, ownerUid, readOnly }: Props) {
       <div className="mb-3 flex items-end justify-between gap-3">
         <div className="min-w-0">
           <p className="mr-eyebrow">Vitrina de medallas</p>
-          <p className="mt-1 text-xs leading-snug text-zinc-400">
+          <p className="mt-1 text-xs leading-snug text-mr-muted">
             {editable
               ? 'Hasta 3 logros en tu perfil. Pulsa una medalla para ver qué mide.'
               : 'Logros destacados. Pulsa una medalla para ver qué mide.'}
           </p>
         </div>
         {unlockedIds.length > 0 && (
-          <span className="shrink-0 rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-1 text-[11px] font-bold tabular-nums text-zinc-300">
+          <span className="shrink-0 rounded-full border border-mr-line bg-mr-line px-2.5 py-1 text-[11px] font-bold tabular-nums text-mr-ink">
             {unlockedIds.length}/{MEDAL_DEFINITIONS.length}
           </span>
         )}
@@ -115,7 +115,7 @@ export default function MedalShowcase({ user, ownerUid, readOnly }: Props) {
             <li
               key={idx}
               className={`relative flex flex-col items-center rounded-[var(--radius-card)] p-2 sm:p-3 ${
-                def ? 'mr-surface' : 'border border-dashed border-white/[0.12] bg-white/[0.015]'
+                def ? 'mr-surface' : 'border border-dashed border-mr-line-strong bg-mr-paper'
               }`}
             >
               {def ? (
@@ -128,13 +128,13 @@ export default function MedalShowcase({ user, ownerUid, readOnly }: Props) {
                   <div className="flex h-[72px] w-full items-center justify-center sm:h-[84px]">
                     <MedalGlyph def={def} size={60} className="drop-shadow-[0_6px_10px_rgba(0,0,0,0.45)]" />
                   </div>
-                  <p className="mt-1.5 line-clamp-2 min-h-[2.2em] text-center font-display text-[13px] font-bold uppercase leading-tight tracking-wide text-zinc-200 sm:text-sm">
+                  <p className="mt-1.5 line-clamp-2 min-h-[2.2em] text-center font-display text-[13px] font-bold uppercase leading-tight tracking-wide text-mr-ink sm:text-sm">
                     {def.title}
                   </p>
                 </button>
               ) : (
                 <div className="flex h-[72px] w-full items-center justify-center sm:h-[84px]">
-                  <span className="font-display text-xs font-bold uppercase tracking-[0.18em] text-zinc-600">Vacío</span>
+                  <span className="font-display text-xs font-bold uppercase tracking-[0.18em] text-mr-subtle">Vacío</span>
                 </div>
               )}
               {editable && (
@@ -146,7 +146,7 @@ export default function MedalShowcase({ user, ownerUid, readOnly }: Props) {
                       setEditSlot(idx);
                       setPickerOpen(true);
                     }}
-                    className="mr-focus min-h-[32px] rounded-[var(--radius-control)] bg-orange-500/15 px-2.5 py-1 text-[11px] font-bold text-orange-300 transition-colors hover:bg-orange-500/25"
+                    className="mr-focus min-h-[32px] rounded-[var(--radius-control)] bg-mr-accent/20 px-2.5 py-1 text-[11px] font-bold text-mr-accent-text transition-colors hover:bg-mr-accent-hover/20"
                   >
                     {def ? 'Cambiar' : 'Elegir'}
                   </button>
@@ -157,7 +157,7 @@ export default function MedalShowcase({ user, ownerUid, readOnly }: Props) {
                         e.stopPropagation();
                         clearSlot(idx);
                       }}
-                      className="mr-focus min-h-[32px] rounded-[var(--radius-control)] bg-white/[0.06] px-2.5 py-1 text-[11px] font-semibold text-zinc-400 transition-colors hover:bg-white/[0.1] hover:text-zinc-200"
+                      className="mr-focus min-h-[32px] rounded-[var(--radius-control)] bg-mr-line px-2.5 py-1 text-[11px] font-semibold text-mr-muted transition-colors hover:bg-mr-line hover:text-mr-ink"
                     >
                       Quitar
                     </button>
@@ -170,14 +170,14 @@ export default function MedalShowcase({ user, ownerUid, readOnly }: Props) {
       </ul>
 
       {editable && unlockedIds.length === 0 && (
-        <p className="mt-3 text-center text-xs leading-relaxed text-zinc-500">
+        <p className="mt-3 text-center text-xs leading-relaxed text-mr-muted">
           Completa rutas con grabación para desbloquear medallas (km, curvas, inclinación, velocidad…).
         </p>
       )}
 
       {detailMedalId && (
         <div
-          className="fixed inset-0 z-[6100] flex items-end justify-center bg-black/70 p-4 backdrop-blur-sm sm:items-center"
+          className="fixed inset-0 z-[6100] flex items-end justify-center bg-[#14110e73] p-4 backdrop-blur-sm sm:items-center"
           role="dialog"
           aria-modal="true"
           aria-labelledby="medal-detail-title"
@@ -187,12 +187,12 @@ export default function MedalShowcase({ user, ownerUid, readOnly }: Props) {
             className="mr-sheet w-full max-w-sm overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-white/[0.07] px-5 py-3.5">
+            <div className="flex items-center justify-between border-b border-mr-line px-5 py-3.5">
               <p className="mr-eyebrow">Medalla</p>
               <button
                 type="button"
                 onClick={() => setDetailMedalId(null)}
-                className="mr-focus rounded-full p-2 text-zinc-400 transition-colors hover:bg-white/[0.06] hover:text-white"
+                className="mr-focus rounded-full p-2 text-mr-muted transition-colors hover:bg-mr-line hover:text-mr-ink"
                 aria-label="Cerrar"
               >
                 <X size={20} />
@@ -204,13 +204,13 @@ export default function MedalShowcase({ user, ownerUid, readOnly }: Props) {
                   <div className="mx-auto flex justify-center">
                     <MedalGlyph def={detailDef} size={96} className="drop-shadow-[0_10px_18px_rgba(0,0,0,0.5)]" />
                   </div>
-                  <h3 id="medal-detail-title" className="mt-5 font-display text-3xl font-bold uppercase leading-none tracking-wide text-zinc-50">
+                  <h3 id="medal-detail-title" className="mt-5 font-display text-3xl font-bold uppercase leading-none tracking-wide text-mr-ink">
                     {detailDef.title}
                   </h3>
-                  <p className="mt-3 text-sm leading-relaxed text-zinc-400">{detailDef.subtitle}</p>
+                  <p className="mt-3 text-sm leading-relaxed text-mr-muted">{detailDef.subtitle}</p>
                 </>
               ) : (
-                <p className="text-sm text-zinc-500">No hay información para esta medalla.</p>
+                <p className="text-sm text-mr-muted">No hay información para esta medalla.</p>
               )}
             </div>
           </div>
@@ -219,16 +219,16 @@ export default function MedalShowcase({ user, ownerUid, readOnly }: Props) {
 
       {editable && pickerOpen && (
         <div
-          className="fixed inset-0 z-[6000] flex items-end justify-center bg-black/70 p-4 backdrop-blur-sm sm:items-center"
+          className="fixed inset-0 z-[6000] flex items-end justify-center bg-[#14110e73] p-4 backdrop-blur-sm sm:items-center"
           role="dialog"
           aria-modal="true"
           aria-labelledby="medal-picker-title"
         >
           <div className="mr-sheet flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden">
-            <div className="flex items-center justify-between border-b border-white/[0.07] px-5 py-3.5">
+            <div className="flex items-center justify-between border-b border-mr-line px-5 py-3.5">
               <div>
                 <p className="mr-eyebrow">Elige para la vitrina</p>
-                <p id="medal-picker-title" className="mt-0.5 font-display text-2xl font-bold uppercase leading-none tracking-wide text-zinc-50">
+                <p id="medal-picker-title" className="mt-0.5 font-display text-2xl font-bold uppercase leading-none tracking-wide text-mr-ink">
                   Tus medallas
                 </p>
               </div>
@@ -238,7 +238,7 @@ export default function MedalShowcase({ user, ownerUid, readOnly }: Props) {
                   setPickerOpen(false);
                   setEditSlot(null);
                 }}
-                className="mr-focus rounded-full p-2 text-zinc-400 transition-colors hover:bg-white/[0.06] hover:text-white"
+                className="mr-focus rounded-full p-2 text-mr-muted transition-colors hover:bg-mr-line hover:text-mr-ink"
                 aria-label="Cerrar"
               >
                 <X size={20} />
@@ -252,15 +252,15 @@ export default function MedalShowcase({ user, ownerUid, readOnly }: Props) {
                     type="button"
                     disabled={saving}
                     onClick={() => assignSlot(m.id)}
-                    className="mr-focus flex min-h-[44px] flex-col items-center rounded-[var(--radius-card)] border border-white/[0.07] bg-zinc-950/60 p-2.5 text-center transition-colors hover:border-orange-500/40 hover:bg-white/[0.04] disabled:opacity-50"
+                    className="mr-focus flex min-h-[44px] flex-col items-center rounded-[var(--radius-card)] border border-mr-line bg-mr-page/60 p-2.5 text-center transition-colors hover:border-mr-accent hover:bg-mr-line disabled:opacity-50"
                   >
                     <MedalGlyph def={m} size={52} />
-                    <p className="mt-1.5 line-clamp-2 text-[11px] font-bold leading-tight text-zinc-200">{m.title}</p>
+                    <p className="mt-1.5 line-clamp-2 text-[11px] font-bold leading-tight text-mr-ink">{m.title}</p>
                   </button>
                 ))}
               </div>
               {unlockedIds.length === 0 && (
-                <p className="py-8 text-center text-sm text-zinc-500">Aún no tienes medallas desbloqueadas.</p>
+                <p className="py-8 text-center text-sm text-mr-muted">Aún no tienes medallas desbloqueadas.</p>
               )}
             </div>
           </div>

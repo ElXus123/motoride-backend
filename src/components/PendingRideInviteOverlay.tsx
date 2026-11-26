@@ -159,29 +159,29 @@ export default function PendingRideInviteOverlay({ onJoinGroup, activeGroupId }:
 
   return (
     <div
-      className="fixed inset-0 z-[6000] flex items-center justify-center p-4 sm:p-6 bg-black/75 backdrop-blur-md"
+      className="fixed inset-0 z-[6000] flex items-center justify-center p-4 sm:p-6 bg-[#14110e73] backdrop-blur-md"
       role="dialog"
       aria-modal="true"
       aria-labelledby="global-ride-invite-title"
       onClick={() => void dismiss()}
     >
       <div
-        className="w-full max-w-md bg-zinc-900 border border-blue-500/50 rounded-3xl shadow-2xl shadow-blue-900/20 overflow-hidden"
+        className="w-full max-w-md bg-mr-paper border border-[#1d4f8a]/40 rounded-3xl shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-6 pt-6 pb-4 border-b border-zinc-800 bg-gradient-to-br from-blue-600/20 to-orange-500/10">
-          <p className="text-[10px] font-black uppercase tracking-widest text-blue-300 mb-2">Invitación a ruta</p>
-          <h2 id="global-ride-invite-title" className="text-lg font-black text-white leading-snug">
-            <span className="text-blue-200">{fromName || 'Un amigo'}</span> te invita a{' '}
-            <span className="text-orange-400">{pending.groupName || 'una ruta'}</span>
+        <div className="px-6 pt-6 pb-4 border-b border-mr-line bg-mr-page text-mr-ink">
+          <p className="mb-2 text-[11px] font-black uppercase tracking-widest text-[#1d4f8a]">Invitación a ruta</p>
+          <h2 id="global-ride-invite-title" className="mr-title text-[2rem] leading-tight">
+            <span className="text-[#1d4f8a]">{fromName || 'Un amigo'}</span> te invita a{' '}
+            <span className="text-mr-accent-text">{pending.groupName || 'una ruta'}</span>
           </h2>
-          <p className="text-xs text-zinc-400 mt-2 font-mono">Código: {gid}</p>
+          <p className="text-xs text-mr-muted mt-2 font-mono">Código: {gid}</p>
         </div>
         <div className="p-6 flex flex-col-reverse sm:flex-row gap-3 sm:justify-end">
           <button
             type="button"
             onClick={() => void dismiss()}
-            className="w-full sm:w-auto px-5 py-3 rounded-2xl bg-zinc-800 text-zinc-200 text-sm font-bold hover:bg-zinc-700"
+            className="w-full sm:w-auto px-5 py-3 rounded-2xl bg-mr-line text-mr-ink text-sm font-bold hover:bg-mr-line"
           >
             Ignorar
           </button>
@@ -189,7 +189,7 @@ export default function PendingRideInviteOverlay({ onJoinGroup, activeGroupId }:
             type="button"
             disabled={joining}
             onClick={() => void accept()}
-            className="w-full sm:w-auto px-5 py-3 rounded-2xl bg-orange-500 text-white text-sm font-black hover:bg-orange-400 disabled:opacity-60 flex items-center justify-center gap-2 min-w-[8rem]"
+            className="w-full sm:w-auto px-5 py-3 rounded-2xl bg-mr-accent text-mr-ink text-sm font-black hover:bg-mr-accent-hover disabled:opacity-60 flex items-center justify-center gap-2 min-w-[8rem]"
           >
             {joining ? <Loader2 size={18} className="animate-spin" /> : null}
             Unirme a la ruta

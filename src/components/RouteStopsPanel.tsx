@@ -31,13 +31,13 @@ export default function RouteStopsPanel({ candidates, electorateSize, voteMode, 
         <div className="flex items-start justify-between gap-3 pb-3 border-b border-white/10">
           <div>
             <p className="mr-eyebrow">Paradas</p>
-            <h2 className="text-lg font-black text-white leading-tight">Gasolineras, cafés y miradores</h2>
-            <p className="text-xs text-zinc-400 mt-1">
+            <h2 className="text-lg font-black text-mr-ink leading-tight">Gasolineras, cafés y miradores</h2>
+            <p className="text-xs text-mr-muted mt-1">
               {live
                 ? `Vota la parada que quieres. La más votada por mayoría será la próxima del grupo.`
                 : 'Sin conexión con el grupo: se muestra tu última elección.'}
             </p>
-            <p className="text-[11px] text-zinc-500 mt-1">Junto al trazado (hasta {MAX_STOP_OFF_ROUTE_M} m).</p>
+            <p className="text-[11px] text-mr-muted mt-1">Junto al trazado (hasta {MAX_STOP_OFF_ROUTE_M} m).</p>
           </div>
           <button type="button" onClick={onClose} className="mr-focus p-2 rounded-full bg-zinc-800 text-zinc-300" aria-label="Cerrar">
             <X size={18} />
@@ -46,7 +46,7 @@ export default function RouteStopsPanel({ candidates, electorateSize, voteMode, 
 
         <div className="flex-1 overflow-y-auto overscroll-contain py-3 space-y-2">
           {loading && (
-            <div className="flex items-center gap-2 text-sm text-zinc-300 py-6 justify-center">
+            <div className="flex items-center gap-2 text-sm text-mr-muted py-6 justify-center">
               <Loader2 size={18} className="animate-spin text-orange-400" aria-hidden />
               Buscando paradas a lo largo de la ruta (máx. 2 min)...
             </div>
@@ -54,7 +54,7 @@ export default function RouteStopsPanel({ candidates, electorateSize, voteMode, 
 
           {!loading && (error || candidates === null) && (
             <div className="text-center py-6">
-              <p className="text-sm text-zinc-300">No se pudieron cargar las paradas ahora (el servicio de mapas puede estar saturado o sin conexión).</p>
+              <p className="text-sm text-mr-muted">No se pudieron cargar las paradas ahora (el servicio de mapas puede estar saturado o sin conexión).</p>
               <button type="button" onClick={onRetry} className="mt-3 inline-flex items-center gap-2 rounded-xl bg-zinc-800 px-3 py-2 text-xs font-bold text-zinc-200">
                 <RefreshCw size={14} className="text-orange-400" aria-hidden />
                 Reintentar
@@ -63,7 +63,7 @@ export default function RouteStopsPanel({ candidates, electorateSize, voteMode, 
           )}
 
           {!loading && !error && candidates && candidates.length === 0 && (
-            <p className="text-sm text-zinc-400 text-center py-6">No hay gasolineras, cafés ni miradores junto al trazado.</p>
+            <p className="text-sm text-mr-muted text-center py-6">No hay gasolineras, cafés ni miradores junto al trazado.</p>
           )}
 
           {!loading &&
@@ -71,17 +71,17 @@ export default function RouteStopsPanel({ candidates, electorateSize, voteMode, 
             candidates?.map((c) => {
               const Icon = KIND_ICON[c.kind];
               return (
-                <div key={c.docId} className={`flex items-center gap-3 rounded-2xl p-3 ring-1 ${c.chosen ? 'bg-emerald-500/10 ring-emerald-400/30' : 'bg-zinc-900/70 ring-white/5'}`}>
+                <div key={c.docId} className={`flex items-center gap-3 rounded-2xl p-3 ring-1 ${c.chosen ? 'bg-emerald-500/10 ring-emerald-400/30' : 'bg-mr-page/60 ring-mr-line'}`}>
                   <div className="w-9 h-9 rounded-xl bg-zinc-800 flex items-center justify-center text-orange-400 shrink-0">
                     <Icon size={18} aria-hidden />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-bold text-white break-words leading-snug">{c.name ?? STOP_KIND_LABEL[c.kind]}</p>
-                    <p className="text-[11px] text-zinc-400 tabular-nums">
+                    <p className="text-sm font-bold text-mr-ink break-words leading-snug">{c.name ?? STOP_KIND_LABEL[c.kind]}</p>
+                    <p className="text-[11px] text-mr-muted tabular-nums">
                       {STOP_KIND_LABEL[c.kind]} · km {(c.alongM / 1000).toFixed(1)}
                       {c.chosen ? ' · elegida por el grupo' : ''}
                     </p>
-                    <p className="text-[11px] text-zinc-500 tabular-nums">
+                    <p className="text-[11px] text-mr-muted tabular-nums">
                       {c.votes === 1 ? '1 voto' : `${c.votes} votos`}
                       {electorateSize > 0 ? ` de ${electorateSize}` : ''}
                     </p>

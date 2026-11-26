@@ -168,23 +168,23 @@ export default function FriendDirectChatModal({ open, onClose, peerUid, peerDisp
 
   return (
     <div
-      className="fixed inset-0 z-[6000] flex items-end justify-center bg-black/75 p-0 sm:p-4 sm:items-center backdrop-blur-sm"
+      className="fixed inset-0 z-[6000] flex items-end justify-center bg-[#14110e73] p-0 sm:p-4 sm:items-center backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-labelledby="dm-chat-title"
     >
-      <div className="flex h-[min(95dvh,600px)] w-full max-w-[calc(100%-1rem)] flex-col rounded-t-3xl border border-white/[0.08] bg-zinc-900 shadow-2xl sm:rounded-[1.5rem] sm:max-h-[85vh]">
-        <div className="flex shrink-0 items-center justify-between border-b border-zinc-800 px-4 py-3">
+      <div className="flex h-[min(95dvh,600px)] w-full flex-col rounded-t-[22px] sm:max-w-md border border-mr-line bg-mr-paper shadow-2xl sm:rounded-[22px] sm:max-h-[85vh] sm:border">
+        <div className="flex shrink-0 items-center justify-between border-b border-mr-line px-4 py-3">
           <div className="min-w-0 pr-2">
-            <h2 id="dm-chat-title" className="truncate text-base font-black text-white">
+            <h2 id="dm-chat-title" className="mr-title truncate text-2xl uppercase">
               Chat con {peerDisplayName || 'Amigo'}
             </h2>
-            <p className="text-[11px] font-medium text-zinc-500">Solo vosotros dos · Mensajes privados</p>
+            <p className="text-xs font-medium text-mr-muted">Solo vosotros dos · Mensajes privados</p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="shrink-0 rounded-xl p-2 text-zinc-400 hover:bg-zinc-800 hover:text-white"
+            className="shrink-0 rounded-xl p-2 text-mr-muted hover:bg-mr-line hover:text-mr-ink"
             aria-label="Cerrar"
           >
             <X size={20} />
@@ -193,24 +193,24 @@ export default function FriendDirectChatModal({ open, onClose, peerUid, peerDisp
 
         <div ref={listRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain px-3 py-3">
           {loading ? (
-            <div className="flex justify-center py-16 text-zinc-500">
+            <div className="flex justify-center py-16 text-mr-muted">
               <Loader2 className="animate-spin" size={28} />
             </div>
           ) : items.length === 0 ? (
-            <p className="py-10 text-center text-sm text-zinc-500">Escribid para empezar la conversación.</p>
+            <p className="py-10 text-center text-sm text-mr-muted">Escribid para empezar la conversación.</p>
           ) : (
             items.map((m) => {
               const mine = m.uid === user?.uid;
               return (
                 <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
                   <div
-                    className={`max-w-[88%] rounded-2xl px-3 py-2 text-sm ${
-                      mine ? 'bg-orange-500/25 text-orange-50' : 'bg-zinc-800 text-zinc-100'
+                    className={`max-w-[88%] rounded-[14px] px-3 py-2 text-sm ${
+                      mine ? 'bg-mr-accent text-mr-on-accent' : 'border border-mr-line bg-mr-paper text-mr-ink'
                     }`}
                   >
-                    {!mine ? <p className="mb-0.5 text-[11px] font-bold text-orange-400/90">{m.displayName}</p> : null}
+                    {!mine ? <p className="mb-0.5 text-[11px] font-bold text-mr-accent-text">{m.displayName}</p> : null}
                     <p className="whitespace-pre-wrap break-words leading-snug">{m.text}</p>
-                    <p className="mt-1 text-[9px] text-zinc-500">
+                    <p className={`mt-1 text-[11px] ${mine ? 'text-mr-on-accent/80' : 'text-mr-muted'}`}>
                       {m.createdAt > 0
                         ? new Date(m.createdAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })
                         : '…'}
@@ -222,7 +222,7 @@ export default function FriendDirectChatModal({ open, onClose, peerUid, peerDisp
           )}
         </div>
 
-        <div className="shrink-0 border-t border-zinc-800 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <div className="shrink-0 border-t border-mr-line p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           <div className="flex gap-2">
             <input
               type="text"
@@ -237,13 +237,13 @@ export default function FriendDirectChatModal({ open, onClose, peerUid, peerDisp
               maxLength={2000}
               disabled={!roomReady}
               placeholder={roomReady ? 'Escribe un mensaje…' : 'Abriendo…'}
-              className="min-w-0 flex-1 rounded-2xl border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm text-white outline-none focus:border-orange-500 disabled:opacity-50"
+              className="min-w-0 flex-1 rounded-2xl border border-mr-line bg-mr-page px-4 py-3 text-sm text-mr-ink outline-none focus:border-mr-accent disabled:opacity-50"
             />
             <button
               type="button"
               disabled={sending || !text.trim() || !roomReady}
               onClick={() => void send()}
-              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-orange-500 text-zinc-950 hover:bg-orange-400 disabled:opacity-40"
+              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-mr-accent text-mr-on-accent hover:bg-mr-accent-hover disabled:opacity-40"
               aria-label="Enviar"
             >
               <Send size={18} />

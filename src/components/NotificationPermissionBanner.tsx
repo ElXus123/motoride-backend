@@ -68,7 +68,7 @@ export default function NotificationPermissionBanner({ userUid }: { userUid?: st
 
   return (
     <div
-      className="fixed bottom-0 left-0 right-0 z-[11500] border-t border-white/[0.08] bg-zinc-900/95 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-8px_32px_rgba(0,0,0,0.45)] backdrop-blur-md"
+      className="fixed bottom-0 left-0 right-0 z-[11500] border-t border-mr-line bg-mr-paper text-mr-ink p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-8px_32px_rgba(0,0,0,0.25)] backdrop-blur-md"
       role="region"
       aria-label="Activar notificaciones"
     >
@@ -77,8 +77,8 @@ export default function NotificationPermissionBanner({ userUid }: { userUid?: st
           <Bell size={20} aria-hidden />
         </div>
         <div className="min-w-0 flex-1 pt-0.5">
-          <p className="text-sm font-bold text-white">¿Activar avisos en el teléfono?</p>
-          <p className="mt-0.5 text-xs leading-relaxed text-zinc-400">
+          <p className="text-sm font-bold text-mr-ink">¿Activar avisos en el teléfono?</p>
+          <p className="mt-0.5 text-xs leading-relaxed text-mr-muted">
             Avisos al invitarte a una ruta, ventana ~1 h antes de una salida programada y solicitudes de amistad. En
             Chrome y Edge el push con la app cerrada funciona con FCM (clave VAPID + Cloud Functions). En Safari de
             iPhone suele hacer falta añadir MotoRide a la pantalla de inicio (PWA) para recibir push en segundo plano.
@@ -88,7 +88,7 @@ export default function NotificationPermissionBanner({ userUid }: { userUid?: st
               type="button"
               onClick={() => void onActivate()}
               disabled={busy}
-              className="rounded-xl bg-orange-500 px-4 py-2 text-xs font-black uppercase tracking-wide text-zinc-950 hover:bg-orange-400 disabled:opacity-60"
+              className="rounded-xl bg-orange-500 px-4 py-2 text-xs font-black uppercase tracking-wide text-mr-on-accent hover:bg-orange-400 disabled:opacity-60"
             >
               {busy ? 'Abriendo…' : 'Activar'}
             </button>
@@ -104,7 +104,7 @@ export default function NotificationPermissionBanner({ userUid }: { userUid?: st
         <button
           type="button"
           onClick={onClose}
-          className="shrink-0 rounded-xl p-2 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+          className="shrink-0 rounded-xl p-2 text-mr-muted hover:bg-mr-page hover:text-mr-ink"
           aria-label="Cerrar"
         >
           <X size={18} />
