@@ -111,6 +111,14 @@ export const useLeanAngle = (
   const lastOrientationBucketRef = useRef<0 | 90 | 180 | 270>(0);
   /** Normaliza el signo del acelerómetro (iOS lo da invertido respecto a la norma W3C). */
   const accelSign = useRef(new AccelSignDetector());
+  /**
+   * Tras un cambio de orientación la referencia (RBase/yaw) se conserva: está en ejes naturales y no
+   * depende de la orientación. El cero se recalibra solo cuando el móvil está quieto en la nueva
+   * posición; si no, un giro con 4° de inclinación quedaba fijado como «vertical» (lectura de ~4°).
+   */
+  const pendingRecalibRef = useRef(false);
+  const quietSecRef = useRef(0);
+  const pendingSecRef = useRef(0);
 
   useEffect(() => {
     speedRef.current = speedMps;
@@ -310,12 +318,13 @@ export const useLeanAngle = (
         const ob = orientationBucket(screenDeg);
         if (ob !== lastOrientationBucketRef.current || signChanged) {
           lastOrientationBucketRef.current = ob;
-          calibratedRef.current = false;
+          // Sin recalibrar al instante: se espera a que el móvil esté quieto (bloque «pendiente» más abajo).
+          // El eje de avance aprendido tampoco se descarta: se mide en ejes naturales, igual en cualquier orientación.
+          if (calibratedRef.current) pendingRecalibRef.current = true;
+          quietSecRef.current = 0;
+          pendingSecRef.current = 0;
           gLpInit.current = false;
           pocket.current.reset();
-          forwardLearn.current.reset();
-          compAngleRadRef.current = 0;
-          displayLpRef.current = 0;
           prevGravUnitRef.current = null;
         }
 
@@ -389,6 +398,15 @@ export const useLeanAngle = (
 
         if (!calibratedRef.current) {
           applyBikeCalibrationFromGravity();
+        } else if (pendingRecalibRef.current) {
+          quietSecRef.current = motionStationaryRef.current ? quietSecRef.current + dt : 0;
+          pendingSecRef.current += dt;
+          if (quietSecRef.current >= 1 || pendingSecRef.current >= 10) {
+            applyBikeCalibrationFromGravity();
+            pendingRecalibRef.current = false;
+            quietSecRef.current = 0;
+            pendingSecRef.current = 0;
+          }
         }
 
         const wx = wRemap[0];
