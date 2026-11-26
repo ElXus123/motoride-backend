@@ -278,7 +278,7 @@ export default function AdminWeeklyChallenges() {
         <p className="mt-2 text-xs text-mr-muted">
           Activos ahora: <span className="font-semibold text-mr-accent-text">{activeNow.length}</span>
           {usingDefaults && <span className="text-mr-muted"> (valores por defecto)</span>}
-          {invalidCount > 0 && <span className="text-[#a3261c]"> · {invalidCount} documento(s) no válidos, ignorados</span>}
+          {invalidCount > 0 && <span className="text-mr-danger"> · {invalidCount} documento(s) no válidos, ignorados</span>}
         </p>
       </div>
 
@@ -510,7 +510,7 @@ export default function AdminWeeklyChallenges() {
               </label>
 
               {formError && (
-                <p role="alert" className="text-xs text-[#a3261c]">
+                <p role="alert" className="text-xs text-mr-danger">
                   {formError}
                 </p>
               )}

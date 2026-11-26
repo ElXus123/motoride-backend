@@ -20,7 +20,8 @@ import { getLineCoordinates } from '../lib/navigationPose';
 import { getDistance } from '../lib/geoUtils';
 import { calculateLevel, formatDurationHoursMinutes } from '../lib/utils';
 import { requestJson } from '../lib/network';
-import { Users, Plus, LogOut, User as UserIcon, Activity, Trash2, Calendar, MapPin, Search, Clock, ChevronRight, Upload, X, Map as MapIcon, HeartHandshake, CircleDollarSign, Shield, CheckCircle2, AlertCircle, Mail, Share2, Copy, Check, Loader2, Globe, Lock, Inbox, UserPlus, ListOrdered, FileText, MessageCircle } from 'lucide-react';
+import { Users, Plus, LogOut, User as UserIcon, Activity, Trash2, Calendar, MapPin, Search, Clock, ChevronRight, Upload, X, Map as MapIcon, HeartHandshake, CircleDollarSign, Shield, CheckCircle2, AlertCircle, Mail, Share2, Copy, Check, Loader2, Globe, Lock, Inbox, UserPlus, ListOrdered, FileText, MessageCircle, Sun, Moon } from 'lucide-react';
+import { useTheme } from '../hooks/useTheme';
 import { copyTextToClipboard, getSupportMailtoHref } from '../lib/clientInfo';
 import { buildScheduledInviteSharePayload, formatScheduledRideDayOnlyEs } from '../lib/scheduledRouteShare';
 import { generateGroupCode } from '../lib/groupCode';
@@ -56,22 +57,23 @@ import {
   type RouteFetcher,
 } from '../lib/curvePlanner';
 import { motion, useReducedMotion } from 'motion/react';
-import FriendsModal from './FriendsModal';
 import InvitesMailboxModal from './InvitesMailboxModal';
-import InviteFriendsModal from './InviteFriendsModal';
 import PremiumBadge from './PremiumBadge';
 import { WeeklyChallengeCard } from './WeeklyChallengeCard';
 import ScheduledRouteAttendees from './ScheduledRouteAttendees';
 import ScheduledRouteSoonOverlay from './ScheduledRouteSoonOverlay';
-import ScheduledRoutePlanChatModal from './ScheduledRoutePlanChatModal';
 import { Button, Eyebrow } from './ui';
+import { useMailboxChatUnread } from '../hooks/useMailboxChatUnread';
 
 /** Leaflet solo se descarga al abrir la vista previa de una ruta (no en el arranque). */
 const RoutePreviewMap = lazy(() => import('./RoutePreviewMap'));
 /** Mapa para fijar el destino con chincheta (también lazy: Leaflet no entra en el arranque). */
 const DestinationPickerMap = lazy(() => import('./DestinationPickerMap'));
-import FriendDirectChatModal from './FriendDirectChatModal';
-import { useMailboxChatUnread } from '../hooks/useMailboxChatUnread';
+/** Modales que solo existen mientras están abiertos: se descargan al abrirlos, no con el Dashboard. */
+const FriendsModal = lazy(() => import('./FriendsModal'));
+const InviteFriendsModal = lazy(() => import('./InviteFriendsModal'));
+const ScheduledRoutePlanChatModal = lazy(() => import('./ScheduledRoutePlanChatModal'));
+const FriendDirectChatModal = lazy(() => import('./FriendDirectChatModal'));
 
 interface DashboardProps {
   onJoinGroup: (id: string) => void;
@@ -93,6 +95,7 @@ const PROVINCE_MAPPING: {[key: string]: string} = {
 
 export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }: DashboardProps) {
   const { user } = useAuth();
+  const { resolved: resolvedTheme, toggleTheme } = useTheme();
   const showMessage = useAppMessage();
   const [userData, setUserData] = useState<any>(null);
 
@@ -1173,6 +1176,15 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     <>
       <button
         type="button"
+        onClick={toggleTheme}
+        className="flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center p-0 bg-zinc-900 border border-zinc-800 rounded-full hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-mr-ink shrink-0"
+        aria-label={resolvedTheme === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
+        title={resolvedTheme === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
+      >
+        {resolvedTheme === 'dark' ? <Sun size={18} className="sm:w-5 sm:h-5" /> : <Moon size={18} className="sm:w-5 sm:h-5" />}
+      </button>
+      <button
+        type="button"
         onClick={() => setShowSupportModal(true)}
         className="flex h-9 w-9 sm:h-10 sm:w-auto sm:min-w-0 items-center justify-center gap-1.5 sm:px-2.5 rounded-full bg-mr-accent/15 border border-orange-500/30 text-mr-accent-text hover:bg-orange-500/25 transition-colors shrink-0"
         title="Apoyar MotoRide (Ko-fi)"
@@ -1677,7 +1689,11 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       </motion.main>
 
       {/* Friends Modal */}
-      {showFriendsModal && <FriendsModal onClose={() => setShowFriendsModal(false)} onRepeatRoute={onRepeatRoute} />}
+      {showFriendsModal && (
+        <Suspense fallback={null}>
+          <FriendsModal onClose={() => setShowFriendsModal(false)} onRepeatRoute={onRepeatRoute} />
+        </Suspense>
+      )}
       <InvitesMailboxModal
         open={showInvitesMailbox}
         onClose={() => setShowInvitesMailbox(false)}
@@ -1695,12 +1711,14 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
         }}
       />
       {friendDmOpen ? (
-        <FriendDirectChatModal
-          open
-          onClose={() => setFriendDmOpen(null)}
-          peerUid={friendDmOpen.uid}
-          peerDisplayName={friendDmOpen.name}
-        />
+        <Suspense fallback={null}>
+          <FriendDirectChatModal
+            open
+            onClose={() => setFriendDmOpen(null)}
+            peerUid={friendDmOpen.uid}
+            peerDisplayName={friendDmOpen.name}
+          />
+        </Suspense>
       ) : null}
       <ScheduledRouteSoonOverlay
         open={scheduledSoonRoute !== null}
@@ -1735,23 +1753,27 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
         }}
       />
       {scheduledInviteModal && (
-        <InviteFriendsModal
-          open
-          onClose={() => setScheduledInviteModal(null)}
-          groupId={scheduledInviteModal.groupId}
-          groupName={scheduledInviteModal.groupName}
-          memberUids={scheduledInviteModal.memberUids}
-          inviteKind="scheduled_ride"
-          scheduledTimestamp={scheduledInviteModal.scheduledTimestamp}
-        />
+        <Suspense fallback={null}>
+          <InviteFriendsModal
+            open
+            onClose={() => setScheduledInviteModal(null)}
+            groupId={scheduledInviteModal.groupId}
+            groupName={scheduledInviteModal.groupName}
+            memberUids={scheduledInviteModal.memberUids}
+            inviteKind="scheduled_ride"
+            scheduledTimestamp={scheduledInviteModal.scheduledTimestamp}
+          />
+        </Suspense>
       )}
       {planChatRoute && (
-        <ScheduledRoutePlanChatModal
-          open
-          onClose={() => setPlanChatRoute(null)}
-          groupId={planChatRoute.id}
-          groupName={planChatRoute.name}
-        />
+        <Suspense fallback={null}>
+          <ScheduledRoutePlanChatModal
+            open
+            onClose={() => setPlanChatRoute(null)}
+            groupId={planChatRoute.id}
+            groupName={planChatRoute.name}
+          />
+        </Suspense>
       )}
 
       {/* Nivel de curvas antes de generar la ruta */}

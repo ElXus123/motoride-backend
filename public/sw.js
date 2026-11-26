@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ruta-motera-v5';
+const CACHE_NAME = 'ruta-motera-v6';
 /** Mismo nombre que MAP_TILE_CACHE_NAME en src/lib/mapTileCache.ts (v4: descarta teselas «API KEY REQUIRED» de Carto). */
 const TILE_CACHE = 'map-tiles-v4';
 /** Mismo límite que MAP_TILE_CACHE_MAX_ENTRIES en src/lib/mapTileCache.ts. */
@@ -86,8 +86,13 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Cache-first for same-origin static assets (except manifest to avoid stale installability metadata).
-  if (isSameOrigin && (requestUrl.pathname.startsWith('/assets/') || requestUrl.pathname.endsWith('.png')) && !requestUrl.pathname.endsWith('manifest.json') && !requestUrl.pathname.endsWith('manifest.webmanifest')) {
+  // Cache-first for same-origin static assets: bundles con hash (/assets/), imágenes (png/webp) y fuentes propias.
+  // Se excluye el manifest para no quedar con metadatos de instalación obsoletos.
+  // index.html NO entra aquí: va siempre por red (bloque de navegación de arriba).
+  const p = requestUrl.pathname;
+  const isStaticAsset =
+    p.startsWith('/assets/') || p.startsWith('/fonts/') || /\.(png|webp|woff2)$/.test(p);
+  if (isSameOrigin && isStaticAsset && !p.endsWith('manifest.json') && !p.endsWith('manifest.webmanifest')) {
     event.respondWith(
       caches.match(event.request).then((cached) => {
         if (cached) return cached;

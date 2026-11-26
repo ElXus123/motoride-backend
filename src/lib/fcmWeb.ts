@@ -1,6 +1,11 @@
-import { deleteToken, getMessaging, getToken, isSupported, onMessage } from 'firebase/messaging';
 import { collection, deleteDoc, doc, getDocs, setDoc } from 'firebase/firestore';
 import { app, auth, db } from '../firebase';
+
+/**
+ * firebase/messaging (y su SDK de push) solo se descarga cuando hace falta: al entrar con sesión
+ * o al pedir permiso de notificaciones. Así el arranque no carga FCM.
+ */
+const loadMessaging = () => import('firebase/messaging');
 
 const VAPID_KEY = (import.meta as ImportMeta & { env?: { VITE_FIREBASE_VAPID_KEY?: string } }).env
   ?.VITE_FIREBASE_VAPID_KEY;
@@ -24,8 +29,10 @@ async function fcmTokenDocId(token: string): Promise<string> {
 export async function registerWebPushFcm(userUid: string): Promise<boolean> {
   if (!userUid || typeof window === 'undefined') return false;
   if (!VAPID_KEY || VAPID_KEY.length < 20) return false;
+  let fcm: Awaited<ReturnType<typeof loadMessaging>>;
   try {
-    const ok = await isSupported();
+    fcm = await loadMessaging();
+    const ok = await fcm.isSupported();
     if (!ok) return false;
   } catch {
     return false;
@@ -33,11 +40,11 @@ export async function registerWebPushFcm(userUid: string): Promise<boolean> {
   if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return false;
 
   try {
-    const messaging = getMessaging(app);
+    const messaging = fcm.getMessaging(app);
     const reg =
       (await navigator.serviceWorker.getRegistration()) ||
       (await navigator.serviceWorker.register('/sw.js', { scope: '/' }));
-    const token = await getToken(messaging, {
+    const token = await fcm.getToken(messaging, {
       vapidKey: VAPID_KEY,
       serviceWorkerRegistration: reg,
     });
@@ -72,9 +79,10 @@ export function startForegroundFcmListeners(): void {
     try {
       foregroundUnsubscribe?.();
       foregroundUnsubscribe = null;
-      if (!(await isSupported())) return;
-      const messaging = getMessaging(app);
-      foregroundUnsubscribe = onMessage(messaging, (payload) => {
+      const fcm = await loadMessaging();
+      if (!(await fcm.isSupported())) return;
+      const messaging = fcm.getMessaging(app);
+      foregroundUnsubscribe = fcm.onMessage(messaging, (payload) => {
         if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
         const title =
           payload.notification?.title || (typeof payload.data?.title === 'string' ? payload.data.title : '') || 'MotoRide';
@@ -108,11 +116,12 @@ export async function removeWebPushForCurrentUser(): Promise<void> {
   const uid = auth.currentUser?.uid;
   if (!uid || typeof window === 'undefined') return;
   try {
-    const ok = await isSupported().catch(() => false);
-    if (ok) {
+    const fcm = await loadMessaging().catch(() => null);
+    const ok = fcm ? await fcm.isSupported().catch(() => false) : false;
+    if (fcm && ok) {
       try {
-        const messaging = getMessaging(app);
-        await deleteToken(messaging).catch(() => {});
+        const messaging = fcm.getMessaging(app);
+        await fcm.deleteToken(messaging).catch(() => {});
       } catch {
         /* ignore */
       }

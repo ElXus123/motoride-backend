@@ -24,7 +24,8 @@ const setupPWAAssets = () => {
     document.head.appendChild(favicon);
   }
   favicon.type = 'image/png';
-  favicon.href = '/icon-192.png';
+  // 64 px (4 kB) en vez de 192 px: la pestaña solo muestra 16-32 px.
+  favicon.href = '/favicon-64.png';
 
   // Apple home screen icon.
   let appleIcon = document.querySelector("link[rel='apple-touch-icon']") as HTMLLinkElement | null;

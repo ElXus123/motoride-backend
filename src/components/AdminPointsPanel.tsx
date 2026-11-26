@@ -635,7 +635,7 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
                             <button
                               type="button"
                               onClick={() => void removePremiumCandidate(c.id)}
-                              className="p-1.5 rounded-lg bg-mr-line text-mr-muted hover:text-[#a3261c]"
+                              className="p-1.5 rounded-lg bg-mr-line text-mr-muted hover:text-mr-danger"
                               title="Quitar de candidatos"
                             >
                               <Trash2 size={14} />
@@ -791,7 +791,7 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
                         type="button"
                         onClick={() => void toggleEvent(event)}
                         className={`shrink-0 px-3 py-1 rounded-lg text-xs font-bold ${
-                          event.active ? 'bg-[#1f6b3a]/20 text-[#1f6b3a]' : 'bg-mr-line text-mr-ink'
+                          event.active ? 'bg-[#1f6b3a]/20 text-mr-success' : 'bg-mr-line text-mr-ink'
                         }`}
                       >
                         {event.active ? 'Activo' : 'Inactivo'}

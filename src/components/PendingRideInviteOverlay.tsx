@@ -170,9 +170,9 @@ export default function PendingRideInviteOverlay({ onJoinGroup, activeGroupId }:
         onClick={(e) => e.stopPropagation()}
       >
         <div className="px-6 pt-6 pb-4 border-b border-mr-line bg-mr-page text-mr-ink">
-          <p className="mb-2 text-[11px] font-black uppercase tracking-widest text-[#1d4f8a]">Invitación a ruta</p>
+          <p className="mb-2 text-[11px] font-black uppercase tracking-widest text-mr-info">Invitación a ruta</p>
           <h2 id="global-ride-invite-title" className="mr-title text-[2rem] leading-tight">
-            <span className="text-[#1d4f8a]">{fromName || 'Un amigo'}</span> te invita a{' '}
+            <span className="text-mr-info">{fromName || 'Un amigo'}</span> te invita a{' '}
             <span className="text-mr-accent-text">{pending.groupName || 'una ruta'}</span>
           </h2>
           <p className="text-xs text-mr-muted mt-2 font-mono">Código: {gid}</p>

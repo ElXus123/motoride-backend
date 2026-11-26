@@ -104,7 +104,8 @@ import { buildScheduledInviteSharePayload } from '../lib/scheduledRouteShare';
 import { formatNavDistanceMeters, formatNavDurationS, formatNavEtaClock } from '../lib/navFormat';
 import { generateGroupCode } from '../lib/groupCode';
 import { motion, AnimatePresence } from 'motion/react';
-import appIcon from '../../ICONO.png';
+/** WebP de 512 px (83 kB) en vez del PNG de 1,9 MB que antes se empaquetaba en el bundle. */
+const appIcon = '/ICONO-512.webp';
 import { escapeHtml, safeProfileImageSrc } from '../lib/safeHtml';
 
 /** Rutas con distancia ≤ esta cifra (km) no crean entrada en `rideHistory`; puntos y km al perfil sí. */
@@ -5517,7 +5518,7 @@ export default function MapView({
             icon={L.divIcon({
               html: `<div style="display:flex;flex-direction:column;align-items:center;gap:2px;">
                 <div style="width: 30px; height: 30px; border-radius: 9999px; background: #ffffff; border: 2.5px solid #dc2626; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);">
-                  <img src="/RADAR.png" alt="Radar" style="width: 17px; height: 17px; object-fit: contain;" onerror="this.style.display='none'; this.parentElement.innerHTML='<span style=&quot;color:#dc2626;font-size:13px;font-weight:900;&quot;>R</span>';" />
+                  <img src="/RADAR.png" alt="Radar" width="17" height="17" decoding="async" style="width: 17px; height: 17px; object-fit: contain;" onerror="this.style.display='none'; this.parentElement.innerHTML='<span style=&quot;color:#dc2626;font-size:13px;font-weight:900;&quot;>R</span>';" />
                 </div>
                 <div style="background:rgba(9,9,11,0.82);color:#fff;font:700 10px/1 system-ui,sans-serif;padding:2px 5px;border-radius:6px;white-space:nowrap;">${formatNavDistanceMeters(radar.distanceM)}</div>
               </div>`,

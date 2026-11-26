@@ -556,7 +556,9 @@ export const useLeanAngle = (
                 : 1.0;
         if (Math.abs(outDeg) < deadDeg) outDeg = 0;
 
-        setLeanAngle(outDeg);
+        // Estado de React en pasos de 0,5°: el filtro interno sigue con precisión total, pero así el sensor
+        // (~60 muestras/s) no re-renderiza MapView en cada décima de grado que el ruido mueve.
+        setLeanAngle(Math.round(outDeg * 2) / 2);
 
         const roundedAngle = Math.round(outDeg);
         const minMaxThreshold = lowSpeedLean ? 0 : tableFlatRest ? 10 : 0;

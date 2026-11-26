@@ -1,5 +1,4 @@
-import { useEffect, useRef } from 'react';
-import { motion, useReducedMotion } from 'motion/react';
+import { useEffect, useRef, useState } from 'react';
 import { Mic, Radio, Route, Users } from 'lucide-react';
 import { signInWithGoogle } from '../firebase';
 
@@ -16,7 +15,10 @@ const FEATURES = [
  * La entrada usa GSAP cargado en diferido; si falla o hay movimiento reducido, todo se muestra sin animar.
  */
 export default function Login() {
-  const reduceMotion = useReducedMotion();
+  // Sin librería de movimiento en el arranque: el botón usa transiciones CSS (transform/background).
+  const [reduceMotion] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  );
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -93,7 +95,7 @@ export default function Login() {
         <section className="flex w-full max-w-xl flex-col items-center text-center lg:items-start lg:text-left">
           <img
             data-intro="logo"
-            src="/ICONO-512.webp"
+            src="/ICONO-256.webp"
             alt=""
             width={96}
             height={96}
@@ -138,13 +140,10 @@ export default function Login() {
             Usa tu cuenta de Google para ver tus grupos, tus rutas y las quedadas que tienes apuntadas.
           </p>
 
-          <motion.button
+          <button
             type="button"
             onClick={signInWithGoogle}
-            whileHover={{ y: -1 }}
-            whileTap={{ scale: 0.98 }}
-            transition={{ type: 'spring', stiffness: 500, damping: 32 }}
-            className="mr-focus mt-7 flex min-h-14 w-full items-center justify-center gap-3 rounded-[var(--radius-control)] border border-mr-line-strong bg-mr-paper px-6 py-4 text-base font-bold text-mr-ink shadow-[var(--shadow-lift)] transition-colors hover:bg-mr-line"
+            className="mr-focus mt-7 flex min-h-14 w-full items-center justify-center gap-3 rounded-[var(--radius-control)] border border-mr-line-strong bg-mr-paper px-6 py-4 text-base font-bold text-mr-ink shadow-[var(--shadow-lift)] transition-[background-color,transform] duration-150 hover:bg-mr-line hover:-translate-y-px active:scale-[0.98] motion-reduce:transform-none motion-reduce:transition-colors"
           >
             <img
               src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
@@ -154,7 +153,7 @@ export default function Login() {
               className="h-6 w-6"
             />
             Continuar con Google
-          </motion.button>
+          </button>
         </section>
       </div>
     </div>

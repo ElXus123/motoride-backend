@@ -10,13 +10,9 @@ import {
   getDocFromServer,
   type Firestore,
 } from 'firebase/firestore';
-import { getFunctions } from 'firebase/functions';
 import firebaseConfig from '../firebase-applet-config.json';
 
 export const app = initializeApp(firebaseConfig);
-
-/** Misma región que las Cloud Functions v2 del proyecto (sendRideInvite, etc.). */
-export const motorideFunctions = getFunctions(app, 'europe-west1');
 
 export const auth = getAuth(app);
 

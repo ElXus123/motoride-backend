@@ -15,7 +15,9 @@ import {
 import { updateProfile } from 'firebase/auth';
 import { db, auth, logOut, handleFirestoreError, OperationType } from '../firebase';
 import { calculateLevel } from '../lib/utils';
-import { ArrowLeft, Camera, LogOut, ChevronDown, ChevronUp, Activity, Trash2, Play, Clock, Shield, X, Trophy } from 'lucide-react';
+import { ArrowLeft, Camera, LogOut, ChevronDown, ChevronUp, Activity, Trash2, Play, Clock, Shield, X, Trophy, Sun, Moon, SunMoon } from 'lucide-react';
+import { useTheme } from '../hooks/useTheme';
+import type { ThemeChoice } from '../lib/theme';
 import PremiumBadge from './PremiumBadge';
 import AdminPointsPanel from './AdminPointsPanel';
 import { formatRideCardSubtitle, formatRideCardTitle, rideHistoryPointsEarned } from '../lib/rideHistoryDisplay';
@@ -23,7 +25,13 @@ import MedalShowcase from './MedalShowcase';
 import { MEDAL_DEFINITIONS, listUnlockedMedalIds } from '../lib/achievements';
 import { FRAME_CATALOG, getEquippedFrame, getUnlockedFrameIds, sanitizeProfileFrameId } from '../lib/frames';
 import { AvatarFrame } from './AvatarFrame';
-import { Button, Card, Eyebrow, TextField, Title } from './ui';
+import { Button, Card, Chip, Eyebrow, TextField, Title } from './ui';
+
+const THEME_OPTIONS: { value: ThemeChoice; label: string; Icon: typeof Sun }[] = [
+  { value: 'light', label: 'Claro', Icon: Sun },
+  { value: 'dark', label: 'Oscuro', Icon: Moon },
+  { value: 'system', label: 'Automático', Icon: SunMoon },
+];
 
 type Props = {
   onBack: () => void;
@@ -37,6 +45,7 @@ const ICON_BTN =
 export default function Profile({ onBack, onRepeatRoute }: Props) {
   const { user } = useAuth();
   const showMessage = useAppMessage();
+  const { choice: themeChoice, resolved: resolvedTheme, setChoice: setThemeChoice } = useTheme();
   const [displayName, setDisplayName] = useState(user?.displayName || '');
   const [motorcycle, setMotorcycle] = useState('');
   const [loading, setLoading] = useState(false);
@@ -506,9 +515,32 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
           )}
         </Card>
 
+        {/* Tema: claro, oscuro o automático (sigue la configuración del móvil) */}
+        <Card as="section" aria-labelledby="theme-settings-title" className="mt-6 p-5">
+          <Eyebrow>Pantalla</Eyebrow>
+          <h2 id="theme-settings-title" className="mr-title mt-1 text-[1.625rem]">Tema</h2>
+          <div role="group" aria-labelledby="theme-settings-title" className="mt-4 flex flex-wrap gap-2">
+            {THEME_OPTIONS.map(({ value, label, Icon }) => (
+              <Chip
+                key={value}
+                selected={themeChoice === value}
+                onClick={() => setThemeChoice(value)}
+                icon={<Icon size={16} />}
+              >
+                {label}
+              </Chip>
+            ))}
+          </div>
+          <p className="mt-3 text-[0.8125rem] text-mr-muted">
+            {themeChoice === 'system'
+              ? `Sigue la configuración de tu móvil (ahora: ${resolvedTheme === 'dark' ? 'oscuro' : 'claro'}).`
+              : 'Se aplica al momento y queda guardado en este dispositivo.'}
+          </p>
+        </Card>
+
         <button
           onClick={logOut}
-          className="mr-focus mt-8 flex min-h-[48px] w-full items-center justify-center gap-2 rounded-[12px] py-3 text-base font-bold text-[#a3261c] transition-colors hover:bg-mr-line"
+          className="mr-focus mt-8 flex min-h-[48px] w-full items-center justify-center gap-2 rounded-[12px] py-3 text-base font-bold text-mr-danger transition-colors hover:bg-mr-line"
         >
           <LogOut size={20} aria-hidden="true" />
           Cerrar Sesión
@@ -663,7 +695,7 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
                 <button
                   type="button"
                   onClick={() => deleteRide(detailRide.id)}
-                  className="mr-focus flex min-h-[44px] w-full items-center justify-center gap-2 rounded-[12px] border border-[#a3261c] bg-mr-paper py-3 text-sm font-bold text-[#a3261c] transition-colors hover:bg-mr-line"
+                  className="mr-focus flex min-h-[44px] w-full items-center justify-center gap-2 rounded-[12px] border border-[#a3261c] bg-mr-paper py-3 text-sm font-bold text-mr-danger transition-colors hover:bg-mr-line"
                 >
                   <Trash2 size={18} aria-hidden="true" /> Eliminar del historial
                 </button>

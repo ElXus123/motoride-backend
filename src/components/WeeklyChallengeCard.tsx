@@ -206,7 +206,7 @@ export function WeeklyChallengeCard({ uid, className = '' }: { uid: string; clas
         )}
       </div>
       {error && (
-        <p role="alert" className="mt-3 text-xs text-[#a3261c]">
+        <p role="alert" className="mt-3 text-xs text-mr-danger">
           {error}
         </p>
       )}

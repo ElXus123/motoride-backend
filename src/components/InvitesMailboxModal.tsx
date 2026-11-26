@@ -237,7 +237,7 @@ export default function InvitesMailboxModal({
                       }}
                       className="w-full text-left rounded-2xl border border-[#1d4f8a]/40 bg-[#1d4f8a]/10 p-3 hover:bg-[#1d4f8a]/20"
                     >
-                      <p className="text-xs font-black text-[#1d4f8a]">Chat plan · {row.groupName}</p>
+                      <p className="text-xs font-black text-mr-info">Chat plan · {row.groupName}</p>
                       <p className="text-[11px] text-mr-muted font-mono mt-0.5">{row.groupId}</p>
                       <p className="text-xs text-mr-ink mt-1 line-clamp-2">{row.preview || 'Nuevo mensaje'}</p>
                     </button>
@@ -282,7 +282,7 @@ export default function InvitesMailboxModal({
                         <p className="font-display text-2xl font-bold uppercase leading-tight text-mr-ink truncate">{inv.groupName || 'Ruta'}</p>
                         <p className="text-xs text-mr-muted font-mono">Código {inv.groupId}</p>
                         {inv.kind === 'scheduled_ride' && (
-                          <p className="text-[11px] font-bold text-[#1d4f8a] mt-1">Ruta programada</p>
+                          <p className="text-[11px] font-bold text-mr-info mt-1">Ruta programada</p>
                         )}
                         <p className="text-[11px] text-mr-subtle mt-1">
                           {inv.sentAt
@@ -297,7 +297,7 @@ export default function InvitesMailboxModal({
                         type="button"
                         disabled={removingId === inv.id}
                         onClick={() => void removeInvite(inv)}
-                        className="shrink-0 p-2 text-mr-muted hover:text-[#a3261c]"
+                        className="shrink-0 p-2 text-mr-muted hover:text-mr-danger"
                         title="Descartar"
                       >
                         {removingId === inv.id ? (

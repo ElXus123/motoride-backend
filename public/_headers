@@ -11,7 +11,7 @@
 # Cabeceras de seguridad para todas las rutas (CSP: scripts solo del propio origen; apis.google.com y
 # dominios de Firebase Auth para el inicio de sesión con Google; resto de orígenes de datos vía connect-src/img-src).
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self' https://apis.google.com; img-src 'self' data: blob: https:; connect-src 'self' https: wss:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; worker-src 'self' blob:; frame-src https://*.firebaseapp.com https://accounts.google.com https://*.google.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://apis.google.com; img-src 'self' data: blob: https:; connect-src 'self' https: wss:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; worker-src 'self' blob:; frame-src https://*.firebaseapp.com https://accounts.google.com https://*.google.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
 
@@ -20,3 +20,7 @@
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
   Access-Control-Allow-Origin: *
+
+# Fuentes propias (public/fonts): cambian muy poco; caché larga en navegador y CDN.
+/fonts/*
+  Cache-Control: public, max-age=2592000

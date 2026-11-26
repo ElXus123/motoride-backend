@@ -14,10 +14,12 @@
  * Bordes: 1 px en tinta al 13 %. Sin gradientes, sin sombras pesadas, sin blobs.
  * Movimiento: 180–320 ms, curva “expo out”. Respeta prefers-reduced-motion.
  *
- * REGLA DE SUPERFICIES OSCURAS
- * - El tema es CLARO por defecto. Los neutros zinc-* están INVERTIDOS a propósito:
+ * TEMA CLARO / OSCURO
+ * - El tema real está en <html data-theme="light|dark"> (src/lib/theme.ts, public/boot.js).
+ *   Por defecto sigue el sistema; la elección del usuario se guarda en localStorage.
+ * - En claro, los neutros zinc-* están INVERTIDOS a propósito:
  *   bg-zinc-950 = crema de página, text-zinc-100 = tinta, bg-zinc-900 = papel de tarjeta.
- *   Así el código heredado sigue siendo legible sin tocarlo.
+ *   Así el código heredado sigue siendo legible sin tocarlo. En oscuro vuelve la escala normal.
  * - Las superficies oscuras (HUD de navegación, mapa, popups y modales oscuros) van
  *   dentro de un ámbito `.mr-dark` (o usan tokens `hud-*`). Dentro de `.mr-dark` vuelven
  *   los zinc originales (oscuros) y el texto claro es legal.
@@ -67,6 +69,10 @@
   --color-mr-accent-hover: #e77a12;
   --color-mr-accent-text: #a44e08;
   --color-mr-on-accent: #14110e;
+  /* Texto de estado (rojo destructivo, verde confirmado, azul info). Se redefine en oscuro. */
+  --color-mr-danger: #a3261c;
+  --color-mr-success: #1f6b3a;
+  --color-mr-info: #1d4f8a;
 
   /* ── HUD oscuro de navegación y mapa (siempre oscuro, legible de noche) ── */
   --color-hud-bg: #0d0c0b;
@@ -144,6 +150,9 @@
   --color-mr-line: #efebe325;
   --color-mr-line-strong: #efebe366;
   --color-mr-accent-text: #ffa23d;
+  --color-mr-danger: #ff8a7a;
+  --color-mr-success: #6fd3a6;
+  --color-mr-info: #7cc8e4;
   --mr-page: #0d0c0b;
   --mr-paper: #171614;
   --mr-ink: #efebe3;
@@ -154,6 +163,56 @@
   --mr-accent-text: #ffa23d;
   --mr-on-accent: #14110e;
   color: var(--mr-ink);
+}
+
+/* Tema oscuro de la app: <html data-theme="dark"> (lo pone public/boot.js y src/lib/theme.ts).
+   Mismos nombres de token que el claro. Las clases zinc vuelven a su escala normal (oscura).
+   El HUD y el mapa usan .mr-dark y tokens hud-*, así que no cambian con este tema. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-zinc-50: #faf8f4;
+  --color-zinc-100: #efebe3;
+  --color-zinc-200: #ddd8cd;
+  --color-zinc-300: #bfb9ad;
+  --color-zinc-400: #9b958a;
+  --color-zinc-500: #77726a;
+  --color-zinc-600: #55514a;
+  --color-zinc-700: #3a3834;
+  --color-zinc-800: #272623;
+  --color-zinc-900: #171614;
+  --color-zinc-950: #0d0c0b;
+  --color-orange-400: #ffa23d;
+  --color-orange-300: #ffbb67;
+  --color-orange-200: #ffd69e;
+  --color-orange-100: #ffecd0;
+  --color-orange-50: #fff7ec;
+  --color-mr-page: #0d0c0b;
+  --color-mr-paper: #171614;
+  --color-mr-ink: #efebe3;
+  --color-mr-muted: #a8a195;
+  --color-mr-subtle: #8f8880;
+  --color-mr-line: #ffffff1f;
+  --color-mr-line-strong: #ffffff3d;
+  --color-mr-accent: #f58a1f;
+  --color-mr-accent-hover: #ffa23d;
+  --color-mr-accent-text: #ffa23d;
+  --color-mr-on-accent: #14110e;
+  --color-mr-danger: #ff8a7a;
+  --color-mr-success: #6fd3a6;
+  --color-mr-info: #7cc8e4;
+  --shadow-lift: 0 1px 0 rgb(0 0 0 / 0.35), 0 8px 24px -18px rgb(0 0 0 / 0.8);
+  --shadow-sheet: 0 -10px 40px -20px rgb(0 0 0 / 0.7);
+  --mr-page: #0d0c0b;
+  --mr-paper: #171614;
+  --mr-ink: #efebe3;
+  --mr-muted: #a8a195;
+  --mr-subtle: #8f8880;
+  --mr-line: #ffffff1f;
+  --mr-line-strong: #ffffff3d;
+  --mr-accent: #f58a1f;
+  --mr-accent-hover: #ffa23d;
+  --mr-accent-text: #ffa23d;
+  --mr-on-accent: #14110e;
 }
 
 html {
@@ -498,7 +557,8 @@ h2,
   background: #6f675c;
 }
 
-.mr-dark .custom-scrollbar::-webkit-scrollbar-thumb {
+.mr-dark .custom-scrollbar::-webkit-scrollbar-thumb,
+:root[data-theme="dark"] .custom-scrollbar::-webkit-scrollbar-thumb {
   background: #3a3834;
 }
 

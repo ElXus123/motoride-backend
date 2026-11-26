@@ -271,7 +271,7 @@ export default function InviteFriendsModal({
                             </p>
                           </div>
                           {inRoute ? (
-                            <span className="text-[11px] font-bold text-[#1f6b3a] shrink-0 px-2">En ruta</span>
+                            <span className="text-[11px] font-bold text-mr-success shrink-0 px-2">En ruta</span>
                           ) : (
                             <button
                               type="button"
@@ -313,7 +313,7 @@ export default function InviteFriendsModal({
                     className="flex items-center justify-center gap-2 rounded-xl bg-mr-line py-2.5 text-xs font-bold text-mr-ink hover:bg-mr-line"
                   >
                     {scheduleShareCopied === 'code' ? (
-                      <Check size={16} className="text-[#1f6b3a]" />
+                      <Check size={16} className="text-mr-success" />
                     ) : (
                       <Copy size={16} />
                     )}
@@ -347,7 +347,7 @@ export default function InviteFriendsModal({
                     className="flex items-center justify-center gap-2 rounded-xl bg-mr-accent/20 py-2.5 text-xs font-bold text-mr-ink hover:bg-mr-accent-hover"
                   >
                     {scheduleShareCopied === 'link' ? (
-                      <Check size={16} className="text-[#1f6b3a]" />
+                      <Check size={16} className="text-mr-success" />
                     ) : (
                       <Share2 size={16} />
                     )}

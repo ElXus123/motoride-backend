@@ -13,7 +13,8 @@ export default function AppLogoSplash({
   /** Tailwind z-index (p. ej. z-[9999] bajo MainApp). */
   zClassName?: string;
 }) {
-  const [src, setSrc] = useState('/ICONO-512.webp');
+  // 256 px (25 kB): se muestra a 112 px; el de 512 px pesa 83 kB sin aportar nada en pantalla.
+  const [src, setSrc] = useState('/ICONO-256.webp');
 
   return (
     <div

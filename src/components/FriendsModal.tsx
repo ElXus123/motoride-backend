@@ -421,13 +421,13 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                           <div className="flex items-center gap-2">
                             {isIncoming ? (
                               <>
-                                <button onClick={() => acceptFriendRequest(rid)} className="p-2 rounded-lg bg-[#1f6b3a]/10 text-[#1f6b3a] hover:bg-[#1f6b3a]/20"><Check size={18} /></button>
-                                <button onClick={() => rejectFriendRequest(rid)} className="p-2 rounded-lg bg-[#a3261c]/10 text-[#a3261c] hover:bg-[#8a1f17]/20"><Ban size={18} /></button>
+                                <button onClick={() => acceptFriendRequest(rid)} className="p-2 rounded-lg bg-[#1f6b3a]/10 text-mr-success hover:bg-[#1f6b3a]/20"><Check size={18} /></button>
+                                <button onClick={() => rejectFriendRequest(rid)} className="p-2 rounded-lg bg-[#a3261c]/10 text-mr-danger hover:bg-[#8a1f17]/20"><Ban size={18} /></button>
                               </>
                             ) : isFriend ? (
                               <button 
                                 onClick={() => removeFriend(rid)}
-                                className="p-2 rounded-lg transition-colors bg-[#a3261c]/10 text-[#a3261c] hover:bg-[#8a1f17]/20"
+                                className="p-2 rounded-lg transition-colors bg-[#a3261c]/10 text-mr-danger hover:bg-[#8a1f17]/20"
                               >
                                 <UserMinus size={18} />
                               </button>
@@ -442,7 +442,7 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                             ) : (
                               <button 
                                 onClick={() => sendFriendRequest(rid)}
-                                className="p-2 rounded-lg transition-colors bg-[#1d4f8a]/10 text-[#1d4f8a] hover:bg-[#1d4f8a]/20"
+                                className="p-2 rounded-lg transition-colors bg-[#1d4f8a]/10 text-mr-info hover:bg-[#1d4f8a]/20"
                               >
                                 <UserPlus size={18} />
                               </button>
@@ -466,8 +466,8 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                             {u.isPremium === true ? <PremiumBadge compact /> : null}
                           </p>
                           <div className="flex gap-2">
-                            <button onClick={() => acceptFriendRequest(u.uid)} className="p-2 rounded-lg bg-[#1f6b3a]/10 text-[#1f6b3a] hover:bg-[#1f6b3a]/20"><Check size={18} /></button>
-                            <button onClick={() => rejectFriendRequest(u.uid)} className="p-2 rounded-lg bg-[#a3261c]/10 text-[#a3261c] hover:bg-[#8a1f17]/20"><Ban size={18} /></button>
+                            <button onClick={() => acceptFriendRequest(u.uid)} className="p-2 rounded-lg bg-[#1f6b3a]/10 text-mr-success hover:bg-[#1f6b3a]/20"><Check size={18} /></button>
+                            <button onClick={() => rejectFriendRequest(u.uid)} className="p-2 rounded-lg bg-[#a3261c]/10 text-mr-danger hover:bg-[#8a1f17]/20"><Ban size={18} /></button>
                           </div>
                         </div>
                       ))}
@@ -517,7 +517,7 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                               e.stopPropagation();
                               void removeFriend(fid);
                             }}
-                            className="mr-focus inline-flex h-11 w-11 items-center justify-center rounded-full text-mr-subtle transition-colors hover:bg-mr-line hover:text-[#a3261c]"
+                            className="mr-focus inline-flex h-11 w-11 items-center justify-center rounded-full text-mr-subtle transition-colors hover:bg-mr-line hover:text-mr-danger"
                             title="Eliminar amigo"
                           >
                             <UserMinus size={18} />

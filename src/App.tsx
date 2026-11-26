@@ -1,11 +1,24 @@
 import * as React from 'react';
-import { useEffect, useState } from 'react';
+import { Suspense, lazy, useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { AppMessageProvider, useAppMessage } from './contexts/AppMessageContext';
 import Login from './components/Login';
-import MainApp from './components/MainApp';
 import AppLogoSplash from './components/AppLogoSplash';
 import { AlertTriangle, Download, RefreshCcw, ShieldAlert } from 'lucide-react';
+
+/**
+ * La app con sesión (Dashboard, lógica de grupos, FCM…) se descarga aparte: quien no tiene sesión
+ * (login) no baja ese código ni sus temporizadores de precarga.
+ */
+const MainApp = lazy(() => import('./components/MainApp'));
+
+/** Pista por navegador (no es dato de sesión): si la última vez había usuario, se precarga MainApp en paralelo con Auth. */
+const SESSION_HINT_KEY = 'motoride_session_hint';
+try {
+  if (window.localStorage.getItem(SESSION_HINT_KEY) === '1') void import('./components/MainApp');
+} catch {
+  /* modo privado */
+}
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -55,6 +68,16 @@ const AppContent = () => {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isIOS, setIsIOS] = useState(false);
   const [isChromeIOS, setIsChromeIOS] = useState(false);
+
+  useEffect(() => {
+    if (loading) return;
+    try {
+      if (user) window.localStorage.setItem(SESSION_HINT_KEY, '1');
+      else window.localStorage.removeItem(SESSION_HINT_KEY);
+    } catch {
+      /* modo privado */
+    }
+  }, [user, loading]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -247,7 +270,13 @@ const AppContent = () => {
           </div>
         </div>
       )}
-      {user ? <MainApp /> : <Login />}
+      {user ? (
+        <Suspense fallback={<AppLogoSplash zClassName="z-[9999]" />}>
+          <MainApp />
+        </Suspense>
+      ) : (
+        <Login />
+      )}
     </div>
   );
 };
