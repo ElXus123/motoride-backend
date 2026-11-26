@@ -32,6 +32,16 @@ export function legacyFlat1000TotalXp(level: number, points: number): number {
   return (L - 1) * POINTS_LEVEL_UNIT + P;
 }
 
+/**
+ * XP total acumulada necesaria para LLEGAR a `level` desde el nivel 1 (0 para nivel 1).
+ * Suma de tramos: sum_{L=1}^{level-1} L × 1000 = 1000 × (level−1) × level / 2.
+ * La curva NO se ha cambiado: alterarla re-nivelaría a todos los usuarios existentes.
+ */
+export function cumulativeXpForLevel(level: number): number {
+  const lv = Math.max(1, Math.floor(Number(level) || 1));
+  return (POINTS_LEVEL_UNIT * (lv - 1) * lv) / 2;
+}
+
 /** Descompone un total de XP (economía progresiva) en `(level, points)` normalizados. */
 export function decomposeProgressiveTotalXp(totalXp: number): { level: number; points: number } {
   let T = Math.max(0, Math.floor(Number(totalXp) || 0));
@@ -47,12 +57,31 @@ export function decomposeProgressiveTotalXp(totalXp: number): { level: number; p
 }
 
 /**
- * Normaliza `(level, points)` leídos de Firestore: migra desde el modelo fijo 1000
- * y corrige desbordes bajo la curva progresiva.
+ * Versión del modelo de progreso guardada en `users.progressModel`.
+ * 2 = curva progresiva (L×1000 por tramo). Sin campo = modelo antiguo (1000 fijo) pendiente de migrar.
  */
-export function normalizeUserProgress(storedLevel: number, storedPoints: number): { level: number; points: number } {
-  const totalLegacy = legacyFlat1000TotalXp(storedLevel, storedPoints);
-  return decomposeProgressiveTotalXp(totalLegacy);
+export const PROGRESS_MODEL_VERSION = 2;
+
+/**
+ * Normaliza `(level, points)` leídos de Firestore con la curva progresiva.
+ * `points` es el progreso dentro del tramo; solo se corrige un desborde (points ≥ level×1000).
+ * NO reinterpreta los datos como modelo antiguo: hacerlo bajaba de nivel a los usuarios
+ * en cada arranque (L10/9000 pasaba a L6/3000). El marcador `progressModel` se escribe al sincronizar.
+ * Para migrar perfiles del modelo fijo de 1000 (antes del bloque 40), usar `migrateFlatLegacyProgress`.
+ */
+export function normalizeUserProgress(
+  storedLevel: number,
+  storedPoints: number,
+  _progressModel?: unknown
+): { level: number; points: number } {
+  const lv = Math.max(1, Math.floor(Number(storedLevel) || 1));
+  const pts = Math.max(0, Math.floor(Number(storedPoints) || 0));
+  return decomposeProgressiveTotalXp(cumulativeXpForLevel(lv) + pts);
+}
+
+/** Migración manual del modelo fijo de 1000 puntos por nivel (solo perfiles previos al bloque 40). */
+export function migrateFlatLegacyProgress(storedLevel: number, storedPoints: number): { level: number; points: number } {
+  return decomposeProgressiveTotalXp(legacyFlat1000TotalXp(storedLevel, storedPoints));
 }
 
 export function levelFromStored(pointsInLevel: number, storedLevel: number): number {

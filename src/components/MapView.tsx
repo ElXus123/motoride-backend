@@ -10,15 +10,12 @@ import {
   type FC,
   type ReactNode,
 } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, GeoJSON, useMap, useMapEvents, Pane } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, GeoJSON, CircleMarker, useMap, useMapEvents, Pane } from 'react-leaflet';
 import L from 'leaflet';
 import {
   doc,
   onSnapshot,
   updateDoc,
-  collection,
-  query,
-  where,
   getDoc,
   setDoc,
   arrayRemove,
@@ -31,11 +28,15 @@ import { useAppMessage } from '../contexts/AppMessageContext';
 import { useLocationTracking } from '../hooks/useLocationTracking';
 import { useOpenMeteoWeather } from '../hooks/useOpenMeteoWeather';
 import { useLeanAngle, type LeanCalibrationProfile } from '../hooks/useLeanAngle';
+import {
+  clearActiveRouteSnapshot,
+  readActiveRouteSnapshot,
+  saveActiveRouteSnapshot,
+} from '../lib/activeRouteSnapshot';
 import { useNavigation } from '../hooks/useNavigation';
 import { useNavigationHeading } from '../hooks/useNavigationHeading';
-import { getLineCoordinates, snapPointToRouteDetailed } from '../lib/navigationPose';
 import { offsetByMeters } from '../lib/geoUtils';
-import { anyPrecipitationRiskAtPoints } from '../lib/precipitationRisk';
+import { anyPrecipitationRiskAtPoints, routePointsAhead } from '../lib/precipitationRisk';
 import {
   DEFAULT_PREMIUM_GPS_POLICY,
   normalizePremiumGpsPolicy,
@@ -45,12 +46,20 @@ import { useRoadData } from '../hooks/useRoadData';
 import { parseGPX, parseRouteData } from '../lib/gpx';
 import { getDistance } from '../lib/geoUtils';
 import { requestJson } from '../lib/network';
-import { getActivePointsConfig } from '../lib/pointsConfig';
+import { curvePointsForPeak, getActivePointsConfig, RIDE_POINTS_RULES } from '../lib/pointsConfig';
+import { PROGRESS_MODEL_VERSION } from '../lib/levelProgress';
 import { fetchRainViewerTileUrl } from '../lib/rainviewer';
-import { LEAFLET_LIGHT_ERROR_TILE, LEAFLET_TRANSPARENT_ERROR_TILE } from '../lib/leafletTiles';
+import {
+  BASE_MAP_MAX_NATIVE_ZOOM,
+  BASE_MAP_TILE_URL,
+  LEAFLET_LIGHT_ERROR_TILE,
+  LEAFLET_TRANSPARENT_ERROR_TILE,
+} from '../lib/leafletTiles';
 import { getLevelRingBoxStyle, getLevelRingWrapperClass } from '../lib/levelRing';
-import { pickBestNominatimResult, sortNominatimResults } from '../lib/nominatimPick';
-import { prefetchAroundUser } from '../lib/mapTileCache';
+import { resolvePeerFrameId } from '../lib/frames';
+import { AvatarFrame, frameOverlayHtml, getFrameOuterSize } from './AvatarFrame';
+import { formatNominatimSuggestion, pickBestNominatimResult, sortRoutableNominatimResults } from '../lib/nominatimPick';
+import { prefetchAroundUser, prefetchRouteTiles } from '../lib/mapTileCache';
 import { weatherWmoToLucide } from '../lib/weatherWmo';
 import socket from '../lib/socket';
 import {
@@ -61,14 +70,42 @@ import {
 import { useVoiceChat } from '../hooks/useVoiceChat';
 import PremiumBadge from './PremiumBadge';
 import InviteFriendsModal from './InviteFriendsModal';
-import { Upload, ArrowLeft, Copy, Check, Navigation, AlertTriangle, Play, Square, MapPin, Trophy, Bell, AlertCircle, Wrench, Fuel, X, Maximize, Minimize, Search, Share2, Menu, Target, LogOut, Users, UserPlus, Mic, MicOff, ShieldAlert, Activity, Layers, Lock, LockOpen, Smartphone, RotateCw, Crown, WifiOff, Monitor, Loader2, Mail, Ban, CloudRain, Pause, Coffee, ArrowUp } from 'lucide-react';
+import { Upload, ArrowLeft, Copy, Check, Navigation, AlertTriangle, Play, Square, MapPin, Trophy, Bell, AlertCircle, Wrench, Fuel, X, Maximize, Minimize, Search, Share2, Menu, Target, LogOut, Users, UserPlus, Mic, MicOff, ShieldAlert, Activity, Layers, Lock, LockOpen, Smartphone, RotateCw, Crown, WifiOff, Monitor, Loader2, Mail, Ban, CloudRain, Pause, Coffee, ArrowUp, CornerUpLeft, CornerUpRight } from 'lucide-react';
 import { getDirectionIcon } from './NavManeuverIcons';
+import RouteStopsPanel from './RouteStopsPanel';
+
+/** Paradas en ruta (gasolineras, cafés, miradores): oculto de momento. Poner a true para reactivar. */
+const ROUTE_STOPS_ENABLED = false;
+import { getLineCoordinates } from '../lib/navigationPose';
+import { loadSummaryLogo, renderRouteSummaryCard } from '../lib/routeSummaryCard';
+import { buildRouteIndex, type RouteIndex } from '../lib/routeProgress';
+import {
+  fetchRouteStops,
+  getCachedRouteStops,
+  nextChosenStop,
+  routeCacheKey,
+  STOP_KIND_LABEL,
+  type RouteStop,
+} from '../lib/routeStops';
+import {
+  applyVoteOps,
+  buildCandidates,
+  buildVoteMoveOps,
+  electorateOf,
+  pickChosenStop,
+  publishRouteStopCandidates,
+  subscribeRouteStopVotes,
+  toRouteStop,
+  type RouteStopCandidate,
+  type StopVoteDoc,
+} from '../lib/stopVotes';
 import { copyTextToClipboard, getSupportMailtoHref } from '../lib/clientInfo';
 import { buildScheduledInviteSharePayload } from '../lib/scheduledRouteShare';
-import { formatNavDistanceMeters } from '../lib/navFormat';
+import { formatNavDistanceMeters, formatNavDurationS, formatNavEtaClock } from '../lib/navFormat';
 import { generateGroupCode } from '../lib/groupCode';
 import { motion, AnimatePresence } from 'motion/react';
 import appIcon from '../../ICONO.png';
+import { escapeHtml, safeProfileImageSrc } from '../lib/safeHtml';
 
 /** Rutas con distancia ≤ esta cifra (km) no crean entrada en `rideHistory`; puntos y km al perfil sí. */
 const MIN_KM_TO_SAVE_RIDE_HISTORY = 5;
@@ -125,21 +162,26 @@ type ScreenOrientationLockArg =
   | 'landscape-secondary';
 
 // Custom icon creator for avatars with level (aro evoluciona con el nivel)
-const createAvatarIcon = (url: string, level: number = 1, isPremium: boolean = false) => {
+const createAvatarIcon = (url: string, level: number = 1, isPremium: boolean = false, frameId: string = 'none') => {
   const rv = getLevelRingBoxStyle(level, isPremium);
+  /** Marco por fuera del aro de nivel: el contenedor de 44 px no cambia; el SVG se centra sobre el avatar de 40 px. */
+  const frameHtml = frameOverlayHtml(frameId, getFrameOuterSize(40, frameId), { x: 20, y: 20 });
   const lvlBg = isPremium ? '#d97706' : '#f97316';
   const crown = isPremium
     ? `<div style="position:absolute;top:-5px;left:-3px;width:17px;height:17px;background:linear-gradient(160deg,#fde68a,#f59e0b);border-radius:50%;border:2px solid #18181b;box-shadow:0 1px 4px rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;font-size:9px;line-height:1;">👑</div>`
     : '';
+  // La URL de la foto viene de Firestore (dato de usuario): solo https válida o data:image raster, y escapada.
+  const imgSrc = escapeHtml(safeProfileImageSrc(url) ?? 'https://via.placeholder.com/40');
   return L.divIcon({
     className: 'custom-avatar-icon',
     html: `<div style="position: relative; width: 44px; height: 44px;">
              ${crown}
              <div style="width: 40px; height: 40px; border-radius: 50%; overflow: hidden; ${rv.border}; box-shadow: ${rv.boxShadow}, 0 4px 6px -1px rgb(0 0 0 / 0.12); background: white;">
-               <img src="${url || 'https://via.placeholder.com/40'}" style="width: 100%; height: 100%; object-fit: cover;" />
+               <img src="${imgSrc}" style="width: 100%; height: 100%; object-fit: cover;" />
              </div>
+             ${frameHtml}
              <div style="position: absolute; bottom: -2px; right: -2px; background: ${lvlBg}; color: white; border-radius: 50%; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 900; border: 2px solid #18181b; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">
-               ${level}
+               ${escapeHtml(level)}
              </div>
            </div>`,
     iconSize: [44, 44],
@@ -154,7 +196,8 @@ const CurrentUserMarker = ({
   displayNameToUse,
   userLevel,
   score,
-  isPremium
+  isPremium,
+  subscribeSmooth,
 }: {
   position: [number, number];
   heading: number;
@@ -162,16 +205,29 @@ const CurrentUserMarker = ({
   userLevel: number;
   score: number;
   isPremium?: boolean;
+  /** Bucle de suavizado: mueve la flecha por frame con setLatLng (sin re-render de React). */
+  subscribeSmooth?: (fn: (p: { lat: number; lng: number }) => void) => () => void;
 }) => {
   const markerRef = useRef<any>(null);
-  
+
+  useEffect(() => {
+    if (!subscribeSmooth) return;
+    return subscribeSmooth((p) => {
+      const m = markerRef.current;
+      if (m) m.setLatLng([p.lat, p.lng]);
+    });
+  }, [subscribeSmooth]);
+
+  // La flecha propia no lleva marco de avatar: el marco solo se muestra en los marcadores de los demás.
   const icon = useMemo(() => {
     return L.divIcon({
       className: 'current-user-icon',
-      html: `<div class="user-arrow-container" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; transition: transform 0.3s ease-out;">
-               <svg viewBox="0 0 100 100" width="32" height="32" style="filter: drop-shadow(0px 2px 3px rgba(0,0,0,0.4));">
-                 <path d="M 50 10 L 90 90 L 50 75 L 10 90 Z" fill="#3b82f6" stroke="white" stroke-width="6" stroke-linejoin="round" />
-               </svg>
+      html: `<div style="position: relative; width: 32px; height: 32px;">
+               <div class="user-arrow-container" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; transition: transform 0.3s ease-out;">
+                 <svg viewBox="0 0 100 100" width="32" height="32" style="filter: drop-shadow(0px 2px 3px rgba(0,0,0,0.4));">
+                   <path d="M 50 10 L 90 90 L 50 75 L 10 90 Z" fill="#3b82f6" stroke="white" stroke-width="6" stroke-linejoin="round" />
+                 </svg>
+               </div>
              </div>`,
       iconSize: [32, 32],
       iconAnchor: [16, 16]
@@ -189,7 +245,7 @@ const CurrentUserMarker = ({
         }
       }
     }
-  }, [heading]);
+  }, [heading, icon]);
 
   return (
     <Marker
@@ -219,8 +275,10 @@ const SmoothedPeerMarker: FC<{
   targetLat: number;
   targetLng: number;
   icon: L.DivIcon;
+  /** Compañero sin conexión: se mantiene su última posición, atenuada. */
+  offline?: boolean;
   children?: ReactNode;
-}> = ({ targetLat, targetLng, icon, children }) => {
+}> = ({ targetLat, targetLng, icon, offline = false, children }) => {
   const markerRef = useRef<L.Marker | null>(null);
   const smoothRef = useRef<{ lat: number; lng: number }>({ lat: targetLat, lng: targetLng });
   const targetRef = useRef({ lat: targetLat, lng: targetLng });
@@ -262,58 +320,86 @@ const SmoothedPeerMarker: FC<{
 
   const p0 = smoothRef.current;
   return (
-    <Marker ref={markerRef} position={[p0.lat, p0.lng]} icon={icon} zIndexOffset={100}>
+    <Marker ref={markerRef} position={[p0.lat, p0.lng]} icon={icon} zIndexOffset={100} opacity={offline ? 0.45 : 1}>
       {children}
     </Marker>
   );
 };
 
+/**
+ * Moto vista de frente para el indicador de inclinación. El giro lo da `angle` (grados) alrededor de la rueda.
+ * Silueta simple (horquilla, depósito, faro, manillar y casco) con gradientes suaves; sin animaciones.
+ */
 const MotorcycleIcon = ({ angle }: { angle: number }) => (
   <div
     style={{ transform: `rotate(${angle}deg)`, transformOrigin: 'bottom center', transition: 'transform 45ms linear' }}
     className="w-24 h-24 flex items-center justify-center"
   >
-    <svg viewBox="0 0 100 100" className="w-full h-full drop-shadow-[0_10px_10px_rgba(0,0,0,0.5)]">
-      {/* Front View Classic/Cruiser - Based on User Image */}
-      
-      {/* Front Tire */}
-      <rect x="44" y="60" width="12" height="35" rx="6" fill="#0a0a0a" stroke="white" strokeWidth="1" />
-      <path d="M 44 70 L 56 70 M 44 80 L 56 80 M 44 90 L 56 90" stroke="#333" strokeWidth="1" />
-      
-      {/* Forks */}
-      <rect x="38" y="35" width="4" height="45" rx="2" fill="#94a3b8" stroke="white" strokeWidth="0.5" />
-      <rect x="58" y="35" width="4" height="45" rx="2" fill="#94a3b8" stroke="white" strokeWidth="0.5" />
-      
-      {/* Crash Bars / Engine Guards */}
-      <path d="M 38 55 Q 25 55 25 70 Q 25 85 38 85" fill="none" stroke="white" strokeWidth="2" />
-      <path d="M 62 55 Q 75 55 75 70 Q 75 85 62 85" fill="none" stroke="white" strokeWidth="2" />
-      
-      {/* Main Body / Tank Area */}
-      <path d="M 35 45 L 65 45 L 60 65 L 40 65 Z" fill="#7f1d1d" stroke="white" strokeWidth="1" />
-      
-      {/* Round Headlight */}
-      <circle cx="50" cy="42" r="10" fill="white" stroke="white" strokeWidth="1.5" className="animate-pulse shadow-[0_0_20px_rgba(255,255,255,0.8)]" />
-      <circle cx="50" cy="42" r="8" fill="#fef08a" opacity="0.5" />
-      
-      {/* Turn Signals */}
-      <circle cx="35" cy="40" r="4" fill="#f59e0b" stroke="white" strokeWidth="0.5" />
-      <circle cx="65" cy="40" r="4" fill="#f59e0b" stroke="white" strokeWidth="0.5" />
-      
-      {/* Handlebars */}
-      <path d="M 20 35 Q 35 30 50 35 Q 65 30 80 35" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" />
-      <path d="M 20 35 Q 35 30 50 35 Q 65 30 80 35" fill="none" stroke="#111" strokeWidth="1.5" strokeLinecap="round" />
-      
-      {/* Rider - Helmet & Body */}
-      <path d="M 35 35 Q 50 10 65 35" fill="#111" stroke="white" strokeWidth="1" /> {/* Body/Shoulders */}
-      <circle cx="50" cy="22" r="12" fill="#111" stroke="white" strokeWidth="1" /> {/* Helmet */}
-      <rect x="40" y="20" width="20" height="6" rx="3" fill="#334155" /> {/* Visor */}
-      
-      {/* Mirrors */}
-      <path d="M 25 32 L 15 22" stroke="white" strokeWidth="1.5" />
-      <ellipse cx="15" cy="22" rx="8" ry="5" fill="#111" stroke="white" strokeWidth="1" transform="rotate(-20 15 22)" />
-      
-      <path d="M 75 32 L 85 22" stroke="white" strokeWidth="1.5" />
-      <ellipse cx="85" cy="22" rx="8" ry="5" fill="#111" stroke="white" strokeWidth="1" transform="rotate(20 85 22)" />
+    <svg viewBox="0 0 100 100" className="w-full h-full drop-shadow-[0_8px_10px_rgba(0,0,0,0.45)]" aria-hidden>
+      <defs>
+        <linearGradient id="mr-moto-tyre" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stopColor="#3f3f46" />
+          <stop offset="0.5" stopColor="#18181b" />
+          <stop offset="1" stopColor="#09090b" />
+        </linearGradient>
+        <linearGradient id="mr-moto-chrome" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stopColor="#e2e8f0" />
+          <stop offset="0.5" stopColor="#94a3b8" />
+          <stop offset="1" stopColor="#334155" />
+        </linearGradient>
+        <linearGradient id="mr-moto-tank" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#fdba74" />
+          <stop offset="0.45" stopColor="#f58a1f" />
+          <stop offset="1" stopColor="#9a3412" />
+        </linearGradient>
+        <radialGradient id="mr-moto-lamp" cx="0.5" cy="0.45" r="0.6">
+          <stop offset="0" stopColor="#ffffff" />
+          <stop offset="0.6" stopColor="#fef3c7" />
+          <stop offset="1" stopColor="#fbbf24" />
+        </radialGradient>
+        <linearGradient id="mr-moto-helmet" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#52525b" />
+          <stop offset="1" stopColor="#18181b" />
+        </linearGradient>
+      </defs>
+
+      {/* Sombra en el suelo */}
+      <ellipse cx="50" cy="95" rx="19" ry="2.6" fill="#000" opacity="0.4" />
+
+      {/* Rueda delantera */}
+      <rect x="42" y="60" width="16" height="35" rx="8" fill="url(#mr-moto-tyre)" stroke="rgba(255,255,255,0.14)" strokeWidth="0.6" />
+
+      {/* Horquilla (dos barras cromadas que bajan a la rueda) */}
+      <path d="M38 40 L45 40 L49 68 L43.5 68 Z" fill="url(#mr-moto-chrome)" />
+      <path d="M62 40 L55 40 L51 68 L56.5 68 Z" fill="url(#mr-moto-chrome)" />
+
+      {/* Puente superior */}
+      <rect x="35" y="37" width="30" height="5" rx="2.5" fill="url(#mr-moto-chrome)" />
+
+      {/* Manillar con puños */}
+      <path d="M24 36 Q50 30 76 36" fill="none" stroke="#cbd5e1" strokeWidth="2.4" strokeLinecap="round" />
+      <rect x="19.5" y="33.5" width="6.5" height="5" rx="2.5" fill="#18181b" />
+      <rect x="74" y="33.5" width="6.5" height="5" rx="2.5" fill="#18181b" />
+
+      {/* Retrovisores */}
+      <path d="M27 35 L22 24 M73 35 L78 24" stroke="#94a3b8" strokeWidth="1.3" strokeLinecap="round" />
+      <ellipse cx="21" cy="22" rx="5.5" ry="3.2" transform="rotate(-18 21 22)" fill="url(#mr-moto-chrome)" />
+      <ellipse cx="79" cy="22" rx="5.5" ry="3.2" transform="rotate(18 79 22)" fill="url(#mr-moto-chrome)" />
+
+      {/* Casco del piloto, sobre el depósito */}
+      <circle cx="50" cy="25" r="8.5" fill="url(#mr-moto-helmet)" stroke="rgba(255,255,255,0.16)" strokeWidth="0.6" />
+      <path d="M43.5 24.5 Q50 21 56.5 24.5 L55.5 27.5 Q50 29.5 44.5 27.5 Z" fill="#0f172a" opacity="0.85" />
+
+      {/* Depósito / carenado */}
+      <path d="M37 46 Q50 41 63 46 L60.5 62 Q50 66 39.5 62 Z" fill="url(#mr-moto-tank)" />
+      <path d="M41 47.5 Q50 44.5 59 47.5" fill="none" stroke="#fff" strokeOpacity="0.35" strokeWidth="0.9" strokeLinecap="round" />
+
+      {/* Faro */}
+      <circle cx="50" cy="51" r="4.4" fill="url(#mr-moto-lamp)" stroke="#0a0a0a" strokeOpacity="0.6" strokeWidth="0.7" />
+
+      {/* Intermitentes */}
+      <circle cx="36.5" cy="48" r="1.7" fill="#fbbf24" />
+      <circle cx="63.5" cy="48" r="1.7" fill="#fbbf24" />
     </svg>
   </div>
 );
@@ -381,6 +467,58 @@ function MapTilePrefetchBridge({
   return null;
 }
 
+/** Preferencias de aviso de curva (ajustes del mapa). Se leen con try/catch: en modo privado localStorage puede fallar. */
+const CURVE_WARN_KEY = 'motoride_curve_warn_v1';
+const CURVE_VIBRATE_KEY = 'motoride_curve_vibrate_v1';
+function readStoredFlag(key: string, fallback: boolean): boolean {
+  try {
+    const v = localStorage.getItem(key);
+    return v === null ? fallback : v === '1';
+  } catch {
+    return fallback;
+  }
+}
+function writeStoredFlag(key: string, value: boolean) {
+  try {
+    localStorage.setItem(key, value ? '1' : '0');
+  } catch {
+    /* sin persistencia: la preferencia dura lo que la sesión */
+  }
+}
+/** Por debajo de esta distancia (m) se permite la vibración de aviso, una vez por curva. */
+const CURVE_VIBRATE_DISTANCE_M = 150;
+/** Margen (km/h) por encima de la recomendación antes de marcar la curva como «yendo rápido». */
+const CURVE_TOO_FAST_MARGIN_KMH = 5;
+
+/** Paradas elegidas por el usuario para esta ruta (solo se guardan con la clave de la ruta a la que pertenecen). */
+type ChosenStopStore = { key: string; stops: RouteStop[] };
+const chosenStopsStorageKey = (groupId: string) => `motoride_route_stops_${groupId}`;
+function readChosenStopStore(groupId: string): ChosenStopStore | null {
+  try {
+    const raw = localStorage.getItem(chosenStopsStorageKey(groupId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed.key === 'string' && Array.isArray(parsed.stops) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+function writeChosenStopStore(groupId: string, store: ChosenStopStore) {
+  try {
+    localStorage.setItem(chosenStopsStorageKey(groupId), JSON.stringify(store));
+  } catch {
+    /* sin persistencia */
+  }
+}
+
+/** Dónde dejó la cámara el seguimiento automático y en qué posición GPS estaba entonces. */
+type FollowAnchor = { center: { lat: number; lng: number }; loc: { lat: number; lng: number } };
+
+/** Tras soltar el mapa, si no se toca nada en este tiempo y hay ruta en marcha, el mapa vuelve a seguir la flecha. */
+const AUTO_RECENTER_MS = 9000;
+/** Distancia en píxeles entre el centro del mapa y donde debería estar en modo seguimiento para mostrar «recentrar». */
+const OFF_CENTER_PX = 60;
+
 // Component to handle map centering and rotation
 const MapController = ({
   location,
@@ -393,6 +531,9 @@ const MapController = ({
   hasActiveRoute,
   isLandscapeUi,
   smoothFollow = false,
+  smoothSubscribe,
+  recenterSignal = 0,
+  followAnchorRef,
 }: {
   location: any;
   /** Rumbo para desplazar el centro en horizontal con mapa rotado (flecha a la derecha como GPS). */
@@ -408,13 +549,19 @@ const MapController = ({
   isLandscapeUi: boolean;
   /** Posición ya interpolada: relaja el anti-jitter del seguimiento para no quedar el centro atrás. */
   smoothFollow?: boolean;
+  /** Suscripción al bucle de suavizado (rAF): la cámara sigue cada frame sin re-renderizar React. */
+  smoothSubscribe?: (fn: (p: { lat: number; lng: number }) => void) => () => void;
+  /** Incrementa al pulsar «recentrar» o al auto-recentrar: fuerza un desplazamiento animado hacia la flecha. */
+  recenterSignal?: number;
+  followAnchorRef: MutableRefObject<FollowAnchor | null>;
 }) => {
   const map = useMap();
   const hasAutoZoomedRef = useRef(false);
   const lastFollowRef = useRef<{ lat: number; lng: number; zoom: number; t: number } | null>(null);
   const smoothedRecordingZoomRef = useRef<number | null>(null);
+  const forceAnimateRef = useRef(false);
 
-  useEffect(() => {
+  const follow = (location: any, fromSmooth = false) => {
     if (isFollowing && location && typeof location.lat === 'number' && typeof location.lng === 'number') {
       let dynamicZoom = followZoomFromSpeedKmh(speedKmh);
       if (isRecording) {
@@ -434,7 +581,9 @@ const MapController = ({
       const mapH = size.y;
       const landscapeMap = mapW > mapH || isLandscapeUi;
 
-      const animatePan = !hasAutoZoomedRef.current;
+      const forcedRecenter = forceAnimateRef.current;
+      const animatePan = !hasAutoZoomedRef.current || forcedRecenter;
+      const panOptions = { animate: animatePan, duration: forcedRecenter ? 0.6 : 0.25 };
       const now = Date.now();
       const prev = lastFollowRef.current;
       const zoomChanged = prev != null && Math.abs(prev.zoom - zoom) > 0.04;
@@ -444,11 +593,16 @@ const MapController = ({
       if (hasAutoZoomedRef.current && tooSoon && !smoothFollow) {
         return;
       }
+      // Frame de suavizado sin movimiento apreciable (<25 cm) ni cambio de zoom: no mover la cámara.
+      if (fromSmooth && prev != null && !zoomChanged && movedM < 0.25) {
+        return;
+      }
 
       if (!hasAutoZoomedRef.current) {
         map.invalidateSize();
       }
 
+      let target: { lat: number; lng: number };
       if (landscapeMap && mapW > 40) {
         // Apaisado: flecha a la derecha (carretera “adelante” a la izquierda-centro).
         // Con mapa rotado por rumbo, un offset solo en X de Leaflet no coincide con la derecha de pantalla → centro geográfico desplazado ⊥ al rumbo.
@@ -461,18 +615,30 @@ const MapController = ({
           const cosLat = Math.max(0.2, Math.cos((lat * Math.PI) / 180));
           const mpp = (40075016.686 * cosLat) / (256 * Math.pow(2, zoom));
           const shiftM = Math.min(130, Math.max(38, mapW * mpp * 0.26 * (showRanking ? 1.08 : 1)));
-          const centerLeftOfTravel = offsetByMeters(lat, location.lng as number, bearingForMapOffset - 90, shiftM);
-          map.setView([centerLeftOfTravel.lat, centerLeftOfTravel.lng], zoom, { animate: animatePan });
+          target = offsetByMeters(lat, location.lng as number, bearingForMapOffset - 90, shiftM);
         } else {
           const frac = showRanking ? 0.34 : 0.30;
           const offsetX = mapW * frac;
           const targetPoint = map.project([location.lat, location.lng], zoom).subtract([offsetX, 0]);
-          const targetLatLng = map.unproject(targetPoint, zoom);
-          map.setView(targetLatLng, zoom, { animate: animatePan });
+          target = map.unproject(targetPoint, zoom);
         }
+      } else if (hasActiveRoute && headingRotationActive && Number.isFinite(bearingForMapOffset) && speedKmh > 3) {
+        // Ruta activa con mapa girado por rumbo: el centro va un poco por delante del usuario,
+        // así la flecha queda bajo la tarjeta de instrucción y no tapada por ella.
+        const cosLat = Math.max(0.2, Math.cos((location.lat * Math.PI) / 180));
+        const mppP = (40075016.686 * cosLat) / (256 * Math.pow(2, zoom));
+        const shiftM = Math.min(90, Math.max(30, mapH * mppP * 0.14));
+        target = offsetByMeters(location.lat as number, location.lng as number, bearingForMapOffset, shiftM);
       } else {
-        map.setView([location.lat, location.lng], zoom, { animate: animatePan });
+        target = { lat: location.lat, lng: location.lng };
       }
+      map.setView([target.lat, target.lng], zoom, panOptions);
+      forceAnimateRef.current = false;
+      // Ancla: permite saber, mientras el usuario explora, dónde debería estar el centro con la flecha en su posición actual.
+      followAnchorRef.current = {
+        center: { lat: target.lat, lng: target.lng },
+        loc: { lat: location.lat, lng: location.lng },
+      };
 
       lastFollowRef.current = { lat: location.lat, lng: location.lng, zoom, t: now };
 
@@ -480,6 +646,14 @@ const MapController = ({
         hasAutoZoomedRef.current = true;
       }
     }
+  };
+
+  // Siempre la versión más reciente de `follow` (props actuales) para el bucle de suavizado.
+  const followRef = useRef(follow);
+  followRef.current = follow;
+
+  useEffect(() => {
+    followRef.current(location);
   }, [
     location,
     isFollowing,
@@ -493,6 +667,145 @@ const MapController = ({
     headingRotationActive,
     smoothFollow,
   ]);
+
+  useEffect(() => {
+    if (!smoothSubscribe) return;
+    return smoothSubscribe((p) => followRef.current(p, true));
+  }, [smoothSubscribe]);
+
+  // Recentrado pedido por el usuario o automático: desplazamiento animado hacia la última posición conocida.
+  const latestLocationRef = useRef(location);
+  latestLocationRef.current = location;
+  useEffect(() => {
+    if (!recenterSignal) return;
+    const loc = latestLocationRef.current;
+    if (!loc || typeof loc.lat !== 'number' || typeof loc.lng !== 'number') return;
+    forceAnimateRef.current = true;
+    followRef.current(loc);
+  }, [recenterSignal]);
+
+  return null;
+};
+
+/**
+ * Distingue el movimiento del usuario (arrastre, pellizco, rueda) del movimiento automático del seguimiento.
+ * Leaflet solo dispara dragstart con el dedo/ratón; los setView programáticos no lo disparan.
+ */
+const MapFollowGuard = ({
+  location,
+  isFollowing,
+  autoRecenterEnabled,
+  followAnchorRef,
+  onUserMove,
+  onAutoRecenter,
+  onOffCenterChange,
+}: {
+  location: any;
+  isFollowing: boolean;
+  /** Ruta activa y en marcha: solo entonces el mapa vuelve solo a la flecha. */
+  autoRecenterEnabled: boolean;
+  followAnchorRef: MutableRefObject<FollowAnchor | null>;
+  onUserMove: () => void;
+  onAutoRecenter: () => void;
+  onOffCenterChange: (offCenter: boolean) => void;
+}) => {
+  const map = useMap();
+  const timerRef = useRef<number | undefined>(undefined);
+  const offCenterRef = useRef(false);
+  const latestRef = useRef({ location, isFollowing, autoRecenterEnabled });
+  latestRef.current = { location, isFollowing, autoRecenterEnabled };
+  const callbacksRef = useRef({ onUserMove, onAutoRecenter, onOffCenterChange });
+  callbacksRef.current = { onUserMove, onAutoRecenter, onOffCenterChange };
+
+  const clearTimer = useCallback(() => {
+    if (timerRef.current !== undefined) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = undefined;
+    }
+  }, []);
+
+  const armAutoRecenter = useCallback(() => {
+    clearTimer();
+    if (!latestRef.current.autoRecenterEnabled) return;
+    timerRef.current = window.setTimeout(() => {
+      timerRef.current = undefined;
+      if (latestRef.current.autoRecenterEnabled && !latestRef.current.isFollowing) {
+        callbacksRef.current.onAutoRecenter();
+      }
+    }, AUTO_RECENTER_MS);
+  }, [clearTimer]);
+
+  const evaluateOffCenter = useCallback(() => {
+    const anchor = followAnchorRef.current;
+    const { location: loc, isFollowing: following } = latestRef.current;
+    let off = false;
+    if (!following && anchor && loc && typeof loc.lat === 'number' && typeof loc.lng === 'number') {
+      // Centro esperado ahora = posición actual + desplazamiento que tenía la cámara respecto a la flecha al seguir.
+      const expected = {
+        lat: loc.lat + (anchor.center.lat - anchor.loc.lat),
+        lng: loc.lng + (anchor.center.lng - anchor.loc.lng),
+      };
+      const pCenter = map.latLngToContainerPoint(map.getCenter());
+      const pExpected = map.latLngToContainerPoint(L.latLng(expected.lat, expected.lng));
+      off = pCenter.distanceTo(pExpected) > OFF_CENTER_PX;
+    }
+    if (off !== offCenterRef.current) {
+      offCenterRef.current = off;
+      callbacksRef.current.onOffCenterChange(off);
+    }
+  }, [map, followAnchorRef]);
+
+  useMapEvents({
+    dragstart: () => {
+      clearTimer();
+      callbacksRef.current.onUserMove();
+    },
+    dragend: () => armAutoRecenter(),
+    moveend: () => evaluateOffCenter(),
+  });
+
+  // Pellizco y rueda del ratón también son movimiento del usuario.
+  useEffect(() => {
+    const el = map.getContainer();
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length >= 2) {
+        clearTimer();
+        callbacksRef.current.onUserMove();
+      }
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length === 0 && !latestRef.current.isFollowing) armAutoRecenter();
+    };
+    const onWheel = () => {
+      clearTimer();
+      callbacksRef.current.onUserMove();
+      armAutoRecenter();
+    };
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchend', onTouchEnd, { passive: true });
+    el.addEventListener('wheel', onWheel, { passive: true });
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchend', onTouchEnd);
+      el.removeEventListener('wheel', onWheel);
+    };
+  }, [map, armAutoRecenter, clearTimer]);
+
+  // Seguir otra vez (botón o automático) cancela cualquier temporizador pendiente.
+  useEffect(() => {
+    if (isFollowing) clearTimer();
+  }, [isFollowing, clearTimer]);
+
+  useEffect(() => {
+    if (!autoRecenterEnabled) clearTimer();
+  }, [autoRecenterEnabled, clearTimer]);
+
+  // La flecha se mueve con el GPS aunque el mapa esté quieto: reevaluar.
+  useEffect(() => {
+    evaluateOffCenter();
+  }, [location, isFollowing, evaluateOffCenter]);
+
+  useEffect(() => clearTimer, [clearTimer]);
 
   return null;
 };
@@ -519,6 +832,8 @@ export default function MapView({
   const [customPhotoURL, setCustomPhotoURL] = useState<string | null>(null);
   const [group, setGroup] = useState<any>(null);
   const [memberPremiumByUid, setMemberPremiumByUid] = useState<Record<string, boolean>>({});
+  /** Marco equipado de cada miembro (users/{uid}); respaldo cuando el payload de ubicación no lo trae. */
+  const [memberFrameByUid, setMemberFrameByUid] = useState<Record<string, string>>({});
   const [memberDisplayNameByUid, setMemberDisplayNameByUid] = useState<Record<string, string>>({});
 
   const groupMembersKey = useMemo(() => {
@@ -530,6 +845,7 @@ export default function MapView({
     if (!groupMembersKey) {
       setMemberPremiumByUid({});
       setMemberDisplayNameByUid({});
+      setMemberFrameByUid({});
       return;
     }
     const ids = groupMembersKey.split('|').filter(Boolean);
@@ -539,10 +855,13 @@ export default function MapView({
         (snap) => {
           const v = snap.exists() && snap.data()?.isPremium === true;
           const dn = snap.exists() ? String(snap.data()?.displayName || 'Motero').slice(0, 80) || 'Motero' : 'Motero';
+          const fid = resolvePeerFrameId(snap.exists() ? snap.data()?.profileFrameId : null);
           setMemberPremiumByUid((prev) => (prev[uid] === v ? prev : { ...prev, [uid]: v }));
           setMemberDisplayNameByUid((prev) => (prev[uid] === dn ? prev : { ...prev, [uid]: dn }));
+          setMemberFrameByUid((prev) => (prev[uid] === fid ? prev : { ...prev, [uid]: fid }));
         },
         () => {
+          setMemberFrameByUid((prev) => (uid in prev ? { ...prev, [uid]: 'none' } : prev));
           setMemberPremiumByUid((prev) => (uid in prev ? { ...prev, [uid]: false } : prev));
           setMemberDisplayNameByUid((prev) => {
             if (!(uid in prev)) return prev;
@@ -584,6 +903,15 @@ export default function MapView({
   const [peerAlertTick, setPeerAlertTick] = useState(0);
   const [copied, setCopied] = useState(false);
   const [isFollowing, setIsFollowing] = useState(true);
+  /** Vista descentrada de la flecha tras explorar con el dedo: muestra el botón «recentrar». */
+  const [mapOffCenter, setMapOffCenter] = useState(false);
+  const [recenterSignal, setRecenterSignal] = useState(0);
+  const followAnchorRef = useRef<FollowAnchor | null>(null);
+  const recenterMapOnRider = useCallback(() => {
+    setIsFollowing(true);
+    setRecenterSignal((n) => n + 1);
+  }, []);
+  const handleUserMapMove = useCallback(() => setIsFollowing(false), []);
   const lastHeadingRef = useRef<number | null>(null);
   const lastHeadingTimeRef = useRef<number>(Date.now());
   /** Prefetch de teselas: posición GPS y centro del mapa (misma caché persistente que el SW). */
@@ -911,6 +1239,8 @@ export default function MapView({
   const [inviteBusy, setInviteBusy] = useState(false);
   const [inviteModalContext, setInviteModalContext] = useState<{ groupId: string; groupName: string } | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [curveWarnEnabled, setCurveWarnEnabled] = useState<boolean>(() => readStoredFlag(CURVE_WARN_KEY, true));
+  const [curveVibrateEnabled, setCurveVibrateEnabled] = useState<boolean>(() => readStoredFlag(CURVE_VIBRATE_KEY, false));
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const offlineDebounceRef = useRef<number | null>(null);
 
@@ -1101,6 +1431,18 @@ export default function MapView({
   }, []);
 
   const userLevel = profileLevel;
+  /** Marco equipado del propio usuario (valor guardado en users/{uid}, ya validado al guardar). */
+  const [selfStoredFrameId, setSelfStoredFrameId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!user?.uid) return;
+    const unsub = onSnapshot(
+      doc(db, 'users', user.uid),
+      (snap) => setSelfStoredFrameId(snap.exists() ? (snap.data()?.profileFrameId ?? null) : null),
+      () => setSelfStoredFrameId(null)
+    );
+    return () => unsub();
+  }, [user?.uid]);
+  const selfFrameId = resolvePeerFrameId(selfStoredFrameId);
   const isHost = group?.createdBy === user?.uid;
   /** Evita cleanups del efecto pagehide/unmount cuando `isHost` pasa de false→true al cargar el snapshot del grupo (p. ej. tras promover desde REPEATED). */
   const isHostRef = useRef(!!isHost);
@@ -1126,6 +1468,7 @@ export default function MapView({
       photoURL: photoURLToUse,
       level: userLevel,
       isHost,
+      profileFrameId: selfFrameId,
     },
     { enableHighAccuracy: gpsHighAccuracyEnabled }
   );
@@ -1328,6 +1671,15 @@ export default function MapView({
     [navigationGuideHiddenLocal, parsedRoute]
   );
 
+  // Precarga las teselas a lo largo de la ruta (en segundo plano, tras un breve retardo para no competir con el mapa inicial).
+  useEffect(() => {
+    if (!effectiveRouteForNav) return;
+    const id = window.setTimeout(() => {
+      void prefetchRouteTiles(effectiveRouteForNav);
+    }, 400);
+    return () => window.clearTimeout(id);
+  }, [effectiveRouteForNav]);
+
   useEffect(() => {
     if (!precipitationBanner) return;
     const id = window.setTimeout(() => setPrecipitationBanner(false), 30000);
@@ -1355,8 +1707,127 @@ export default function MapView({
   const COOLDOWN_MS = 10 * 60 * 1000;
 
   const lastPrecipLocation = useRef<{ lat: number; lng: number }>({ lat: 0, lng: 0 });
+  /** Última consulta de lluvia a Open-Meteo (throttle: el efecto se reejecuta con cada posición GPS). */
+  const lastPrecipCheckAtRef = useRef(0);
 
   const navState = useNavigation(currentLocation, effectiveRouteForNav);
+
+  // Paradas sobre la ruta (Overpass, una vez por ruta; ver lib/routeStops.ts).
+  const [showRouteStops, setShowRouteStops] = useState(false);
+  const [routeStopsState, setRouteStopsState] = useState<{ key: string; stops: RouteStop[] } | null>(null);
+  const [routeStopsLoading, setRouteStopsLoading] = useState(false);
+  const [routeStopsError, setRouteStopsError] = useState(false);
+  const [chosenStopStore, setChosenStopStore] = useState<ChosenStopStore | null>(() => readChosenStopStore(groupId));
+  const stopsRouteIndex: RouteIndex | null = useMemo(() => {
+    if (!effectiveRouteForNav) return null;
+    const parsed = parseRouteData(effectiveRouteForNav);
+    return parsed ? buildRouteIndex(getLineCoordinates(parsed)) : null;
+  }, [effectiveRouteForNav]);
+  const stopsRouteKey = stopsRouteIndex ? routeCacheKey(stopsRouteIndex) : null;
+  const routeStops = routeStopsState && routeStopsState.key === stopsRouteKey ? routeStopsState.stops : null;
+  const chosenStops: RouteStop[] =
+    chosenStopStore && stopsRouteKey && chosenStopStore.key === stopsRouteKey ? chosenStopStore.stops : [];
+  const chosenStopIds = useMemo(() => chosenStops.map((s) => s.id), [chosenStops]);
+
+  const loadRouteStops = useCallback(() => {
+    if (!stopsRouteIndex || !stopsRouteKey) return;
+    const cached = getCachedRouteStops(stopsRouteIndex);
+    if (cached) {
+      setRouteStopsState({ key: stopsRouteKey, stops: cached });
+      setRouteStopsError(false);
+      return;
+    }
+    setRouteStopsLoading(true);
+    setRouteStopsError(false);
+    fetchRouteStops(stopsRouteIndex)
+      .then((stops) => setRouteStopsState({ key: stopsRouteKey, stops }))
+      .catch(() => setRouteStopsError(true))
+      .finally(() => setRouteStopsLoading(false));
+  }, [stopsRouteIndex, stopsRouteKey]);
+
+  // Votación del grupo sobre las paradas (lib/stopVotes.ts). Un único listener por ruta activa; se cierra al salir.
+  const [groupVotes, setGroupVotes] = useState<{ key: string; status: 'live' | 'offline' | 'error'; docs: StopVoteDoc[] } | null>(null);
+  useEffect(() => {
+    if (!stopsRouteKey || groupId === 'REPEATED') return;
+    const key = stopsRouteKey;
+    const unsub = subscribeRouteStopVotes(
+      db,
+      groupId,
+      key,
+      ({ docs, fromCache }) => setGroupVotes({ key, status: fromCache ? 'offline' : 'live', docs }),
+      () => setGroupVotes((prev) => ({ key, status: 'error', docs: prev?.key === key ? prev.docs : [] }))
+    );
+    return () => unsub();
+  }, [groupId, stopsRouteKey]);
+  const voteState = groupVotes && groupVotes.key === stopsRouteKey ? groupVotes : null;
+  const voteDocs = useMemo(() => voteState?.docs ?? [], [voteState]);
+  const voteLive = voteState?.status === 'live';
+  const voteMode: 'live' | 'offline' = voteLive ? 'live' : 'offline';
+  const groupChosen = useMemo(() => (voteLive ? pickChosenStop(voteDocs) : null), [voteLive, voteDocs]);
+  const groupChosenStop: RouteStop | null = groupChosen ? toRouteStop(groupChosen.doc) : null;
+  const electorateSize = useMemo(() => electorateOf(voteDocs).size, [voteDocs]);
+  const activeChosenIds = voteLive ? (groupChosenStop ? [groupChosenStop.id] : []) : chosenStopIds;
+  const candidates = useMemo(
+    () => buildCandidates(voteDocs, routeStops, stopsRouteKey ?? '', user?.uid ?? null),
+    [voteDocs, routeStops, stopsRouteKey, user?.uid]
+  );
+
+  // El primer miembro que abre el panel publica las candidatas (Overpass ya consultado); los demás las leen.
+  const publishedRouteKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!showRouteStops || !voteLive || !routeStops || !stopsRouteKey || voteDocs.length > 0) return;
+    if (groupId === 'REPEATED' || publishedRouteKeyRef.current === stopsRouteKey) return;
+    publishedRouteKeyRef.current = stopsRouteKey;
+    publishRouteStopCandidates(db, groupId, stopsRouteKey, routeStops).catch(() => {
+      // Otro miembro publicó antes (el lote se rechaza entero y no toca votos): el listener traerá sus docs.
+      publishedRouteKeyRef.current = null;
+    });
+  }, [showRouteStops, voteLive, routeStops, stopsRouteKey, voteDocs.length, groupId]);
+
+  const openRouteStops = useCallback(() => {
+    setShowRouteStops(true);
+    // Con candidatas ya publicadas en el grupo no hace falta consultar Overpass.
+    if (voteLive && voteDocs.length > 0) return;
+    loadRouteStops();
+  }, [loadRouteStops, voteLive, voteDocs.length]);
+
+  // Al cargar la vista con una ruta ya conocida, pinta las paradas en el mapa (una consulta por ruta, con caché).
+  useEffect(() => {
+    if (!stopsRouteKey || routeStopsState?.key === stopsRouteKey) return;
+    const cached = stopsRouteIndex ? getCachedRouteStops(stopsRouteIndex) : null;
+    if (cached) setRouteStopsState({ key: stopsRouteKey, stops: cached });
+  }, [stopsRouteKey, stopsRouteIndex, routeStopsState]);
+
+  /** Voto propio: deja el voto en esta parada (o lo quita si ya era el mío). Solo con conexión al grupo. */
+  const toggleGroupStopVote = useCallback(
+    (candidate: RouteStopCandidate) => {
+      if (!voteLive || !user?.uid || !stopsRouteKey || groupId === 'REPEATED') return;
+      // Solo se vota sobre candidatas ya publicadas en el grupo (no sobre la lista local aún sin publicar).
+      if (!voteDocs.some((d) => d.docId === candidate.docId)) return;
+      const mine = candidate.mine;
+      const ops = buildVoteMoveOps(voteDocs, user.uid, mine ? null : candidate.docId);
+      applyVoteOps(db, groupId, user.uid, ops)
+        .then(() => {
+          // Respaldo sin red: se guarda la última elección de este dispositivo.
+          const stop: RouteStop = {
+            id: candidate.stopId,
+            kind: candidate.kind,
+            name: candidate.name,
+            lat: candidate.lat,
+            lng: candidate.lng,
+            alongM: candidate.alongM,
+            offRouteM: 0,
+          };
+          const store: ChosenStopStore = { key: stopsRouteKey, stops: mine ? [] : [stop] };
+          setChosenStopStore(store);
+          writeChosenStopStore(groupId, store);
+        })
+        .catch(() => {
+          showMessage({ variant: 'error', title: 'Paradas', message: 'No se pudo registrar tu voto. Inténtalo de nuevo.' });
+        });
+    },
+    [voteLive, voteDocs, user?.uid, stopsRouteKey, groupId, showMessage]
+  );
   const navigationHeading = useNavigationHeading(
     heading,
     speed,
@@ -1376,25 +1847,31 @@ export default function MapView({
 
   const displayLocation = useMemo(() => {
     if (!currentLocation) return null;
-    const snapCandidate = navState.routeGeometry || effectiveRouteForNav;
-    if (!snapCandidate) return currentLocation;
+    // Snap sobre el trazado ORIGINAL (no sobre la guía OSRM de vuelta).
+    if (!effectiveRouteForNav || !navState.snapped || navState.offRouteM == null) return currentLocation;
 
-    const snapped = snapPointToRouteDetailed(currentLocation.lat, currentLocation.lng, snapCandidate);
     const acc = horizontalAccuracy;
     let maxSnapM = 42;
     if (acc != null && Number.isFinite(acc) && acc > 18) {
       // GPS impreciso: acotar el snap para no “saltar” a la polilínea equivocada.
       maxSnapM = Math.max(16, Math.min(42, 52 - acc * 0.42));
     }
-    if (snapped.distanceMeters <= maxSnapM) {
-      return { lat: snapped.lat, lng: snapped.lng };
+    if (navState.offRouteM <= maxSnapM) {
+      return { lat: navState.snapped.lat, lng: navState.snapped.lng };
     }
     return currentLocation;
-  }, [currentLocation, navState.routeGeometry, effectiveRouteForNav, horizontalAccuracy]);
+  }, [currentLocation, navState.snapped, navState.offRouteM, effectiveRouteForNav, horizontalAccuracy]);
 
   const [smoothMapLocation, setSmoothMapLocation] = useState<{ lat: number; lng: number } | null>(null);
   const smoothMapRef = useRef<{ lat: number; lng: number } | null>(null);
   const smoothMapTargetRef = useRef<{ lat: number; lng: number } | null>(null);
+  const smoothListenersRef = useRef(new Set<(p: { lat: number; lng: number }) => void>());
+  const subscribeSmoothMap = useCallback((fn: (p: { lat: number; lng: number }) => void) => {
+    smoothListenersRef.current.add(fn);
+    return () => {
+      smoothListenersRef.current.delete(fn);
+    };
+  }, []);
 
   useEffect(() => {
     if (!displayLocation) {
@@ -1428,18 +1905,18 @@ export default function MapView({
         const nlng = cur.lng + (targ.lng - cur.lng) * SELF_MAP_SMOOTH_ALPHA;
         const errM = getDistance(nlat, nlng, targ.lat, targ.lng);
 
-        if (errM <= SELF_MAP_SNAP_M) {
-          smoothMapRef.current = { lat: targ.lat, lng: targ.lng };
-          setSmoothMapLocation({ lat: targ.lat, lng: targ.lng });
-        } else {
-          smoothMapRef.current = { lat: nlat, lng: nlng };
-          setSmoothMapLocation({ lat: nlat, lng: nlng });
-        }
-
+        // Cada frame: solo se notifica a marcador y cámara (sin setState → sin re-render de MapView).
+        const snapped = errM <= SELF_MAP_SNAP_M;
+        smoothMapRef.current = snapped ? { lat: targ.lat, lng: targ.lng } : { lat: nlat, lng: nlng };
         const p = smoothMapRef.current;
+        smoothListenersRef.current.forEach((fn) => fn(p));
+
         const remainM = getDistance(p.lat, p.lng, targ.lat, targ.lng);
         if (remainM > SELF_MAP_SNAP_M) {
           rafId = requestAnimationFrame(tick);
+        } else {
+          // Fin de la animación: una sola actualización de estado para props y render.
+          setSmoothMapLocation({ lat: p.lat, lng: p.lng });
         }
       } catch {
         /* ignore */
@@ -1460,20 +1937,31 @@ export default function MapView({
       ? { lat: displayLocation.lat, lng: displayLocation.lng }
       : null);
 
-  const { nearestRadarDistanceM, radars, precipPoints } = useRoadData(
+  const { nearestRadarDistanceM, radarsNearby, precipPoints } = useRoadData(
     currentLocation,
     effectiveRouteForNav
   );
 
-  /** Precipitaciones: chequeo periódico y por movimiento. */
+  /** Lluvia en el tramo que queda por delante: posición actual + puntos del trazado cada 5 km (hasta 60 km). */
+  const precipAheadBucket = Math.floor((navState.alongM ?? 0) / 5000);
+  const precipAheadPoints = useMemo(() => {
+    const here = currentLocation ? [{ lat: currentLocation.lat, lng: currentLocation.lng }] : [];
+    if (!stopsRouteIndex) return here.length ? here : precipPoints;
+    return [...here, ...routePointsAhead(stopsRouteIndex, navState.alongM ?? 0)];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stopsRouteIndex, precipAheadBucket, currentLocation?.lat, currentLocation?.lng, precipPoints]);
+
+  /** Precipitaciones: chequeo periódico y por movimiento, con como mucho una consulta cada 5 min. */
   useEffect(() => {
     let cancelled = false;
     const INTERVAL_MS = 30000;
+    const PRECIP_CHECK_MIN_MS = 5 * 60 * 1000;
 
-    /** Verifica si hay riesgo de lluvia en los puntos de la ruta cercanos. */
+    /** Verifica si hay riesgo de lluvia en el trazado por delante del motorista. */
     const checkPrecipitation = async () => {
+      lastPrecipCheckAtRef.current = Date.now();
       try {
-        const risk = await anyPrecipitationRiskAtPoints(precipPoints, 3);
+        const risk = await anyPrecipitationRiskAtPoints(precipAheadPoints);
         if (cancelled || !risk) return;
         lastPrecipBannerAtRef.current = Date.now();
         setPrecipitationBanner(true);
@@ -1488,17 +1976,14 @@ export default function MapView({
     if (!isOnline || !currentLocation) return;
     if (premiumGpsPolicy.precipAlertsPremiumOnly && !selfPremium) return;
     if (Date.now() - lastPrecipBannerAtRef.current < COOLDOWN_MS) return;
-    if (precipPoints.length === 0) return;
-    checkPrecipitation();
+    if (precipAheadPoints.length === 0) return;
+    if (Date.now() - lastPrecipCheckAtRef.current >= PRECIP_CHECK_MIN_MS) checkPrecipitation();
 
     // Revisión periódica cada 30s
     const interval = window.setInterval(() => {
       if (cancelled) return;
       if (Date.now() - lastPrecipBannerAtRef.current < COOLDOWN_MS) return;
-      // Solo revisar si el usuario se ha movido un mínimo (evita spam si está parado)
-      const movedEnough = Math.abs(currentLocation.lat - lastPrecipLocation.current.lat) > 0.0005 ||
-                          Math.abs(currentLocation.lng - lastPrecipLocation.current.lng) > 0.0005;
-      if (!movedEnough && precipPoints.length > 0) return;
+      if (Date.now() - lastPrecipCheckAtRef.current < PRECIP_CHECK_MIN_MS) return;
       checkPrecipitation();
     }, INTERVAL_MS);
 
@@ -1517,7 +2002,7 @@ export default function MapView({
     groupId,
     premiumGpsPolicy.precipAlertsPremiumOnly,
     selfPremium,
-    precipPoints,
+    precipAheadPoints,
   ]);
 
   const wasRadarWithin500Ref = useRef(false);
@@ -1576,7 +2061,20 @@ export default function MapView({
     }
     if (!groupId || groupId === 'REPEATED') return;
     const unsub = onSnapshot(doc(db, 'groups', groupId), (doc) => {
-      setGroup(doc.data());
+      const fromCache = doc.metadata.fromCache;
+      if (doc.exists()) {
+        const data = doc.data();
+        setGroup(data);
+        // Copia local de la ruta activa: permite seguir las indicaciones sin cobertura al recargar.
+        if (data.isRecording === true || data.ridePaused === true) saveActiveRouteSnapshot(groupId, data);
+        else clearActiveRouteSnapshot(groupId);
+      } else if (fromCache) {
+        // Sin red y sin caché del documento: usar la copia local de la ruta, si existe.
+        const local = readActiveRouteSnapshot(groupId);
+        if (local) setGroup(local);
+      } else {
+        setGroup(undefined);
+      }
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, `groups/${groupId}`);
     });
@@ -1599,15 +2097,20 @@ export default function MapView({
           const existing = prev[idx];
           const nextTs = data?.timestamp || 0;
           const prevTs = existing?.timestamp || 0;
-          if (nextTs <= prevTs && !data?.alert) return prev;
+          if (nextTs <= prevTs && !data?.alert && !existing?.offline) return prev;
           const newLocs = [...prev];
-          newLocs[idx] = { ...existing, ...data };
+          newLocs[idx] = { ...existing, ...data, offline: false };
           return newLocs;
         }
-        return [...prev, data];
+        return [...prev, { ...data, offline: false }];
       });
     };
-    const handleUserLeft = (data: { uid: string }) => {
+    const handleUserLeft = (data: { uid: string; reason?: string }) => {
+      if (data?.reason === 'disconnect-timeout') {
+        // Perdió la conexión: mantener su última posición atenuada hasta que vuelva.
+        setLocations(prev => prev.map(l => (l.uid === data.uid ? { ...l, offline: true } : l)));
+        return;
+      }
       setLocations(prev => prev.filter(l => l.uid !== data.uid));
     };
     const handleHostLeftRoute = () => {
@@ -1672,35 +2175,32 @@ export default function MapView({
 
     const unsubs: Array<() => void> = [];
     // Firestore: posición reciente como respaldo del socket. Los avisos no se leen ni escriben en Firestore (solo tiempo real).
+    // Las reglas no permiten listar `locations`: se escucha documento a documento a cada miembro del grupo
+    // (solo se autoriza leer la ubicación de quien comparte tu groupId). Al cambiar de grupo se limpia todo.
     if (group?.members?.length) {
-      const chunks = [];
-      for (let i = 0; i < group.members.length; i += 10) {
-        chunks.push(group.members.slice(i, i + 10));
-      }
+      const memberUids = Array.from(new Set((group.members as unknown[]).map(String))).filter(Boolean);
 
-      chunks.forEach(chunk => {
-        const q = query(collection(db, 'locations'), where('uid', 'in', chunk));
-        const unsub = onSnapshot(q, (snap) => {
-          setLocations(prev => {
-            const newLocs = [...prev];
-            snap.docs.forEach(d => {
-              const raw = d.data();
-              const { alert: _dropAlert, ...data } = raw;
-              if (Date.now() - (data.timestamp as number) < 10 * 60 * 1000) {
-                const idx = newLocs.findIndex(l => l.uid === d.id);
-                if (idx >= 0) {
-                  if ((data.timestamp as number) > (newLocs[idx].timestamp || 0)) {
-                    newLocs[idx] = { ...newLocs[idx], ...data };
-                  }
-                } else {
-                  newLocs.push(data as any);
+      memberUids.forEach((memberUid) => {
+        const unsub = onSnapshot(doc(db, 'locations', memberUid), (snap) => {
+          if (!snap.exists()) return;
+          const raw = snap.data();
+          const { alert: _dropAlert, ...data } = raw;
+          if (Date.now() - (data.timestamp as number) < 10 * 60 * 1000) {
+            setLocations(prev => {
+              const newLocs = [...prev];
+              const idx = newLocs.findIndex(l => l.uid === memberUid);
+              if (idx >= 0) {
+                if ((data.timestamp as number) > (newLocs[idx].timestamp || 0)) {
+                  newLocs[idx] = { ...newLocs[idx], ...data };
                 }
+              } else {
+                newLocs.push(data as any);
               }
+              return newLocs;
             });
-            return newLocs;
-          });
+          }
         }, (error) => {
-          handleFirestoreError(error, OperationType.LIST, 'locations');
+          handleFirestoreError(error, OperationType.GET, `locations/${memberUid}`);
         });
         unsubs.push(unsub);
       });
@@ -1715,43 +2215,113 @@ export default function MapView({
     };
   }, [group?.members, user?.uid]);
 
+  /**
+   * Salida **explícita** de la ruta (botón salir). Cerrar la app, pasarla a segundo plano o perder
+   * la conexión ya NO saca a nadie del grupo: así cualquiera (también el anfitrión) vuelve a entrar solo.
+   *
+   * - Participante: se quita de `members`.
+   * - Anfitrión con la ruta en marcha y más gente: cede el mando al compañero conectado más reciente
+   *   y la ruta sigue para los demás.
+   * - Anfitrión solo (o ruta sin grabar): termina la ruta como antes.
+   */
   const deleteGroupIfHost = async (reason: string): Promise<boolean> => {
     if (!groupId || groupId === 'REPEATED' || !user || leaveInProgressRef.current) return false;
     leaveInProgressRef.current = true;
+    const groupRef = doc(db, 'groups', groupId);
 
-    /**
-     * No borrar el grupo si es una ruta programada y la hora de inicio aún no ha pasado.
-     * El grupo se mantiene hasta que:
-     * 1. La ruta programada ha comenzado (scheduledTimestamp ya pasó), o
-     * 2. El anfitrión vuelve a entrar al grupo manualmente.
-     */
-    const now = Date.now();
-    if (group?.isScheduled === true && Number.isFinite(group.scheduledTimestamp) && group.scheduledTimestamp > 0) {
-      if (group.scheduledTimestamp > now) {
-        console.warn(`Ruta programada: no se borra el grupo porque la salida está programada para ${new Date(group.scheduledTimestamp).toLocaleString()}`);
-        return false;
+    try {
+      // Ruta programada que aún no ha empezado: no tocar el grupo, solo salir del mapa.
+      const now = Date.now();
+      if (
+        group?.isScheduled === true &&
+        Number.isFinite(group.scheduledTimestamp) &&
+        group.scheduledTimestamp > now
+      ) {
+        socket.emit('leave-group', { groupId, uid: user.uid, isHost: false, timestamp: now });
+        return true;
       }
-    }
 
-    // Si el anfitrión es el único miembro y sale, el grupo se auto-borra como antes
-    // Esto es correcto para rutas espontáneas y para rutas programadas que ya han comenzado
-    if (isHostRef.current) {
-      const hostLeftAt = Date.now();
-      await updateDoc(doc(db, 'groups', groupId), {
-        isRecording: false,
-        hostLeftAt,
-        hostLeftUid: user.uid,
-        members: arrayRemove(user.uid)
-      });
-      socket.emit('leave-group', { groupId, uid: user.uid, isHost: true, timestamp: hostLeftAt });
-    } else {
-      await updateDoc(doc(db, 'groups', groupId), {
-        members: arrayRemove(user.uid)
-      });
+      if (isHostRef.current) {
+        const members: string[] = Array.isArray(group?.members) ? group.members.map(String) : [];
+        const others = members.filter((m) => m !== user.uid);
+        const hostLeftAt = Date.now();
+
+        if (group?.isRecording === true && others.length > 0) {
+          // Preferir al compañero que ha enviado posición más recientemente (probablemente conectado).
+          const byRecency = [...others].sort((a, b) => {
+            const ta = locations.find((l) => l.uid === a)?.timestamp || 0;
+            const tb = locations.find((l) => l.uid === b)?.timestamp || 0;
+            return tb - ta;
+          });
+          const newHost = byRecency[0];
+          try {
+            await updateDoc(groupRef, {
+              createdBy: newHost,
+              members: arrayRemove(user.uid),
+              hostLeftAt,
+              hostLeftUid: user.uid,
+            });
+          } catch (e) {
+            // Reglas antiguas sin traspaso: al menos salir sin cortar la ruta a los demás
+            // (un compañero reclamará el mando automáticamente).
+            console.warn('Traspaso de anfitrión no permitido, saliendo sin cerrar la ruta', e);
+            await updateDoc(groupRef, { members: arrayRemove(user.uid) });
+          }
+          socket.emit('leave-group', { groupId, uid: user.uid, isHost: false, timestamp: hostLeftAt });
+          return true;
+        }
+
+        await updateDoc(groupRef, {
+          isRecording: false,
+          hostLeftAt,
+          hostLeftUid: user.uid,
+          ...(group?.isScheduled === true ? {} : { members: arrayRemove(user.uid) }),
+        });
+        socket.emit('leave-group', { groupId, uid: user.uid, isHost: true, timestamp: hostLeftAt });
+        return true;
+      }
+
+      await updateDoc(groupRef, { members: arrayRemove(user.uid) });
       socket.emit('leave-group', { groupId, uid: user.uid, isHost: false, timestamp: Date.now() });
+      return true;
+    } catch (e) {
+      console.error(`deleteGroupIfHost(${reason})`, e);
+      // Permitir reintentar (antes se quedaba bloqueado para siempre tras un fallo).
+      leaveInProgressRef.current = false;
+      return false;
     }
-    return true;
   };
+
+  /**
+   * Si el anfitrión desapareció del grupo con la ruta en marcha (p. ej. salió con reglas antiguas),
+   * el primer miembro de la lista reclama el mando para que alguien pueda pausar / finalizar.
+   */
+  useEffect(() => {
+    if (!groupId || groupId === 'REPEATED' || !user?.uid || !group) return;
+    const members: string[] = Array.isArray(group.members) ? group.members.map(String) : [];
+    if (group.isRecording !== true || !group.createdBy || members.includes(String(group.createdBy))) return;
+    if (members[0] !== user.uid) return;
+    void updateDoc(doc(db, 'groups', groupId), { createdBy: user.uid }).catch((e) =>
+      console.warn('No se pudo reclamar el mando de la ruta', e)
+    );
+  }, [groupId, user?.uid, group?.isRecording, group?.createdBy, group?.members]);
+
+  /** Aviso al recibir el mando de la ruta. */
+  const prevCreatedByRef = useRef<string | null>(null);
+  useEffect(() => {
+    const cb = group?.createdBy ? String(group.createdBy) : null;
+    const prev = prevCreatedByRef.current;
+    prevCreatedByRef.current = cb;
+    if (!prev || !cb || prev === cb || !user?.uid) return;
+    if (cb === user.uid) {
+      showMessage({
+        variant: 'info',
+        title: 'Ahora eres el anfitrión',
+        message: 'El anfitrión anterior ha salido de la ruta. Ahora puedes pausarla o finalizarla para todo el grupo.',
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [group?.createdBy, user?.uid]);
 
   // Wake Lock siempre en vista de mapa (GPS/ruta visible); iOS 16.4+ Safari / PWA; a menudo hace falta un gesto.
   // NO pedir wakeLock si el usuario está en modo bolsillo (evita bloqueo del dispositivo en iPhone)
@@ -1818,31 +2388,10 @@ export default function MapView({
     };
   }, []);
 
-  // Leave group when route view is closed/app is backgrounded or closed.
-  useEffect(() => {
-    if (!groupId || groupId === 'REPEATED') return;
-
-    const handleBeforeUnload = () => {
-      hasExplicitlyLeftRef.current = true;
-      deleteGroupIfHost('beforeunload');
-    };
-    const handlePageHide = () => {
-      hasExplicitlyLeftRef.current = true;
-      deleteGroupIfHost('pagehide');
-    };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    window.addEventListener('pagehide', handlePageHide);
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-      window.removeEventListener('pagehide', handlePageHide);
-      if (!hasExplicitlyLeftRef.current) {
-        deleteGroupIfHost('unmount');
-      }
-    };
-    // No incluir `isHost` aquí: al llegar el snapshot del grupo, isHost pasa a true y el cleanup
-    // anterior ejecutaría deleteGroupIfHost con valores obsoletos y podría expulsar al anfitrión.
-  }, [groupId, user?.uid]);
+  // Cerrar la app / segundo plano / perder conexión NO saca del grupo ni corta la ruta:
+  // antes, si el anfitrión cerraba la app (pagehide / beforeunload) se paraba la ruta a todos.
+  // Ahora el servidor marca la desconexión y, al volver, MainApp reengancha la ruta automáticamente.
+  // Solo la salida explícita (confirmLeaveRoute) llama a deleteGroupIfHost.
 
   // GPS-based lean angle estimation (fallback for when phone is in pocket/screen off)
   useEffect(() => {
@@ -1962,7 +2511,8 @@ export default function MapView({
     if (currentSpeed > MIN_CURVE_SPEED_KMH && absAngle > CURVE_START_DEG) {
       if (!inCurve) {
         setInCurve(true);
-        curveEntryQualifiedRef.current = true;
+        // Solo puntúan curvas entradas a velocidad real (anti farmeo frenando/acelerando).
+        curveEntryQualifiedRef.current = currentSpeed >= RIDE_POINTS_RULES.curveMinEntrySpeedKmh;
         if (leanAngle > 0) {
           rightTurnsRef.current += 1;
         } else {
@@ -1972,8 +2522,9 @@ export default function MapView({
       if (absAngle > currentCurveMax) setCurrentCurveMax(absAngle);
     } else if ((currentSpeed <= MIN_CURVE_SPEED_KMH || absAngle <= CURVE_END_DEG) && inCurve) {
       setInCurve(false);
-      if (curveEntryQualifiedRef.current && currentCurveMax > CURVE_START_DEG) {
-        setScore((prev) => Math.ceil(prev + currentCurveMax));
+      if (curveEntryQualifiedRef.current) {
+        const curvePts = curvePointsForPeak(currentCurveMax);
+        if (curvePts > 0) setScore((prev) => prev + curvePts);
       }
       curveEntryQualifiedRef.current = false;
       setCurrentCurveMax(0);
@@ -2059,170 +2610,14 @@ export default function MapView({
 
   const createSummaryImage = async () => {
     if (!summaryData) return null;
-
-    const loadLogo = (): Promise<HTMLImageElement | null> =>
-      new Promise((resolve) => {
-        try {
-          const img = new Image();
-          img.crossOrigin = 'anonymous';
-          img.onload = () => resolve(img);
-          img.onerror = () => resolve(null);
-          img.src = appIcon;
-        } catch {
-          resolve(null);
-        }
-      });
-
-    const canvas = document.createElement('canvas');
-    const width = 1080;
-    const height = 1920;
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return null;
-
-    const roundRectPath = (x: number, y: number, w: number, h: number, r: number) => {
-      const rad = Math.min(r, w / 2, h / 2);
-      ctx.beginPath();
-      ctx.moveTo(x + rad, y);
-      ctx.arcTo(x + w, y, x + w, y + h, rad);
-      ctx.arcTo(x + w, y + h, x, y + h, rad);
-      ctx.arcTo(x, y + h, x, y, rad);
-      ctx.arcTo(x, y, x + w, y, rad);
-      ctx.closePath();
-    };
-
-    const bg = ctx.createLinearGradient(0, 0, width, height);
-    bg.addColorStop(0, '#0c0a09');
-    bg.addColorStop(0.45, '#1c1917');
-    bg.addColorStop(1, '#0f172a');
-    ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, width, height);
-
-    // Brillo suave superior
-    const glow = ctx.createRadialGradient(width * 0.5, 0, 0, width * 0.5, 0, width * 0.85);
-    glow.addColorStop(0, 'rgba(249, 115, 22, 0.18)');
-    glow.addColorStop(1, 'rgba(249, 115, 22, 0)');
-    ctx.fillStyle = glow;
-    ctx.fillRect(0, 0, width, 520);
-
-    const pad = 72;
-    const cardX = pad;
-    const cardY = pad;
-    const cardW = width - pad * 2;
-    const cardH = height - pad * 2;
-
-    ctx.shadowColor = 'rgba(0,0,0,0.45)';
-    ctx.shadowBlur = 48;
-    ctx.shadowOffsetY = 18;
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
-    roundRectPath(cardX, cardY, cardW, cardH, 44);
-    ctx.fill();
-    ctx.shadowBlur = 0;
-    ctx.shadowOffsetY = 0;
-
-    ctx.strokeStyle = 'rgba(251, 146, 60, 0.35)';
-    ctx.lineWidth = 2;
-    roundRectPath(cardX, cardY, cardW, cardH, 44);
-    ctx.stroke();
-
-    const logo = await loadLogo();
-    let headerY = cardY + 72;
-    if (logo && logo.width > 0) {
-      const lw = 120;
-      const lh = (logo.height / logo.width) * lw;
-      ctx.save();
-      roundRectPath(cardX + 72, headerY, lw, lh, 22);
-      ctx.clip();
-      ctx.drawImage(logo, cardX + 72, headerY, lw, lh);
-      ctx.restore();
-    }
-
-    const titleX = logo && logo.width > 0 ? cardX + 220 : cardX + 72;
-    ctx.fillStyle = '#fafaf9';
-    ctx.font = 'bold 52px system-ui, Segoe UI, Roboto, sans-serif';
-    ctx.fillText('Ruta completada', titleX, headerY + 48);
-    ctx.fillStyle = '#a8a29e';
-    ctx.font = '28px system-ui, Segoe UI, Roboto, sans-serif';
-    const routeTitle = (group?.name || 'Ruta MotoRide').slice(0, 42);
-    ctx.fillText(routeTitle, titleX, headerY + 96);
-
-    const totalScore = summaryData.score || 0;
-    const baseScore = summaryData.baseScore ?? totalScore;
-    const bonusScore = summaryData.distanceBonus || 0;
-    const averageSpeed =
-      summaryData.duration > 0 ? Math.round(summaryData.distance / (summaryData.duration / 3600000)) : 0;
-    const mins = Math.floor(summaryData.duration / 60000);
-    const secs = Math.floor((summaryData.duration % 60000) / 1000);
-
-    const drawStat = (
-      bx: number,
-      by: number,
-      bw: number,
-      bh: number,
-      label: string,
-      value: string,
-      accent: string
-    ) => {
-      ctx.fillStyle = 'rgba(24, 24, 27, 0.85)';
-      roundRectPath(bx, by, bw, bh, 20);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(63, 63, 70, 0.9)';
-      ctx.lineWidth = 1;
-      roundRectPath(bx, by, bw, bh, 20);
-      ctx.stroke();
-      ctx.fillStyle = '#71717a';
-      ctx.font = '600 20px system-ui, Segoe UI, Roboto, sans-serif';
-      ctx.fillText(label.toUpperCase(), bx + 28, by + 40);
-      ctx.fillStyle = accent;
-      ctx.font = 'bold 44px system-ui, Segoe UI, Roboto, sans-serif';
-      ctx.fillText(value, bx + 28, by + 98);
-    };
-
-    const gridTop = headerY + (logo && logo.width > 0 ? 160 : 120);
-    const colGap = 22;
-    const rowGap = 22;
-    const cellW = (cardW - 72 * 2 - colGap) / 2;
-    const cellH = 132;
-    let gx = cardX + 72;
-    let gy = gridTop;
-
-    drawStat(gx, gy, cellW, cellH, 'Distancia', `${summaryData.distance} km`, '#f4f4f5');
-    drawStat(gx + cellW + colGap, gy, cellW, cellH, 'Tiempo', `${mins}m ${secs}s`, '#f4f4f5');
-    gy += cellH + rowGap;
-    drawStat(gx, gy, cellW, cellH, 'Vel. media', `${averageSpeed} km/h`, '#f4f4f5');
-    drawStat(gx + cellW + colGap, gy, cellW, cellH, 'Curvas (I/D)', `${summaryData.leftTurns} / ${summaryData.rightTurns}`, '#f4f4f5');
-    gy += cellH + rowGap;
-    drawStat(gx, gy, cellW, cellH, 'Puntos base', `+${baseScore}`, '#e4e4e7');
-    drawStat(gx + cellW + colGap, gy, cellW, cellH, 'Bonus dist.', bonusScore > 0 ? `+${bonusScore}` : '—', '#34d399');
-    gy += cellH + rowGap;
-
-    const wideH = 168;
-    ctx.fillStyle = 'rgba(24, 24, 27, 0.85)';
-    roundRectPath(gx, gy, cellW * 2 + colGap, wideH, 20);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(63, 63, 70, 0.9)';
-    ctx.lineWidth = 1;
-    roundRectPath(gx, gy, cellW * 2 + colGap, wideH, 20);
-    ctx.stroke();
-    ctx.fillStyle = '#71717a';
-    ctx.font = '600 20px system-ui, Segoe UI, Roboto, sans-serif';
-    ctx.fillText('INCLINACIÓN MÁXIMA', gx + 28, gy + 42);
-    ctx.fillStyle = '#fafaf9';
-    ctx.font = 'bold 48px system-ui, Segoe UI, Roboto, sans-serif';
-    ctx.fillText(`Izq. ${summaryData.maxLeanLeft}°   ·   Der. ${summaryData.maxLeanRight}°`, gx + 28, gy + 108);
-
-    gy += wideH + 36;
-    ctx.fillStyle = '#f97316';
-    ctx.font = 'bold 56px system-ui, Segoe UI, Roboto, sans-serif';
-    ctx.fillText(`+${totalScore} puntos`, gx, gy + 8);
-
-    ctx.fillStyle = '#78716c';
-    ctx.font = '26px system-ui, Segoe UI, Roboto, sans-serif';
-    ctx.fillText('MotoRide · Conduce con seguridad', cardX + 72, cardY + cardH - 56);
-
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png', 0.95));
-    return blob;
+    const logo = await loadSummaryLogo(appIcon);
+    const summaryRouteGeo = group?.routeGeoJSON ? parseRouteData(group.routeGeoJSON) : null;
+    return renderRouteSummaryCard({
+      data: summaryData,
+      routeName: group?.name || 'Ruta MotoRide',
+      routeCoords: getLineCoordinates(summaryRouteGeo),
+      logo,
+    });
   };
 
   const shareSummaryImage = async () => {
@@ -2324,6 +2719,7 @@ export default function MapView({
           await updateDoc(userRef, {
             points: newPoints,
             level: newLevel,
+            progressModel: PROGRESS_MODEL_VERSION,
             totalDistance: (userData.totalDistance || 0) + dist,
             totalLeftTurns: (userData.totalLeftTurns || 0) + stats.leftTurns,
             totalRightTurns: (userData.totalRightTurns || 0) + stats.rightTurns,
@@ -2337,6 +2733,7 @@ export default function MapView({
           await setDoc(userRef, {
             points: newPoints,
             level: newLevel,
+            progressModel: PROGRESS_MODEL_VERSION,
             totalDistance: dist,
             totalLeftTurns: stats.leftTurns,
             totalRightTurns: stats.rightTurns,
@@ -2637,13 +3034,19 @@ export default function MapView({
         const R = 6371; // Earth's radius in km
         const dLat = (currentLocation.lat - lastLocRef.current.lat) * Math.PI / 180;
         const dLon = (currentLocation.lng - lastLocRef.current.lng) * Math.PI / 180;
-        const a = 
+        const a =
           Math.sin(dLat/2) * Math.sin(dLat/2) +
-          Math.cos(lastLocRef.current.lat * Math.PI / 180) * Math.cos(currentLocation.lat * Math.PI / 180) * 
+          Math.cos(lastLocRef.current.lat * Math.PI / 180) * Math.cos(currentLocation.lat * Math.PI / 180) *
           Math.sin(dLon/2) * Math.sin(dLon/2);
         const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
         const d = R * c;
-        
+        // Anti jitter GPS parado: sin velocidad real no se suma km ni se mueve el ancla
+        // (así el jitter no acumula distancia y al arrancar se mide desde el punto de parada).
+        const speedKmhNow = typeof speed === 'number' && Number.isFinite(speed) ? speed * 3.6 : null;
+        const isMovingNow =
+          speedKmhNow !== null ? speedKmhNow >= RIDE_POINTS_RULES.minMovingSpeedKmh : d * 1000 >= 5;
+        if (!isMovingNow) return;
+
         setLocalDistance(prev => {
           const newDist = prev + d;
           
@@ -2828,7 +3231,7 @@ export default function MapView({
           headers: { 'User-Agent': 'MoteroApp/1.0 (contact: motorideapp1@gmail.com)' },
         });
         const arr = Array.isArray(geoData) ? geoData : [];
-        setSearchSuggestions(sortNominatimResults(arr, q).slice(0, 8));
+        setSearchSuggestions(sortRoutableNominatimResults(arr, q).slice(0, 8));
       } catch {
         setSearchSuggestions([]);
       }
@@ -3171,6 +3574,31 @@ export default function MapView({
   const currentSpeedKmh = speed ? Math.round(speed * 3.6) : 0;
   /** Sin redondear: zoom dinámico suave según velocidad real. */
   const speedKmhForMapFollow = (speed ?? 0) * 3.6;
+
+  // Aviso de curva: próxima curva revirada del trazado, con su velocidad recomendada (ver routeProgress.ts).
+  const curveAheadNav = navState.curveAhead ?? null;
+  const curveWarn =
+    curveWarnEnabled && curveAheadNav
+      ? {
+          key: curveAheadNav.curve.startM,
+          direction: curveAheadNav.curve.direction,
+          distM: curveAheadNav.distM,
+          recommendedKmh: curveAheadNav.curve.recommendedKmh,
+          tooFast: speedKmhForMapFollow > curveAheadNav.curve.recommendedKmh + CURVE_TOO_FAST_MARGIN_KMH,
+        }
+      : null;
+  // Próxima parada: la elegida por el grupo (si hay conexión); sin red, la última elección local.
+  const nextStopAhead = voteLive
+    ? nextChosenStop(groupChosenStop ? [groupChosenStop] : [], activeChosenIds, navState.alongM ?? null)
+    : nextChosenStop(chosenStops, chosenStopIds, navState.alongM ?? null);
+  const curveVibratedKeyRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!curveWarn || !curveVibrateEnabled || !curveWarn.tooFast) return;
+    if (curveWarn.distM > CURVE_VIBRATE_DISTANCE_M) return;
+    if (curveVibratedKeyRef.current === curveWarn.key) return;
+    curveVibratedKeyRef.current = curveWarn.key;
+    if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate([120, 80, 120]);
+  }, [curveWarn, curveVibrateEnabled]);
   const isMoving = currentSpeedKmh > 2;
   /** Mapa «rumbo arriba»: rotación CSS del contenedor Leaflet. */
   const mapHeadingRotationActive = isRecording && currentSpeedKmh > 3 && localDistance >= 0.05;
@@ -3195,16 +3623,8 @@ export default function MapView({
     [mapWeather.dailyWeatherCode]
   );
 
-  useEffect(() => {
-    if (!gpsError || !isHost) return;
-    const normalized = gpsError.toLowerCase();
-    if (
-      normalized.includes('denied') ||
-      normalized.includes('permission')
-    ) {
-      deleteGroupIfHost('gps-error');
-    }
-  }, [gpsError, isHost]);
+  // Un fallo de permiso de GPS ya no expulsa al anfitrión ni corta la ruta a todos: se muestra el aviso
+  // de GPS y el resto del grupo sigue rodando.
 
   const toggleForcedLandscapeUi = useCallback(() => {
     if (!isIphoneDevice) return;
@@ -3426,6 +3846,23 @@ export default function MapView({
     [locations, user?.uid]
   );
 
+  /**
+   * Compañeros que enviaron posición durante la ruta en curso. Se reinicia al empezar una ruta
+   * y se guarda como `participantCount` (yo + compañeros) en rideHistory, para el reto «100 km en grupo».
+   */
+  const ridePeerUidsRef = useRef<Set<string>>(new Set());
+  const wasRideActiveRef = useRef(false);
+  useEffect(() => {
+    if (rideActive && !wasRideActiveRef.current) ridePeerUidsRef.current = new Set();
+    wasRideActiveRef.current = rideActive;
+  }, [rideActive]);
+  useEffect(() => {
+    if (!rideActive) return;
+    for (const l of otherLocations) {
+      if (l.uid && l.offline !== true) ridePeerUidsRef.current.add(l.uid);
+    }
+  }, [otherLocations, rideActive]);
+
   /** Miembros del grupo en Firestore aún sin posición en tiempo real (sin GPS o primer fix pendiente). */
   const membersWaitingGps = useMemo(() => {
     if (!Array.isArray(group?.members) || !user?.uid) return [];
@@ -3469,13 +3906,15 @@ export default function MapView({
       level?: number;
       isPremium?: boolean;
       waitingGps?: boolean;
+      profileFrameId?: string;
     };
     const rows: RankRow[] = [
       ...otherLocations.map((l) => ({
         ...l,
         isPremium: memberPremiumByUid[l.uid] === true,
+        profileFrameId: resolvePeerFrameId(l.profileFrameId ?? memberFrameByUid[l.uid]),
       })),
-      ...membersWaitingGps,
+      ...membersWaitingGps.map((m) => ({ ...m, profileFrameId: resolvePeerFrameId(memberFrameByUid[m.uid]) })),
       {
         uid: user?.uid || '',
         displayName: user?.displayName || 'Tú',
@@ -3483,6 +3922,7 @@ export default function MapView({
         photoURL: user?.photoURL,
         level: userLevel,
         isPremium: user?.isPremium === true,
+        profileFrameId: selfFrameId,
       },
     ];
     return rows
@@ -3644,7 +4084,7 @@ export default function MapView({
         {(
            <motion.div 
              layout
-             className="flex items-center gap-2 sm:gap-3 bg-zinc-950/80 backdrop-blur-md p-2 rounded-2xl sm:rounded-full border border-zinc-800 shadow-xl overflow-hidden min-w-0"
+             className="flex items-center gap-2 sm:gap-3 hud-land:gap-1.5 mr-surface backdrop-blur-md p-2 hud-land:p-1.5 overflow-hidden min-w-0"
              animate={{ paddingRight: isMoving ? '8px' : '16px' }}
            >
             <button
@@ -3654,15 +4094,15 @@ export default function MapView({
                 setInviteModalContext(null);
                 setShowExitConfirm(true);
               }}
-              className="p-2 bg-zinc-800 hover:bg-zinc-700 rounded-full transition-colors text-white shrink-0"
+              className="p-2 bg-white/[0.07] hover:bg-white/[0.13] rounded-full transition-colors text-white shrink-0"
             >
                <ArrowLeft size={18}/>
              </button>
              
              <div className="text-white overflow-hidden pr-2 min-w-0">
-               <h2 className="font-bold text-sm leading-tight truncate">{group?.name || 'Cargando...'}</h2>
+               <h2 className="font-display text-xl font-bold uppercase leading-tight tracking-wide break-words line-clamp-2 text-zinc-50">{group?.name || 'Cargando…'}</h2>
                <div className="flex items-center gap-2 text-xs text-zinc-400 min-w-0 flex-wrap">
-                 <span>Código: <strong className="text-orange-500">{groupId}</strong></span>
+                 <span>Código <strong className="font-mono font-semibold text-orange-400">{groupId}</strong></span>
                  <div className="flex items-center gap-1 bg-zinc-800/50 px-1.5 py-0.5 rounded-md">
                    <Users size={12} className="text-zinc-400" />
                    <span className="font-bold text-white">{participantCount}</span>
@@ -3695,10 +4135,10 @@ export default function MapView({
 
            {/* Navigation Instruction */}
            {effectiveRouteForNav && (
-             <div className={`bg-zinc-950/95 backdrop-blur-md border-l-8 border-blue-500 rounded-2xl shadow-2xl flex flex-col gap-2 pointer-events-auto mt-2 max-w-sm ring-1 ring-white/10 transition-all duration-300 ${isCompactUI ? 'p-3' : 'p-4'}`}>
-               <div className={`flex items-center ${isCompactUI ? 'gap-3' : 'gap-5'}`}>
+             <div className={`bg-zinc-950/92 backdrop-blur-md border-l-4 border-sky-brand-500 rounded-2xl shadow-[var(--shadow-sheet)] flex flex-col gap-2 hud-land:gap-1 pointer-events-auto mt-2 hud-land:mt-1 max-w-sm hud-land:max-w-[17rem] ring-1 ring-white/10 transition-all duration-300 ${isCompactUI ? 'p-3 hud-land:p-2' : 'p-4'}`}>
+               <div className={`flex items-center ${isCompactUI ? 'gap-3 hud-land:gap-2' : 'gap-5'}`}>
                  <div
-                   className={`${isCompactUI ? 'w-12 h-12' : 'w-16 h-16'} rounded-2xl flex items-center justify-center text-white shrink-0 shadow-lg shadow-blue-900/40 ring-2 ring-white/25 bg-gradient-to-br from-sky-500 to-blue-700`}
+                   className={`${isCompactUI ? 'w-12 h-12 hud-land:w-10 hud-land:h-10' : 'w-16 h-16'} rounded-2xl flex items-center justify-center text-white shrink-0 shadow-lg shadow-black/40 ring-2 ring-white/25 bg-[#1f7aa0]`}
                  >
                    {getDirectionIcon(
                      navState.maneuverType,
@@ -3708,35 +4148,108 @@ export default function MapView({
                    )}
                  </div>
                  <div className="flex-1 min-w-0">
-                   <p className={`${isCompactUI ? 'text-base' : 'text-xl'} text-white font-black leading-tight tracking-tight`}>{navState.instruction}</p>
+                   <p className={`${isCompactUI ? 'text-base hud-land:text-sm' : 'text-xl'} text-white font-black leading-tight tracking-tight line-clamp-2 hud-land:line-clamp-1`}>{navState.instruction}</p>
                    {navState.instructionDetail ? (
-                     <p className={`${isCompactUI ? 'text-xs' : 'text-sm'} text-blue-100/90 font-semibold leading-snug mt-1`}>
+                     <p className={`${isCompactUI ? 'text-xs hud-land:hidden' : 'text-sm'} text-blue-100/90 font-semibold leading-snug mt-1 line-clamp-2`}>
                        {navState.instructionDetail}
                      </p>
                    ) : null}
                    {navState.distanceToNext !== null && (
                      <div className="mt-1.5">
                        <div className="flex items-baseline gap-1.5">
-                         <span className={`${isCompactUI ? 'text-xl' : 'text-2xl'} text-blue-400 font-black tabular-nums`}>
+                         <span className={`${isCompactUI ? 'text-xl hud-land:text-lg' : 'text-2xl'} text-blue-400 font-black tabular-nums`}>
                            {formatNavDistanceMeters(navState.distanceToNext)}
                          </span>
                        </div>
                        {!isCompactUI && (
-                         <p className="text-[10px] text-zinc-500 font-medium mt-0.5 leading-tight">
-                           Aprox. en línea recta hasta el siguiente giro
+                         <p className="text-[11px] text-zinc-500 font-medium mt-0.5 leading-snug">
+                           {navState.isOnRoute ? 'Por el trazado hasta la maniobra' : 'Distancia en línea recta al trazado'}
                          </p>
                        )}
                      </div>
                    )}
+                   {navState.isOnRoute && navState.remainingM != null && navState.etaMs != null && (
+                     <p className="mt-1 hud-land:mt-0.5 text-xs text-zinc-300 font-semibold tabular-nums">
+                       <span className="hud-land:hidden">
+                         {formatNavDistanceMeters(navState.remainingM)} restantes · llegada {formatNavEtaClock(navState.etaMs)}
+                         {navState.remainingTimeS != null ? ` (${formatNavDurationS(navState.remainingTimeS)})` : ''}
+                         {navState.avgSpeedKmh != null && !navState.avgSpeedObserved ? ` · media ~${navState.avgSpeedKmh} km/h` : ''}
+                       </span>
+                       <span className="hidden hud-land:inline">
+                         {formatNavDistanceMeters(navState.remainingM)} rest. · ETA {formatNavEtaClock(navState.etaMs)}
+                       </span>
+                     </p>
+                   )}
+                   {curveWarn && (
+                     <div
+                       role="status"
+                       aria-live="polite"
+                       className={`mt-2 hud-land:mt-1 flex max-w-full min-w-0 items-start gap-2 rounded-xl px-2.5 py-1.5 hud-land:py-1 text-xs leading-snug font-bold ring-1 ${
+                         curveWarn.tooFast
+                           ? 'bg-amber-500/15 text-amber-100 ring-amber-400/40'
+                           : 'bg-zinc-900/80 text-zinc-200 ring-white/10'
+                       }`}
+                     >
+                       {curveWarn.direction === 'right' ? (
+                         <CornerUpRight size={14} className={curveWarn.tooFast ? 'text-amber-300 shrink-0' : 'text-sky-brand-400 shrink-0'} aria-hidden />
+                       ) : (
+                         <CornerUpLeft size={14} className={curveWarn.tooFast ? 'text-amber-300 shrink-0' : 'text-sky-brand-400 shrink-0'} aria-hidden />
+                       )}
+                       <span className="min-w-0 break-words">
+                         <span className="hud-land:hidden">
+                           Curva {curveWarn.direction === 'right' ? 'a la derecha' : 'a la izquierda'}
+                         </span>
+                         <span className="hidden hud-land:inline">
+                           Curva {curveWarn.direction === 'right' ? 'dcha.' : 'izq.'}
+                         </span>
+                         {curveWarn.distM > 0 ? ` en ${formatNavDistanceMeters(curveWarn.distM)}` : ' ahora'}
+                       </span>
+                       <span className="tabular-nums text-white whitespace-nowrap shrink-0">máx. {curveWarn.recommendedKmh} km/h</span>
+                     </div>
+                   )}
+                   {ROUTE_STOPS_ENABLED && nextStopAhead && (
+                     <div className="mt-2 hud-land:mt-1 flex max-w-full min-w-0 items-start gap-2 rounded-xl px-2.5 py-1.5 hud-land:py-1 text-xs leading-snug font-bold bg-zinc-900/80 text-zinc-200 ring-1 ring-white/10">
+                       <Fuel size={14} className="text-orange-400 shrink-0 mt-0.5" aria-hidden />
+                       <span className="min-w-0 break-words">
+                         <span className="hud-land:hidden">
+                           Próxima parada: {nextStopAhead.stop.name ?? STOP_KIND_LABEL[nextStopAhead.stop.kind]} en {formatNavDistanceMeters(nextStopAhead.distM)}
+                         </span>
+                         <span className="hidden hud-land:inline">
+                           Parada en {formatNavDistanceMeters(nextStopAhead.distM)}
+                         </span>
+                       </span>
+                     </div>
+                   )}
                  </div>
                </div>
+               {ROUTE_STOPS_ENABLED && (
+               <button
+                 type="button"
+                 onClick={openRouteStops}
+                 className="w-full flex items-center justify-center gap-2 py-2 hud-land:py-1 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 text-xs font-bold"
+               >
+                 <Fuel size={14} className="text-orange-400 shrink-0" />
+                 <span className="hud-land:hidden">Paradas en ruta</span>
+                 <span className="hidden hud-land:inline">Paradas</span>
+               </button>
+               )}
                <button
                  type="button"
                  onClick={() => void cancelNavigation()}
-                 className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 text-xs font-bold"
+                 className="w-full flex items-center justify-center gap-2 py-2 hud-land:py-1 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 text-xs font-bold"
                >
                  <Ban size={14} className="text-orange-400 shrink-0" />
-                 {isHost ? 'Cancelar navegación (quita la ruta para todos)' : 'Ocultar guía solo en mi pantalla'}
+                 {isHost ? (
+                   <>
+                     <span className="hud-land:hidden">Cancelar navegación (quita la ruta para todos)</span>
+                     <span className="hidden hud-land:inline">Cancelar ruta</span>
+                   </>
+                 ) : (
+                   <>
+                     <span className="hud-land:hidden">Ocultar guía solo en mi pantalla</span>
+                     <span className="hidden hud-land:inline">Ocultar guía</span>
+                   </>
+                 )}
                </button>
              </div>
            )}
@@ -3772,7 +4285,7 @@ export default function MapView({
                    }
                    void toggleVoice();
                  }}
-                 className={`p-3 rounded-full shadow-xl transition-all duration-300 ease-out relative shrink-0 ${
+                 className={`mr-focus flex h-11 w-11 items-center justify-center rounded-full shadow-[var(--shadow-lift)] ring-1 ring-white/[0.09] transition-all duration-300 ease-out relative shrink-0 ${
                    voiceReconnecting
                      ? 'bg-zinc-900 text-amber-400 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] ring-2 ring-amber-400/45'
                      : isVoiceActive
@@ -3817,9 +4330,9 @@ export default function MapView({
              </div>
            </div>
 
-           <button 
-             onClick={() => setIsFollowing(!isFollowing)}
-             className={`p-3 rounded-full shadow-xl transition-colors ${isFollowing ? 'bg-blue-500 text-white' : 'bg-zinc-800 text-zinc-400'}`}
+           <button
+             onClick={() => (isFollowing ? setIsFollowing(false) : recenterMapOnRider())}
+             className={`mr-focus flex h-11 w-11 items-center justify-center rounded-full shadow-[var(--shadow-lift)] ring-1 ring-white/[0.09] backdrop-blur-md transition-colors ${isFollowing ? 'bg-sky-brand-500 text-white' : 'bg-zinc-950/85 text-zinc-300 hover:text-white'}`}
              title={isFollowing ? "Dejar de seguir" : "Centrar mapa"}
            >
              <Navigation size={20} />
@@ -3831,7 +4344,7 @@ export default function MapView({
                 setShowSettings(false);
                 setShowAlertMenu(!showAlertMenu);
               }}
-              className={`p-3 rounded-full shadow-xl transition-colors ${showAlertMenu ? 'bg-red-500 text-white' : 'bg-zinc-800 text-zinc-400'}`}
+              className={`mr-focus flex h-11 w-11 items-center justify-center rounded-full shadow-[var(--shadow-lift)] ring-1 ring-white/[0.09] backdrop-blur-md transition-colors ${showAlertMenu ? 'bg-red-500 text-white' : 'bg-zinc-950/85 text-zinc-300 hover:text-white'}`}
               title="Avisos rápidos"
             >
               <Bell size={20} />
@@ -3866,7 +4379,7 @@ export default function MapView({
                 setShowAlertMenu(false);
                 setShowSettings(!showSettings);
               }}
-               className={`p-3 rounded-full shadow-xl transition-colors ${showSettings ? 'bg-zinc-100 text-zinc-900' : 'bg-zinc-800 text-zinc-400'}`}
+               className={`mr-focus flex h-11 w-11 items-center justify-center rounded-full shadow-[var(--shadow-lift)] ring-1 ring-white/[0.09] backdrop-blur-md transition-colors ${showSettings ? 'bg-zinc-100 text-zinc-900' : 'bg-zinc-950/85 text-zinc-300 hover:text-white'}`}
                title="Menú"
              >
                 <Menu size={20} />
@@ -3889,6 +4402,45 @@ export default function MapView({
                      Modificar Ruta
                    </button>
                  )}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = !curveWarnEnabled;
+                    setCurveWarnEnabled(next);
+                    writeStoredFlag(CURVE_WARN_KEY, next);
+                  }}
+                  className="flex items-center gap-3 text-white hover:bg-zinc-800 p-3 rounded-2xl text-sm font-bold transition-colors"
+                  aria-pressed={curveWarnEnabled}
+                >
+                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${curveWarnEnabled ? 'bg-sky-500/20 text-sky-brand-400' : 'bg-zinc-800 text-zinc-400'}`}>
+                    <CornerUpRight size={18} />
+                  </div>
+                  <span className="text-left">
+                    Aviso de curvas {curveWarnEnabled ? 'ON' : 'OFF'}
+                    <span className="block text-[10px] font-semibold text-zinc-500">Velocidad recomendada en curvas del trazado</span>
+                  </span>
+                </button>
+                {curveWarnEnabled && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !curveVibrateEnabled;
+                      setCurveVibrateEnabled(next);
+                      writeStoredFlag(CURVE_VIBRATE_KEY, next);
+                    }}
+                    className="flex items-center gap-3 text-white hover:bg-zinc-800 p-3 rounded-2xl text-sm font-bold transition-colors"
+                    aria-pressed={curveVibrateEnabled}
+                  >
+                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${curveVibrateEnabled ? 'bg-sky-500/20 text-sky-brand-400' : 'bg-zinc-800 text-zinc-400'}`}>
+                      <Activity size={18} />
+                    </div>
+                    <span className="text-left">
+                      Vibración en curva {curveVibrateEnabled ? 'ON' : 'OFF'}
+                      <span className="block text-[10px] font-semibold text-zinc-500">Solo si vas por encima de la velocidad recomendada</span>
+                    </span>
+                  </button>
+                )}
 
                 <button
                   type="button"
@@ -3955,6 +4507,22 @@ export default function MapView({
                    </div>
                    Calibrar Inclinación
                  </button>
+
+                 {needsOrientationUserGesture && leanPermissionGranted === false && (
+                   <button
+                     type="button"
+                     onClick={() => {
+                       setShowSettings(false);
+                       void requestPermission({ manual: true });
+                     }}
+                     className="flex items-center gap-3 text-white hover:bg-zinc-800 p-3 rounded-2xl text-sm font-bold transition-colors"
+                   >
+                     <div className="w-8 h-8 rounded-xl bg-amber-500/20 flex items-center justify-center text-amber-400">
+                       <Target size={18} />
+                     </div>
+                     Reintentar permiso de movimiento
+                   </button>
+                 )}
 
                  <button 
                    onClick={() => { toggleFullscreen(); setShowSettings(false); }}
@@ -4054,9 +4622,9 @@ export default function MapView({
         </div>
       )}
 
-      {needsOrientationUserGesture && leanPermissionGranted !== true && (
+      {needsOrientationUserGesture && leanPermissionGranted === null && (
         <div
-          className="absolute z-[1001] bg-indigo-600 text-white p-3 rounded-xl shadow-xl text-sm flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
+          className="absolute z-[1001] bg-indigo-600 text-white p-3 hud-land:p-2 rounded-xl shadow-xl text-sm hud-land:text-xs flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between hud-land:!left-auto hud-land:!right-[4.5rem] hud-land:max-w-[19rem]"
           style={{
             top: leanIosBannerTop,
             left: 'max(1rem, env(safe-area-inset-left, 0px))',
@@ -4065,14 +4633,20 @@ export default function MapView({
           role="status"
         >
           <span className="font-medium leading-snug">
-            En iPhone MotoRide necesita <strong>permiso de movimiento</strong> para mostrar la inclinación. Toca el botón de abajo. Si ya lo rechazaste antes, entra en los ajustes del mapa y usa <strong>Calibrar inclinación</strong>.
+            <span className="hud-land:hidden">
+              En iPhone MotoRide necesita <strong>permiso de movimiento</strong> para mostrar la inclinación. Lo pedirá <strong>una sola vez</strong>: toca el botón de abajo.
+            </span>
+            <span className="hidden hud-land:inline">
+              Activa el <strong>permiso de movimiento</strong> para la inclinación (se pide una sola vez).
+            </span>
           </span>
           <button
             type="button"
-            className="shrink-0 bg-white text-indigo-700 font-bold px-4 py-2 rounded-xl"
+            className="shrink-0 bg-white text-indigo-700 font-bold px-4 hud-land:px-3 py-2 hud-land:py-1.5 rounded-xl"
             onClick={() => void requestPermission()}
           >
-            Permitir inclinómetro
+            <span className="hud-land:hidden">Permitir inclinómetro</span>
+            <span className="hidden hud-land:inline">Permitir</span>
           </button>
         </div>
       )}
@@ -4434,22 +5008,24 @@ export default function MapView({
                   <div key={loc.uid} className={`flex items-center gap-3 p-2 rounded-xl border ${loc.uid === user?.uid ? 'bg-orange-500/10 border-orange-500/30' : 'bg-zinc-900 border-zinc-800'}`}>
                     <div className="w-6 text-xs font-black text-zinc-500">#{index + 1}</div>
                     <div className="relative shrink-0">
-                      <div
-                        className={`rounded-full p-[2px] ${getLevelRingWrapperClass(loc.level || 1, loc.isPremium === true)}`}
-                      >
-                        <img
-                          src={loc.photoURL || 'https://via.placeholder.com/32'}
-                          alt=""
-                          className="w-8 h-8 rounded-full block bg-zinc-800"
-                        />
-                      </div>
+                      <AvatarFrame frameId={loc.profileFrameId} size={36}>
+                        <div
+                          className={`rounded-full p-[2px] ${getLevelRingWrapperClass(loc.level || 1, loc.isPremium === true)}`}
+                        >
+                          <img
+                            src={loc.photoURL || 'https://via.placeholder.com/32'}
+                            alt=""
+                            className="w-8 h-8 rounded-full block bg-zinc-800"
+                          />
+                        </div>
+                      </AvatarFrame>
                       <div className="absolute -bottom-1 -right-1 bg-orange-500 text-white text-[8px] font-black w-4 h-4 flex items-center justify-center rounded-full border border-zinc-900">
                         {loc.level || 1}
                       </div>
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs font-bold text-white truncate flex items-center gap-1.5">
-                        <span className="truncate">{loc.displayName}</span>
+                      <p className="text-xs font-bold text-white break-words flex items-center gap-1.5 min-w-0">
+                        <span className="min-w-0 break-words">{loc.displayName}</span>
                         {loc.isPremium ? <PremiumBadge compact /> : null}
                       </p>
                       <p className="text-[10px] text-zinc-500 font-mono">
@@ -4465,13 +5041,13 @@ export default function MapView({
 
       {/* HUD Overlay */}
       <div className={`absolute left-0 right-0 z-[1000] pointer-events-none flex justify-center px-2 sm:px-4 landscape:justify-start landscape:left-4 landscape:right-auto ${isLandscapeUi ? 'landscape:bottom-3' : 'bottom-5'}`}>
-        <div className="bg-zinc-950/90 backdrop-blur-3xl rounded-[2rem] sm:rounded-[2.5rem] p-1.5 border border-white/10 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.8)] flex items-center gap-0.5 sm:gap-1 pointer-events-auto max-w-[min(100%,calc(100vw-1rem))] min-w-0 overflow-visible landscape:scale-90 landscape:origin-bottom-left">
+        <div className="mr-sheet backdrop-blur-2xl rounded-[1.5rem] sm:rounded-[1.75rem] p-1.5 flex items-center gap-1 sm:gap-1.5 pointer-events-auto max-w-[min(100%,calc(100vw-1rem))] min-w-0 overflow-visible landscape:scale-90 landscape:origin-bottom-left">
           
           {/* Speed + tiempo en ubicación — ancho fijo para no empujar Pausa/Finalizar fuera del viewport */}
-          <div className="flex flex-col items-center justify-center w-[5rem] sm:w-[6.25rem] shrink-0 py-2 sm:py-3 px-2 sm:px-4 bg-white/5 rounded-[1.5rem] sm:rounded-[2rem] border border-white/5 landscape:w-[5rem] landscape:px-2">
+          <div className="flex flex-col items-center justify-center w-[5rem] sm:w-[6.25rem] shrink-0 py-2 sm:py-3 px-2 sm:px-4 bg-black/25 rounded-[var(--radius-card)] ring-1 ring-white/[0.06] landscape:w-[5rem] landscape:px-2 hud-land:w-[4.25rem] hud-land:py-1.5 hud-land:px-1.5">
             {showHudWeather && (
               <div
-                className="flex items-center justify-center gap-1 mb-0.5 sm:mb-1 min-h-[18px] sm:min-h-[20px] w-full"
+                className="flex items-center justify-center gap-1 mb-0.5 sm:mb-1 min-h-[18px] sm:min-h-[20px] w-full hud-land:hidden"
                 title="Viento (~10 m). Flecha relativa a tu rumbo (misma base que la flecha GPS): arriba = mismo sentido que llevas; km/h (Open-Meteo)."
               >
                 {mapWeather.loading && mapWeather.windSpeedKmh == null ? (
@@ -4492,7 +5068,7 @@ export default function MapView({
                     </span>
                     <span className="text-[9px] sm:text-[10px] font-black tabular-nums text-cyan-100/95 leading-none tracking-tight">
                       {Math.round(mapWeather.windSpeedKmh)}
-                      <span className="text-[7px] sm:text-[8px] font-semibold text-zinc-500 ml-0.5">km/h</span>
+                      <span className="text-[9px] font-semibold text-zinc-400 ml-0.5">km/h</span>
                     </span>
                   </>
                 ) : (
@@ -4501,7 +5077,7 @@ export default function MapView({
               </div>
             )}
             <div
-              className="flex items-center justify-center gap-1 sm:gap-1.5 mb-0.5 sm:mb-1 min-h-[22px] sm:min-h-[26px]"
+              className="flex items-center justify-center gap-1 sm:gap-1.5 mb-0.5 sm:mb-1 min-h-[22px] sm:min-h-[26px] hud-land:min-h-[18px] hud-land:mb-0"
               title={
                 showHudWeather
                   ? 'Temperatura ahora e icono según la previsión del día (Open-Meteo)'
@@ -4525,39 +5101,43 @@ export default function MapView({
                   </>
                 )
               ) : (
-                <span className="text-[10px] sm:text-[11px] font-black text-zinc-500 leading-none flex items-center gap-1">
+                <span className="flex items-center justify-center">
                   <Crown size={14} className="text-amber-500/80 shrink-0" aria-hidden />
-                  Premium
+                  <span className="sr-only">Premium</span>
                 </span>
               )}
             </div>
-            <span className="text-3xl sm:text-5xl font-black leading-none tracking-tighter text-white tabular-nums inline-block min-w-[3ch] text-center">{currentSpeedKmh}</span>
-            <span className="text-[8px] sm:text-[9px] font-black uppercase tracking-[0.1em] sm:tracking-[0.2em] text-blue-400 mt-0.5 sm:mt-1">km/h</span>
+            <span className="font-display text-4xl sm:text-6xl hud-land:text-[2.25rem] font-bold leading-none tracking-tight text-zinc-50 tabular-nums inline-block min-w-[3ch] text-center">{currentSpeedKmh}</span>
+            <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-[0.14em] text-sky-brand-400 mt-0.5 sm:mt-1 hud-land:mt-0">km/h</span>
           </div>
 
           {/* Lean Angle & Stats Section */}
-          <div className="flex items-center gap-3 sm:gap-6 px-3 sm:px-6 py-1 sm:py-2 min-w-0">
+          <div className="flex items-center gap-3 sm:gap-6 hud-land:gap-2 px-3 sm:px-6 hud-land:px-2 py-1 sm:py-2 min-w-0">
             {/* Lean Angle Display */}
             <div className="flex flex-col items-center shrink-0">
-              <div className="flex justify-between w-full text-[8px] sm:text-[9px] font-black uppercase tracking-widest px-1 mb-0.5 sm:mb-1">
+              <div className="flex justify-between w-full text-[9px] sm:text-[10px] font-black uppercase tracking-wider px-1 mb-0.5 sm:mb-1 hud-land:mb-0 gap-2 whitespace-nowrap">
                 <div className="flex flex-col items-center">
-                  <span className="text-blue-400">Izq. {maxLeanLeft}°</span>
+                  <span className="text-blue-400" title="Máxima inclinación a la izquierda">
+                    <span className="hud-land:hidden">Izq. </span>{maxLeanLeft}°
+                  </span>
                   <span className="text-zinc-500">{leftTurnsRef.current}</span>
                 </div>
                 <div className="flex flex-col items-center">
-                  <span className="text-red-500">Der. {maxLeanRight}°</span>
+                  <span className="text-red-500" title="Máxima inclinación a la derecha">
+                    <span className="hud-land:hidden">Der. </span>{maxLeanRight}°
+                  </span>
                   <span className="text-zinc-500">{rightTurnsRef.current}</span>
                 </div>
               </div>
-              
+
               <div className="flex flex-col items-center justify-center">
-                <div className="h-10 sm:h-14 flex items-end justify-center overflow-visible">
+                <div className="h-10 sm:h-14 hud-land:h-8 flex items-end justify-center overflow-visible">
                   <div className="scale-[0.55] sm:scale-[0.65] origin-bottom">
                     <MotorcycleIcon angle={leanAngle} />
                   </div>
                 </div>
                 <div className="mt-1 flex flex-col items-center">
-                  <span className="text-lg sm:text-2xl font-black leading-none text-white tabular-nums">
+                  <span className="font-display text-2xl sm:text-3xl hud-land:text-xl font-bold leading-none text-zinc-50 tabular-nums">
                     {Math.round(Math.abs(leanAngle))}°
                   </span>
                 </div>
@@ -4568,7 +5148,7 @@ export default function MapView({
             <div className="w-px h-10 sm:h-12 bg-white/10 shrink-0" />
 
             {/* Score & Stop Recording */}
-            <div className="flex flex-col gap-1 sm:gap-1.5 min-w-[80px] sm:min-w-[100px] shrink-0">
+            <div className="flex flex-col gap-1 sm:gap-1.5 hud-land:gap-0.5 min-w-[80px] sm:min-w-[100px] hud-land:min-w-[4.5rem] shrink-0">
               <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 sm:py-1.5 bg-yellow-500/10 rounded-lg sm:rounded-xl border border-yellow-500/20">
                 <Trophy size={12} className="text-yellow-500 sm:w-[14px] sm:h-[14px]" />
                 <span className="text-xs sm:text-sm font-black text-white tabular-nums">{score}</span>
@@ -4582,8 +5162,9 @@ export default function MapView({
                   title="Inicia la grabación de la ruta para el grupo (GPS, puntos y resumen)"
                 >
                   <Play size={12} className="text-zinc-950 sm:w-[14px] sm:h-[14px]" fill="currentColor" />
-                  <span className="text-[9px] sm:text-xs font-black text-zinc-950 uppercase tracking-tight">
-                    Iniciar grabación
+                  <span className="text-[10px] sm:text-xs font-black text-zinc-950 uppercase tracking-tight leading-tight text-center">
+                    <span className="hud-land:hidden">Iniciar grabación</span>
+                    <span className="hidden hud-land:inline">Grabar</span>
                   </span>
                 </button>
               )}
@@ -4600,7 +5181,7 @@ export default function MapView({
                     title={ridePaused ? 'Reanudar grabación de ruta' : 'Pausar (almuerzo, café…) — el grupo sigue activo'}
                   >
                     {ridePaused ? <Play size={12} className="text-white sm:w-[14px] sm:h-[14px]" /> : <Pause size={12} className="text-white sm:w-[14px] sm:h-[14px]" />}
-                    <span className="text-[9px] sm:text-xs font-black text-white uppercase tracking-tight">
+                    <span className="text-[10px] sm:text-xs font-black text-white uppercase tracking-tight leading-tight text-center">
                       {ridePaused ? 'Reanudar' : 'Pausa'}
                     </span>
                   </button>
@@ -4611,7 +5192,7 @@ export default function MapView({
                     title="Finalizar Ruta"
                   >
                     <Square fill="currentColor" size={12} className="text-white sm:w-[14px] sm:h-[14px]" />
-                    <span className="text-[9px] sm:text-xs font-black text-white uppercase tracking-tight">Finalizar</span>
+                    <span className="text-[10px] sm:text-xs font-black text-white uppercase tracking-tight leading-tight">Finalizar</span>
                   </button>
                 </div>
               )}
@@ -4683,7 +5264,15 @@ export default function MapView({
                           }}
                           className="w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800 transition-colors"
                         >
-                          {item.display_name}
+                          {(() => {
+                            const sug = formatNominatimSuggestion(item);
+                            return (
+                              <>
+                                <span className="block font-semibold text-zinc-100">{sug.title}</span>
+                                {sug.subtitle && <span className="block text-[11px] text-zinc-500">{sug.subtitle}</span>}
+                              </>
+                            );
+                          })()}
                         </button>
                       ))}
                     </div>
@@ -4744,7 +5333,7 @@ export default function MapView({
           onSchedulePrefetch={bumpTilePrefetch}
         />
         <TileLayer
-          url="https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png"
+          url={BASE_MAP_TILE_URL}
           /** keepBuffer más grande cuando la rotación está activa (mapa sigue rumbo), con interpolación según velocidad */
           keepBuffer={isRecording && speedKmhForMapFollow > 20 && mapHeadingRotationActive
             ? 700 // Alto buffer para evitar cuadrados vacíos en rotación + velocidad
@@ -4755,7 +5344,7 @@ export default function MapView({
           updateWhenIdle={false}
           updateWhenZooming={false}
           maxZoom={20}
-          maxNativeZoom={19}
+          maxNativeZoom={BASE_MAP_MAX_NATIVE_ZOOM}
           detectRetina={false}
           crossOrigin
           preferCanvas
@@ -4820,21 +5409,27 @@ export default function MapView({
         )}
 
         {/* Radar Markers */}
-        {radars && radars.map((radar, index) => (
-          <Marker 
-            key={`radar-${index}`} 
-            position={[radar.lat, radar.lng]} 
+        {/* Radares fijos cercanos (≤ 2 km, máx. 8) con su distancia; el resto no se dibuja para no saturar el mapa. */}
+        {radarsNearby.map((radar, index) => (
+          <Marker
+            key={`radar-${radar.lat.toFixed(5)}-${radar.lng.toFixed(5)}-${index}`}
+            position={[radar.lat, radar.lng]}
+            zIndexOffset={-500}
             icon={L.divIcon({
-              html: `<div style="width: 38px; height: 38px; border-radius: 9999px; background: #ffffff; border: 3px solid #dc2626; display: flex; align-items: center; justify-content: center; box-shadow: 0 6px 14px rgba(0, 0, 0, 0.35);">
-                <img src="/RADAR.png" alt="Radar" style="width: 22px; height: 22px; object-fit: contain;" onerror="this.style.display='none'; this.parentElement.innerHTML='<span style=&quot;color:#dc2626;font-size:16px;font-weight:900;&quot;>R</span>';" />
+              html: `<div style="display:flex;flex-direction:column;align-items:center;gap:2px;">
+                <div style="width: 30px; height: 30px; border-radius: 9999px; background: #ffffff; border: 2.5px solid #dc2626; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);">
+                  <img src="/RADAR.png" alt="Radar" style="width: 17px; height: 17px; object-fit: contain;" onerror="this.style.display='none'; this.parentElement.innerHTML='<span style=&quot;color:#dc2626;font-size:13px;font-weight:900;&quot;>R</span>';" />
+                </div>
+                <div style="background:rgba(9,9,11,0.82);color:#fff;font:700 10px/1 system-ui,sans-serif;padding:2px 5px;border-radius:6px;white-space:nowrap;">${formatNavDistanceMeters(radar.distanceM)}</div>
               </div>`,
               className: 'custom-radar-icon',
-              iconSize: [38, 38],
-              iconAnchor: [19, 19]
+              iconSize: [60, 48],
+              iconAnchor: [30, 15]
             })}
           >
             <Popup className="custom-popup">
-              <div className="font-semibold text-center">Radar</div>
+              <div className="font-semibold text-center">Radar fijo</div>
+              <div className="text-xs text-gray-500 text-center">A {formatNavDistanceMeters(radar.distanceM)} en línea recta</div>
             </Popup>
           </Marker>
         ))}
@@ -4845,10 +5440,19 @@ export default function MapView({
             key={loc.uid}
             targetLat={loc.lat}
             targetLng={loc.lng}
-            icon={createAvatarIcon(loc.photoURL, loc.level, loc.isPremium === true)}
+            icon={createAvatarIcon(
+              loc.photoURL,
+              loc.level,
+              loc.isPremium === true,
+              resolvePeerFrameId(loc.profileFrameId ?? memberFrameByUid[loc.uid])
+            )}
+            offline={loc.offline === true}
           >
             <Popup className="custom-popup">
               <div className="font-semibold text-center">{loc.displayName}</div>
+              {loc.offline === true ? (
+                <div className="text-xs text-amber-600 text-center font-semibold">Sin conexión · reconectando</div>
+              ) : null}
               <div className="text-xs text-gray-500 text-center">
                 Nivel {loc.level || 1} • {loc.score || 0} pts
                 {loc.isPremium ? <div className="mt-1 text-amber-500 font-bold">Premium</div> : null}
@@ -4861,11 +5465,12 @@ export default function MapView({
         {mapVisualLocation && typeof mapVisualLocation.lat === 'number' && typeof mapVisualLocation.lng === 'number' && (
           <CurrentUserMarker
             position={[mapVisualLocation.lat, mapVisualLocation.lng]}
-            heading={currentSpeedKmh > 2 ? navigationHeading : 0}
+            heading={navigationHeading}
             displayNameToUse={displayNameToUse}
             userLevel={userLevel}
             score={score}
             isPremium={user?.isPremium === true}
+            subscribeSmooth={subscribeSmoothMap}
           />
         )}
 
@@ -4880,10 +5485,58 @@ export default function MapView({
           hasActiveRoute={!!effectiveRouteForNav}
           isLandscapeUi={isLandscapeUi}
           smoothFollow
+          smoothSubscribe={subscribeSmoothMap}
+          recenterSignal={recenterSignal}
+          followAnchorRef={followAnchorRef}
+        />
+        {/* Paradas sugeridas: marcadores discretos; verde si están en tu lista de paradas. */}
+        {ROUTE_STOPS_ENABLED && routeStops?.map((stop) => {
+          const chosen = activeChosenIds.includes(stop.id);
+          return (
+            <CircleMarker
+              key={stop.id}
+              center={[stop.lat, stop.lng]}
+              radius={6}
+              pathOptions={{
+                color: '#0d0c0b',
+                weight: 2,
+                fillColor: chosen ? '#6fd3a6' : '#ffa23d',
+                fillOpacity: 0.95,
+              }}
+            >
+              <Popup>
+                <div className="font-semibold text-center">{stop.name ?? STOP_KIND_LABEL[stop.kind]}</div>
+                <div className="text-xs text-gray-500 text-center">
+                  {STOP_KIND_LABEL[stop.kind]} · a {Math.round(stop.offRouteM)} m de la ruta
+                </div>
+              </Popup>
+            </CircleMarker>
+          );
+        })}
+        <MapFollowGuard
+          location={mapVisualLocation}
+          isFollowing={isFollowing}
+          autoRecenterEnabled={isRecording && !!effectiveRouteForNav}
+          followAnchorRef={followAnchorRef}
+          onUserMove={handleUserMapMove}
+          onAutoRecenter={recenterMapOnRider}
+          onOffCenterChange={setMapOffCenter}
         />
           </MapContainer>
         </div>
       </div>
+      {ROUTE_STOPS_ENABLED && showRouteStops && (
+        <RouteStopsPanel
+          candidates={candidates}
+          electorateSize={electorateSize}
+          voteMode={voteMode}
+          loading={routeStopsLoading && !candidates}
+          error={routeStopsError && !candidates}
+          onToggle={toggleGroupStopVote}
+          onRetry={loadRouteStops}
+          onClose={() => setShowRouteStops(false)}
+        />
+      )}
       {/* Ride Summary Modal */}
       <AnimatePresence>
         {showSummary && summaryData && (
@@ -5063,6 +5716,7 @@ export default function MapView({
                           pointsEarned: summaryData.score,
                           path: pathForHistory,
                           durationMs: summaryData.duration,
+                          participantCount: Math.min(100, 1 + ridePeerUidsRef.current.size),
                           ...(sk ? { rideSessionKey: sk } : {}),
                           ...(routeStr ? { routeGeoJSON: routeStr } : {}),
                           ...(foodExpenseEurosParsed != null &&

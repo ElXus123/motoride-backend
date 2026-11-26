@@ -21,6 +21,8 @@ import AdminPointsPanel from './AdminPointsPanel';
 import { formatRideCardSubtitle, formatRideCardTitle, rideHistoryPointsEarned } from '../lib/rideHistoryDisplay';
 import MedalShowcase from './MedalShowcase';
 import { MEDAL_DEFINITIONS, listUnlockedMedalIds } from '../lib/achievements';
+import { FRAME_CATALOG, getEquippedFrame, getUnlockedFrameIds, sanitizeProfileFrameId } from '../lib/frames';
+import { AvatarFrame } from './AvatarFrame';
 
 type Props = {
   onBack: () => void;
@@ -45,6 +47,11 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
   const [medalsCatalogOpen, setMedalsCatalogOpen] = useState(false);
 
   const isAdmin = user?.email?.toLowerCase() === 'juarp123@gmail.com';
+
+  // Marcos: stats para el desbloqueo (nivel, medallas, VIP, retos de temporada) y marco equipado.
+  const frameStats = { ...(userData || {}), isPremium: user?.isPremium === true || userData?.isPremium === true };
+  const equippedFrame = getEquippedFrame(frameStats, userData?.profileFrameId);
+  const unlockedFrameIds = new Set(getUnlockedFrameIds(frameStats));
 
   useEffect(() => {
     if (!user) return;
@@ -148,6 +155,19 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
     setLoading(false);
   };
 
+  /** Equipa un marco desbloqueado; se guarda al instante (no depende del botón Guardar). */
+  const equipFrame = async (frameId: string) => {
+    if (!user) return;
+    const safeId = sanitizeProfileFrameId(frameId, frameStats);
+    try {
+      await updateDoc(doc(db, 'users', user.uid), { profileFrameId: safeId });
+    } catch (error) {
+      console.error('Error al equipar marco:', error);
+      showMessage({ variant: 'error', title: 'Marco', message: 'No se pudo equipar el marco.' });
+      handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
+    }
+  };
+
   const deleteRide = (rideId: string) => setDeletingId(rideId);
 
   const confirmDeleteRide = async (rideId: string) => {
@@ -196,12 +216,12 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
   return (
     <div className="min-h-dvh bg-zinc-950 text-white pl-[max(1.5rem,env(safe-area-inset-left,0px))] pr-[max(1.5rem,env(safe-area-inset-right,0px))] pt-[max(1.5rem,env(safe-area-inset-top,0px))] pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]">
       <div className="max-w-md mx-auto pt-4 pb-8">
-        <div className="flex items-center justify-between gap-3 mb-8">
+        <div className="relative flex items-center justify-between gap-3 mb-8 pb-4 after:content-[''] after:absolute after:left-0 after:right-0 after:bottom-0 after:h-0.5 after:bg-[repeating-linear-gradient(90deg,rgb(245_138_31/0.55)_0_7px,transparent_7px_13px)]">
           <div className="flex items-center gap-4 min-w-0">
             <button onClick={onBack} className="p-2 bg-zinc-900 rounded-full hover:bg-zinc-800 transition-colors shrink-0">
               <ArrowLeft size={20} />
             </button>
-            <h1 className="text-2xl font-bold truncate">Mi Perfil</h1>
+            <h1 className="truncate text-4xl uppercase text-zinc-50">Mi perfil</h1>
           </div>
           {isAdmin && (
             <button
@@ -215,19 +235,21 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
           )}
         </div>
 
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-3xl flex flex-col items-center">
+        <div className="mr-surface mr-ticket flex flex-col items-center rounded-[var(--radius-sheet)] p-6 pb-8">
           <div className="relative mb-6 group">
-            <div
-              className={`w-32 h-32 rounded-full overflow-hidden border-4 bg-zinc-800 ${
-                user?.isPremium === true || userData?.isPremium === true ? 'border-amber-500' : 'border-orange-500'
-              }`}
-            >
-              {photoURL ? (
-                <img src={photoURL} alt="Avatar" className="w-full h-full object-cover" />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center text-zinc-500">Sin foto</div>
-              )}
-            </div>
+            <AvatarFrame frameId={equippedFrame.id} size={128}>
+              <div
+                className={`w-32 h-32 rounded-full overflow-hidden border-4 bg-zinc-800 ${
+                  user?.isPremium === true || userData?.isPremium === true ? 'border-amber-500' : 'border-orange-500'
+                }`}
+              >
+                {photoURL ? (
+                  <img src={photoURL} alt="Avatar" className="w-full h-full object-cover" />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-zinc-500">Sin foto</div>
+                )}
+              </div>
+            </AvatarFrame>
             <label className="absolute bottom-0 right-0 bg-orange-500 p-3 rounded-full cursor-pointer hover:bg-orange-600 transition-colors shadow-lg">
               <Camera size={20} className="text-white" />
               <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
@@ -237,6 +259,45 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
           {(user?.isPremium === true || userData?.isPremium === true) && (
             <div className="mb-4">
               <PremiumBadge />
+            </div>
+          )}
+
+          {userData && (
+            <div className="mb-6 w-full">
+              <div className="mb-2 flex items-baseline justify-between text-xs font-bold text-zinc-400">
+                <span className="uppercase tracking-wider text-orange-500">Marco de perfil</span>
+                <span className="text-zinc-500">
+                  {unlockedFrameIds.size} / {FRAME_CATALOG.length} desbloqueados
+                </span>
+              </div>
+              <div className="grid grid-cols-4 gap-2 sm:grid-cols-6" role="radiogroup" aria-label="Marco de perfil">
+                {FRAME_CATALOG.map((frame) => {
+                  const unlocked = unlockedFrameIds.has(frame.id);
+                  const selected = equippedFrame.id === frame.id;
+                  return (
+                    <button
+                      key={frame.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      aria-label={`${frame.name}${unlocked ? '' : ' (bloqueado)'}: ${frame.description}`}
+                      disabled={!unlocked}
+                      onClick={() => unlocked && equipFrame(frame.id)}
+                      title={unlocked ? frame.description : `Bloqueado: ${frame.description}`}
+                      className={`flex flex-col items-center gap-1 rounded-xl border p-2 text-[10px] transition-colors ${
+                        selected
+                          ? 'border-orange-500 bg-orange-500/10 text-orange-300'
+                          : 'border-zinc-800 bg-zinc-900 text-zinc-400 hover:border-zinc-700'
+                      } disabled:cursor-not-allowed disabled:opacity-40`}
+                    >
+                      <AvatarFrame frameId={unlocked ? frame.id : 'none'} size={28}>
+                        <span className="h-7 w-7 rounded-full bg-zinc-800" />
+                      </AvatarFrame>
+                      <span className="w-full truncate text-center">{frame.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
 
@@ -259,7 +320,7 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
                   </div>
                   <div className="h-3 bg-zinc-950 rounded-full overflow-hidden border border-zinc-800">
                     <div
-                      className="h-full bg-gradient-to-r from-orange-500 to-orange-400 transition-all duration-1000 ease-out"
+                      className="h-full bg-orange-500 transition-all duration-1000 ease-out"
                       style={{ width: `${Math.min((levelProgress / levelRequired) * 100, 100)}%` }}
                     />
                   </div>
@@ -269,11 +330,11 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
 
           <div className="grid grid-cols-2 gap-4 mb-6 w-full">
             <div className="bg-zinc-800 px-4 py-3 rounded-2xl text-center border border-zinc-700">
-              <p className="text-[10px] text-zinc-400 uppercase font-bold tracking-wider mb-1">Km Totales</p>
+              <p className="text-[11px] text-zinc-400 uppercase font-bold tracking-wider mb-1">Km Totales</p>
               <p className="font-black text-xl text-white">{(userData?.totalDistance || 0).toFixed(1)}</p>
             </div>
             <div className="bg-zinc-800 px-4 py-3 rounded-2xl text-center border border-zinc-700">
-              <p className="text-[10px] text-zinc-400 uppercase font-bold tracking-wider mb-1">Curvas Totales</p>
+              <p className="text-[11px] text-zinc-400 uppercase font-bold tracking-wider mb-1">Curvas Totales</p>
               <p className="font-black text-xl text-white">
                 {(userData?.totalLeftTurns || 0) + (userData?.totalRightTurns || 0)}
               </p>
@@ -305,7 +366,7 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
                         <Trophy size={14} className={ok ? 'text-emerald-400 shrink-0 mt-0.5' : 'text-zinc-600 shrink-0 mt-0.5'} />
                         <div className="min-w-0">
                           <p className="font-bold text-zinc-200">{m.title}</p>
-                          <p className="text-[10px] text-zinc-500 leading-snug">{m.subtitle}</p>
+                          <p className="text-[11px] text-zinc-500 leading-snug">{m.subtitle}</p>
                         </div>
                       </li>
                     );
@@ -335,7 +396,7 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
                 rows={2}
                 className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-orange-500 transition-colors resize-none placeholder:text-zinc-600"
               />
-              <p className="text-[10px] text-zinc-600 mt-1">{motorcycle.length}/120</p>
+              <p className="text-[11px] text-zinc-600 mt-1">{motorcycle.length}/120</p>
             </div>
 
             <button
@@ -349,7 +410,7 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
         </div>
 
         {/* Historial de rutas (desplegable) */}
-        <div className="mt-6 bg-zinc-900 border border-zinc-800 rounded-3xl overflow-hidden">
+        <div className="mr-surface mt-6 overflow-hidden rounded-[var(--radius-sheet)]">
           <button
             type="button"
             onClick={() => setHistoryOpen((o) => !o)}
@@ -387,7 +448,7 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
                         <p className="text-sm text-zinc-500">{formatRideCardSubtitle(ride.endTime)}</p>
                         <div className="mt-1 flex flex-wrap items-baseline gap-x-8 gap-y-1 pr-2">
                           <span className="text-sm">
-                            <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                            <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
                               Dist.{' '}
                             </span>
                             <span className="font-semibold text-white tabular-nums">
@@ -395,7 +456,7 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
                             </span>
                           </span>
                           <span className="text-sm">
-                            <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                            <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
                               Pts{' '}
                             </span>
                             <span className="font-bold text-orange-400 tabular-nums">
@@ -449,7 +510,7 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
           }}
         >
           <div
-            className="w-full max-w-md max-h-[min(90dvh,640px)] overflow-y-auto rounded-[2rem] border border-zinc-700 bg-zinc-900 p-6 shadow-2xl"
+            className="mr-sheet w-full max-w-md max-h-[min(90dvh,640px)] overflow-y-auto p-6"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-3 mb-4">
@@ -458,7 +519,7 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
                   <Trophy size={24} />
                 </div>
                 <div className="min-w-0">
-                  <h2 id="ride-detail-title" className="text-lg font-black text-white leading-tight truncate">
+                  <h2 id="ride-detail-title" className="truncate text-3xl uppercase leading-none text-zinc-50">
                     {String(detailRide.groupName || 'Ruta')}
                   </h2>
                   <p className="text-xs text-zinc-500 mt-0.5">
@@ -528,7 +589,7 @@ export default function Profile({ onBack, onRepeatRoute }: Props) {
 
             {typeof detailRide.foodExpenseEuros === 'number' && detailRide.foodExpenseEuros > 0 && (
               <div className="mt-4 rounded-2xl border border-amber-500/25 bg-amber-500/10 p-3 text-left">
-                <p className="text-[10px] font-black uppercase tracking-widest text-amber-400/90">Gastos (escote)</p>
+                <p className="text-[11px] font-black uppercase tracking-widest text-amber-400/90">Gastos (escote)</p>
                 <p className="text-sm text-amber-100 mt-1 tabular-nums">
                   Total {detailRide.foodExpenseEuros.toFixed(2)} €
                   {typeof detailRide.splitPerPersonEuros === 'number' && (

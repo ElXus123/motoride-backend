@@ -207,12 +207,12 @@ export default function InvitesMailboxModal({
             animate={{ y: 0, opacity: 1, scale: 1 }}
             exit={{ y: 12, opacity: 0, scale: 0.98 }}
             onClick={(e) => e.stopPropagation()}
-            className="bg-zinc-900 border border-zinc-800 w-full max-w-md max-h-[min(85dvh,640px)] rounded-3xl overflow-hidden shadow-2xl flex flex-col"
+            className="mr-sheet flex max-h-[min(85dvh,640px)] w-full max-w-md flex-col overflow-hidden"
           >
             <div className="p-4 border-b border-zinc-800 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2">
                 <Inbox className="text-orange-400" size={22} />
-                <h2 className="text-lg font-black text-white">Bandeja</h2>
+                <h2 className="text-3xl uppercase text-zinc-50">Bandeja</h2>
               </div>
               <button
                 type="button"
@@ -226,7 +226,7 @@ export default function InvitesMailboxModal({
             <div className="overflow-y-auto flex-1 p-4 space-y-4">
               {(unreadPlanChats.length > 0 || unreadDmChats.length > 0) && (
                 <div className="space-y-2">
-                  <p className="text-[10px] font-black uppercase tracking-wider text-orange-500">Mensajes sin leer</p>
+                  <p className="text-[11px] font-black uppercase tracking-wider text-orange-500">Mensajes sin leer</p>
                   {unreadPlanChats.map((row) => (
                     <button
                       key={`plan-${row.groupId}`}
@@ -238,7 +238,7 @@ export default function InvitesMailboxModal({
                       className="w-full text-left rounded-2xl border border-sky-500/40 bg-sky-500/10 p-3 hover:bg-sky-500/20"
                     >
                       <p className="text-xs font-black text-sky-300">Chat plan · {row.groupName}</p>
-                      <p className="text-[10px] text-zinc-500 font-mono mt-0.5">{row.groupId}</p>
+                      <p className="text-[11px] text-zinc-500 font-mono mt-0.5">{row.groupId}</p>
                       <p className="text-xs text-zinc-300 mt-1 line-clamp-2">{row.preview || 'Nuevo mensaje'}</p>
                     </button>
                   ))}
@@ -262,7 +262,7 @@ export default function InvitesMailboxModal({
                 </div>
               )}
               <div className="space-y-2">
-                <p className="text-[10px] font-black uppercase tracking-wider text-zinc-500">Invitaciones</p>
+                <p className="text-[11px] font-black uppercase tracking-wider text-zinc-500">Invitaciones</p>
                 {loading ? (
                   <div className="flex justify-center py-12 text-zinc-500">
                     <Loader2 className="animate-spin" size={28} />
@@ -280,11 +280,11 @@ export default function InvitesMailboxModal({
                     <div className="flex justify-between gap-2">
                       <div className="min-w-0">
                         <p className="font-bold text-white truncate">{inv.groupName || 'Ruta'}</p>
-                        <p className="text-[10px] text-zinc-500 font-mono">Código {inv.groupId}</p>
+                        <p className="text-[11px] text-zinc-500 font-mono">Código {inv.groupId}</p>
                         {inv.kind === 'scheduled_ride' && (
-                          <p className="text-[10px] font-bold text-sky-400 mt-1">Ruta programada</p>
+                          <p className="text-[11px] font-bold text-sky-400 mt-1">Ruta programada</p>
                         )}
-                        <p className="text-[10px] text-zinc-600 mt-1">
+                        <p className="text-[11px] text-zinc-600 mt-1">
                           {inv.sentAt
                             ? new Date(inv.sentAt).toLocaleString([], {
                                 dateStyle: 'short',

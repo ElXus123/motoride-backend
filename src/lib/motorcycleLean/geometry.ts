@@ -156,6 +156,23 @@ export function buildBikeBasisAtCalibration(
   return true;
 }
 
+/**
+ * Velocidad de cambio (rad/s) del ángulo que devuelve `leanDegFromGravityInBikeFrame`.
+ *
+ * Ese ángulo es una rotación alrededor del eje Y del marco moto, es decir del eje
+ * `R_alignᵀ·ê_y` en coordenadas del dispositivo (fila 1 de R). Como un vector fijo en el mundo
+ * cambia en el marco del móvil como ṁ = −ω × m, se cumple d(lean)/dt = −ω · eje.
+ * Así giroscopio y acelerómetro hablan siempre del mismo eje (antes se usaba un eje
+ * auxiliar arbitrario que, con el móvil en el manillar, era el de cabeceo).
+ * ω en °/s.
+ */
+export function leanRateRadFromGyro(wx: number, wy: number, wz: number, R_align: number[]): number {
+  const ax = R_align[3];
+  const ay = R_align[4];
+  const az = R_align[5];
+  return -(wx * ax + wy * ay + wz * az) * (Math.PI / 180);
+}
+
 /** Velocidad de cambio de inclinación (rad/s) ≈ ω · forward */
 export function rollRateFromGyro(
   wx: number,

@@ -1,17 +1,30 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import {defineConfig, loadEnv} from 'vite';
+import { defineConfig } from 'vite';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export default defineConfig(({mode}) => {
-  const env = loadEnv(mode, '.', '');
+/**
+ * Trozos de librerías para que el arranque (React + Firebase + UI) no cargue Leaflet, motion,
+ * three ni GSAP: esas librerías solo se descargan al entrar en el mapa, la novedad o el login animado.
+ */
+function manualChunks(id: string): string | undefined {
+  if (!id.includes('node_modules')) return undefined;
+  if (/node_modules\/(react|react-dom|scheduler)\//.test(id)) return 'vendor-react';
+  if (/node_modules\/(leaflet|react-leaflet|@react-leaflet|leaflet\.heat)\//.test(id)) return 'vendor-leaflet';
+  if (/node_modules\/(firebase|@firebase)\//.test(id)) return 'vendor-firebase';
+  if (/node_modules\/(motion|motion-dom|motion-utils|framer-motion)\//.test(id)) return 'vendor-motion';
+  if (/node_modules\/three\//.test(id)) return 'vendor-three';
+  if (/node_modules\/gsap\//.test(id)) return 'vendor-gsap';
+  return undefined;
+}
+
+export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss()],
     define: {
-      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
       global: 'window',
       'process.env': '{}',
     },
@@ -27,6 +40,10 @@ export default defineConfig(({mode}) => {
     },
     build: {
       outDir: 'dist',
+      chunkSizeWarningLimit: 800,
+      rollupOptions: {
+        output: { manualChunks },
+      },
     },
   };
 });

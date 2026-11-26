@@ -1,6 +1,15 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
-import { getFirestore, doc, getDocFromCache, getDocFromServer } from 'firebase/firestore';
+import {
+  getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  doc,
+  getDocFromCache,
+  getDocFromServer,
+  type Firestore,
+} from 'firebase/firestore';
 import { getFunctions } from 'firebase/functions';
 import firebaseConfig from '../firebase-applet-config.json';
 
@@ -10,8 +19,31 @@ export const app = initializeApp(firebaseConfig);
 export const motorideFunctions = getFunctions(app, 'europe-west1');
 
 export const auth = getAuth(app);
-// @ts-ignore - firestoreDatabaseId might be missing in some configs
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId || '(default)');
+
+/**
+ * Firestore con caché local persistente (IndexedDB) y cola compartida entre pestañas.
+ * Así, al recargar o reabrir la app sin señal, los documentos ya leídos (grupo/ruta activa,
+ * perfil) siguen disponibles. Lo que NO se guarda: escrituras pendientes de subir se envían
+ * al recuperar red; posiciones de compañeros y avisos en vivo van por Socket.IO, no por Firestore.
+ * Si el navegador no admite IndexedDB (modo privado antiguo), cae a caché en memoria.
+ */
+function createFirestore(): Firestore {
+  // @ts-ignore - firestoreDatabaseId might be missing in some configs
+  const databaseId: string = firebaseConfig.firestoreDatabaseId || '(default)';
+  try {
+    return initializeFirestore(
+      app,
+      { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) },
+      databaseId
+    );
+  } catch (err) {
+    // initializeFirestore lanza si ya se inicializó (HMR) o si no hay soporte: usar la instancia existente.
+    console.warn('Caché local de Firestore no disponible, se usa memoria:', err);
+    return getFirestore(app, databaseId);
+  }
+}
+
+export const db = createFirestore();
 
 // Test connection to Firestore (no bloqueante para no detener carga de app)
 let testConnectionDone = false;

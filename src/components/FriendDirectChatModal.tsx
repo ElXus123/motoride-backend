@@ -173,13 +173,13 @@ export default function FriendDirectChatModal({ open, onClose, peerUid, peerDisp
       aria-modal="true"
       aria-labelledby="dm-chat-title"
     >
-      <div className="flex h-[min(95dvh,600px)] w-full max-w-[calc(100%-1rem)] flex-col rounded-t-3xl border border-white/[0.08] bg-zinc-900 shadow-2xl sm:rounded-3xl sm:max-h-[85vh]">
+      <div className="flex h-[min(95dvh,600px)] w-full max-w-[calc(100%-1rem)] flex-col rounded-t-3xl border border-white/[0.08] bg-zinc-900 shadow-2xl sm:rounded-[1.5rem] sm:max-h-[85vh]">
         <div className="flex shrink-0 items-center justify-between border-b border-zinc-800 px-4 py-3">
           <div className="min-w-0 pr-2">
             <h2 id="dm-chat-title" className="truncate text-base font-black text-white">
               Chat con {peerDisplayName || 'Amigo'}
             </h2>
-            <p className="text-[10px] font-medium text-zinc-500">Solo vosotros dos · Mensajes privados</p>
+            <p className="text-[11px] font-medium text-zinc-500">Solo vosotros dos · Mensajes privados</p>
           </div>
           <button
             type="button"
@@ -208,7 +208,7 @@ export default function FriendDirectChatModal({ open, onClose, peerUid, peerDisp
                       mine ? 'bg-orange-500/25 text-orange-50' : 'bg-zinc-800 text-zinc-100'
                     }`}
                   >
-                    {!mine ? <p className="mb-0.5 text-[10px] font-bold text-orange-400/90">{m.displayName}</p> : null}
+                    {!mine ? <p className="mb-0.5 text-[11px] font-bold text-orange-400/90">{m.displayName}</p> : null}
                     <p className="whitespace-pre-wrap break-words leading-snug">{m.text}</p>
                     <p className="mt-1 text-[9px] text-zinc-500">
                       {m.createdAt > 0

@@ -14,6 +14,7 @@ import {
 } from '../lib/motorcycleLean/geometry';
 import { PocketInstabilityTracker } from '../lib/motorcycleLean/pocketDetection';
 import { evaluateCurvePlausibility, lateralAccelMagnitude } from '../lib/motorcycleLean/curveDetection';
+import { readStoredMotionPermission, requestMotionPermission } from '../lib/motionPermission';
 
 const RAD = Math.PI / 180;
 const EZ: [number, number, number] = [0, 0, 1];
@@ -55,7 +56,10 @@ export function useMotorcycleLean(
     preferExternalTelemetry: false,
     gravityMagnitude: 9.81,
   });
-  const [permissionGranted, setPermissionGranted] = useState<boolean | null>(null);
+  const [permissionGranted, setPermissionGranted] = useState<boolean | null>(() => {
+    const stored = readStoredMotionPermission();
+    return stored === 'granted' ? true : stored === 'denied' ? false : null;
+  });
   const [calibrated, setCalibrated] = useState(false);
   const calibratedRef = useRef(false);
   useEffect(() => {
@@ -81,34 +85,10 @@ export function useMotorcycleLean(
   const straightAccumSec = useRef(0);
   const lastTs = useRef<number | null>(null);
 
-  const requestPermission = useCallback(async () => {
-    const DM = DeviceMotionEvent as unknown as { requestPermission?: () => Promise<'granted' | 'denied'> };
-    const DO = DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<'granted' | 'denied'> };
-
-    if (typeof DM.requestPermission !== 'function' && typeof DO.requestPermission !== 'function') {
-      setPermissionGranted(true);
-      return;
-    }
-    try {
-      if (typeof DO.requestPermission === 'function') {
-        const s = await DO.requestPermission();
-        if (s !== 'granted') {
-          setPermissionGranted(false);
-          return;
-        }
-      }
-      if (typeof DM.requestPermission === 'function') {
-        try {
-          await DM.requestPermission();
-        } catch {
-          // opcional en WebKit
-        }
-      }
-      setPermissionGranted(true);
-    } catch (e) {
-      console.error('useMotorcycleLean permission', e);
-      setPermissionGranted(false);
-    }
+  /** Delega en el punto único de permiso (`lib/motionPermission`); no vuelve a pedirlo si ya se concedió. */
+  const requestPermission = useCallback(async (opts?: { manual?: boolean }) => {
+    const r = await requestMotionPermission({ manual: opts?.manual === true });
+    setPermissionGranted(r === 'granted' ? true : r === 'denied' ? false : null);
   }, []);
 
   const applyCalibration = useCallback(() => {

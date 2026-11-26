@@ -37,6 +37,7 @@ import {
   Users,
   RefreshCw,
   Award,
+  Flag,
 } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
@@ -47,8 +48,9 @@ import {
   type PremiumGpsPolicy,
 } from '../lib/premiumGpsConfig';
 import { addPointsWithLevelUps, pointsToAdvanceFromLevel } from '../lib/utils';
+import AdminWeeklyChallenges from './AdminWeeklyChallenges';
 
-type AdminSection = 'gps' | 'accounts' | 'userstats' | 'points' | 'events' | 'danger';
+type AdminSection = 'gps' | 'accounts' | 'userstats' | 'points' | 'events' | 'challenges' | 'danger';
 
 const SECTIONS: { id: AdminSection; label: string; icon: React.ReactNode }[] = [
   { id: 'gps', label: 'GPS Premium', icon: <Navigation size={16} /> },
@@ -56,6 +58,7 @@ const SECTIONS: { id: AdminSection; label: string; icon: React.ReactNode }[] = [
   { id: 'userstats', label: 'Nivel y puntos', icon: <Award size={16} /> },
   { id: 'points', label: 'Puntos', icon: <Coins size={16} /> },
   { id: 'events', label: 'Eventos puntos', icon: <CalendarRange size={16} /> },
+  { id: 'challenges', label: 'Retos semanales', icon: <Flag size={16} /> },
   { id: 'danger', label: 'Zona peligro', icon: <Skull size={16} /> },
 ];
 
@@ -798,6 +801,8 @@ export default function AdminPointsPanel({ onClose }: { onClose: () => void }) {
                 </div>
               </div>
             )}
+
+            {section === 'challenges' && <AdminWeeklyChallenges />}
 
             {section === 'danger' && (
               <div className="space-y-3 max-w-md">

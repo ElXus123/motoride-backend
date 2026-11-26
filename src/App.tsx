@@ -182,7 +182,7 @@ const AppContent = () => {
   
   return (
     <>
-      {showInstallNotice && (
+      {showInstallNotice && user && (
         <div className="fixed inset-0 z-[6000] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-md bg-zinc-950 border border-zinc-800 rounded-3xl p-5 sm:p-6 shadow-2xl text-white">
             <div className="flex items-start gap-3 mb-4">
@@ -206,6 +206,7 @@ const AppContent = () => {
                   <ol className="list-decimal list-inside space-y-1.5 text-zinc-300">
                     <li>Pulsa <strong className="text-zinc-200">Instalar app</strong> si aparece (abajo o en la barra).</li>
                     <li>Si no, abre el menú <strong className="text-zinc-200">⋮</strong> o <strong className="text-zinc-200">Instalar aplicación</strong>.</li>
+                    <li>Abre MotoRide desde su <strong className="text-zinc-200">icono</strong> en la pantalla de inicio: se verá sin barras del navegador.</li>
                   </ol>
                 </>
               ) : isChromeIOS ? (
@@ -246,11 +247,21 @@ const AppContent = () => {
             </div>
             )}
 
-            {(isSafari || isChromeIOS || isIOS) && (
+            {/* iPhone: Safari no da pantalla completa a webs; la vía es la app añadida a inicio (standalone).
+                Android/escritorio: requestFullscreen funciona directamente. */}
+            {(
               <div className="rounded-2xl border border-blue-500/30 bg-blue-500/10 p-3 mb-3 text-sm text-zinc-200">
-                <p className="font-semibold mb-2">En iPhone: mapa a pantalla llena</p>
+                <p className="font-semibold mb-2">{isIOS ? 'En iPhone: mapa a pantalla llena' : 'Mapa a pantalla completa'}</p>
                 <p className="text-zinc-300 mb-3">
-                  Lo más cómodo es abrir MotoRide desde el <strong className="text-zinc-200">icono que añadiste</strong> (no desde el navegador). Si aún no la has añadido, sigue los pasos de arriba (Safari o Chrome con Compartir → Ver más). Puedes probar este botón; si no hace nada, instálala primero.
+                  {isIOS ? (
+                    <>
+                      Safari de iPhone no permite pantalla completa desde una web. Abre MotoRide desde el <strong className="text-zinc-200">icono que añadiste</strong> a la pantalla de inicio (no desde el navegador): se abrirá sin barras y el mapa ocupará toda la pantalla. Si aún no la has añadido, sigue los pasos de arriba. Puedes probar este botón; si no hace nada, instálala primero.
+                    </>
+                  ) : (
+                    <>
+                      Con la app instalada, Android la abre sin barras del navegador. También puedes pulsar este botón para ver el mapa a pantalla completa (se sale igual pulsando de nuevo).
+                    </>
+                  )}
                 </p>
                 <button
                   onClick={requestFullscreen}

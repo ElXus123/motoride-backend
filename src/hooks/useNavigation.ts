@@ -1,405 +1,291 @@
-import { useState, useEffect, useRef } from 'react';
-import { getDistance } from '../lib/geoUtils';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { getBearing, getDistance } from '../lib/geoUtils';
 import { parseRouteData } from '../lib/gpx';
+import { getLineCoordinates } from '../lib/navigationPose';
 import { requestJson } from '../lib/network';
+import { formatNavDistanceMeters } from '../lib/navFormat';
+import {
+  buildRouteIndex,
+  detectRouteCurves,
+  evaluateRouteStatus,
+  fallbackAverageSpeedKmh,
+  nextCurveAhead,
+  type CurveAhead,
+  type RouteIndex,
+  type RouteManeuver,
+} from '../lib/routeProgress';
+
+/** Aviso de curva: se muestra desde esta distancia (m) antes de la entrada. */
+export const CURVE_WARN_DISTANCE_M = 250;
 
 export interface NavState {
+  /** Metros: por el trazado hasta la siguiente maniobra, o hasta la ruta si estás desviado. */
   distanceToNext: number | null;
   bearingToNext: number | null;
   isOnRoute: boolean;
   instruction: string;
-  /** Segunda línea: carteles de autovía, ref. de vía, etc. */
+  /** Segunda línea: detalle de la maniobra o qué hacer si te has desviado. */
   instructionDetail?: string | null;
   maneuverLocation?: { lat: number; lng: number } | null;
+  /** Solo cuando estás fuera del trazado: guía OSRM de vuelta hasta el punto más cercano del trazado. Nunca sustituye al trazado. */
   routeGeometry?: any;
   maneuverType?: string;
   maneuverModifier?: string;
-  /** OSRM: número de salida en rotonda (1-based), para el icono. */
+  /** Reservado: el trazado GPX no trae número de salida de rotonda. */
   roundaboutExit?: number | null;
+  /** Proyección de la posición sobre el trazado original (para la flecha y el marcador). */
+  snapped?: { lat: number; lng: number } | null;
+  segmentIndex?: number;
+  alongT?: number;
+  /** Metros desde el inicio del trazado. */
+  alongM?: number | null;
+  /** Metros que faltan para el final del trazado. */
+  remainingM?: number | null;
+  /** Próxima curva revirada del trazado (solo en ruta): entrada a menos de CURVE_WARN_DISTANCE_M. */
+  curveAhead?: CurveAhead | null;
+  /** Distancia desde la posición real hasta el trazado. */
+  offRouteM?: number | null;
+  /** Velocidad media usada para el tiempo restante (km/h): la del viaje si hay datos, si no una de referencia. */
+  avgSpeedKmh?: number | null;
+  /** true si la media sale de este viaje (ya hay >= 3 min y >= 2 km); false si es la de referencia. */
+  avgSpeedObserved?: boolean;
+  /** Tiempo restante estimado (s) por el trazado a la velocidad media. */
+  remainingTimeS?: number | null;
+  /** Hora estimada de llegada (epoch ms). */
+  etaMs?: number | null;
 }
 
-/** Normaliza texto tipo cartel OSRM "A-1; Madrid" → más legible */
-function formatDestinations(raw: string): string {
-  if (!raw?.trim()) return '';
-  return raw
-    .split(/[;]/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .join(' · ');
-}
+/** Datos mínimos del viaje para usar la velocidad media real: tiempo y distancia recorridos. */
+const TRIP_MIN_S = 180;
+const TRIP_MIN_M = 2000;
 
-function roadLabel(name?: string, ref?: string): string {
-  const r = ref?.trim();
-  const n = name?.trim();
-  if (r && n) return `${r} (${n})`;
-  return r || n || '';
-}
+const IDLE: NavState = {
+  distanceToNext: null,
+  bearingToNext: null,
+  isOnRoute: false,
+  instruction: 'Esperando ruta...',
+  instructionDetail: null,
+  maneuverLocation: null,
+  routeGeometry: null,
+  roundaboutExit: null,
+  snapped: null,
+};
 
-/** OSRM usa salida 1-based en rotondas (sentido horario desde la entrada). */
-function spanishRoundaboutExit(exit: number): string {
-  const words: Record<number, string> = {
-    1: 'la 1.ª salida',
-    2: 'la 2.ª salida',
-    3: 'la 3.ª salida',
-    4: 'la 4.ª salida',
-    5: 'la 5.ª salida',
-    6: 'la 6.ª salida',
-    7: 'la 7.ª salida',
-    8: 'la 8.ª salida',
-    9: 'la 9.ª salida',
-    10: 'la 10.ª salida',
-  };
-  if (words[exit]) return words[exit];
-  return `la salida ${exit}`;
-}
-
-/** Número de salida en rotonda (OSRM, 1-based en `maneuver.exit`). */
-function getRoundaboutExitNumber(maneuver: Record<string, unknown>): number | null {
-  const raw = maneuver?.exit;
-  if (typeof raw === 'number' && raw > 0 && Number.isFinite(raw)) return Math.round(raw);
-  if (typeof raw === 'string') {
-    const n = parseInt(String(raw).replace(/\D/g, ''), 10);
-    if (n > 0) return n;
-  }
-  return null;
-}
-
-/**
- * El primer paso útil: sin "depart" ni "arrive" final (punto ficticio a 500 m).
- */
-function pickNextManeuverStep(steps: any[]): any | null {
-  if (!steps?.length) return null;
-  const meaningful = steps.filter((s, i) => {
-    const t = s.maneuver?.type;
-    if (t === 'depart') return false;
-    if (t === 'arrive' && i === steps.length - 1) return false;
-    return true;
-  });
-  if (meaningful.length) return meaningful[0];
-  const noDepart = steps.filter((s) => s.maneuver?.type !== 'depart');
-  if (noDepart.length >= 2 && noDepart[noDepart.length - 1].maneuver?.type === 'arrive') {
-    return noDepart[noDepart.length - 2];
-  }
-  return noDepart[0] || steps[0];
-}
-
-function buildStepInstruction(step: any, isOnRouteNow: boolean): { instruction: string; detail: string | null } {
-  const maneuver = step.maneuver || {};
-  const type = maneuver.type as string | undefined;
-  const mod = ((maneuver.modifier || '') as string).toLowerCase();
-  const name = step.name as string | undefined;
-  const ref = step.ref as string | undefined;
-  const destinations = formatDestinations((step.destinations as string) || '');
-
-  let instruction = 'Sigue la ruta';
-  let detail: string | null = null;
-
-  const appendRoad = (base: string) => {
-    const lbl = roadLabel(name, ref);
-    if (lbl) return `${base} por ${lbl}`;
-    return base;
-  };
-
-  switch (type) {
-    case 'roundabout':
-    case 'rotary':
-    case 'roundabout turn': {
-      const exit = getRoundaboutExitNumber(maneuver as Record<string, unknown>);
-      if (exit != null && exit > 0) {
-        instruction = `Rotonda: toma ${spanishRoundaboutExit(exit)}`;
-        detail =
-          'Cuenta las salidas en el sentido de las agujas del reloj desde donde entras. Si hay duda, sigue la línea azul en el mapa.';
-      } else {
-        instruction = 'Entra en la rotonda y sigue el trazado';
-        detail =
-          'En cuanto el mapa muestre el número de salida, úsalo; si no, sigue la curva de la ruta.';
-      }
-      const road = roadLabel(name, ref);
-      if (road) detail = `${road}. ${detail}`;
-      break;
-    }
-
-    case 'exit roundabout':
-    case 'exit rotary':
-      if (mod.includes('right')) instruction = 'Sal de la rotonda por la derecha';
-      else if (mod.includes('left')) instruction = 'Sal de la rotonda por la izquierda';
-      else if (mod.includes('straight') || mod.includes('slight')) instruction = 'Sal de la rotonda (sigue de frente)';
-      else instruction = 'Sal de la rotonda';
-      if (name || ref) detail = roadLabel(name, ref) || null;
-      break;
-
-    case 'off ramp':
-      if (destinations) {
-        instruction = `Toma la salida hacia ${destinations}`;
-      } else if (mod.includes('left')) {
-        instruction = 'Toma la salida a tu izquierda';
-      } else if (mod.includes('right')) {
-        instruction = 'Toma la salida a tu derecha';
-      } else {
-        instruction = 'Toma la salida de la autovía';
-      }
-      if (ref || (name && !destinations)) detail = roadLabel(name, ref) || null;
-      break;
-
-    case 'on ramp':
-    case 'ramp':
-      if (destinations) {
-        instruction = `Incorpórate hacia ${destinations}`;
-      } else {
-        instruction = 'Por el carril de aceleración, incorpórate a la vía principal';
-      }
-      if (name || ref) detail = roadLabel(name, ref) || null;
-      break;
-
-    case 'merge':
-      if (mod.includes('left')) instruction = 'Incorpórate por la izquierda';
-      else if (mod.includes('right') || mod.includes('slight right')) instruction = 'Incorpórate por la derecha';
-      else instruction = 'Incorpórate en el tráfico';
-      if (name || ref) detail = roadLabel(name, ref) || null;
-      break;
-
-    case 'fork':
-      if (mod.includes('left')) instruction = 'En la bifurcación, mantente a la izquierda';
-      else if (mod.includes('right')) instruction = 'En la bifurcación, mantente a la derecha';
-      else instruction = 'En la bifurcación, sigue la vía principal';
-      if (destinations) detail = destinations;
-      else if (name || ref) detail = roadLabel(name, ref) || null;
-      break;
-
-    case 'end of road':
-      if (mod.includes('right')) instruction = 'Al final de la vía, gira a la derecha';
-      else if (mod.includes('left')) instruction = 'Al final de la vía, gira a la izquierda';
-      else instruction = 'Al final de la vía, continúa';
-      if (name || ref) detail = roadLabel(name, ref) || null;
-      break;
-
-    case 'turn': {
-      if (mod.includes('uturn') || mod === 'u-turn') instruction = 'Gira en sentido contrario (giro de 180°)';
-      else if (mod.includes('sharp right')) instruction = 'Gira fuerte a la derecha';
-      else if (mod.includes('sharp left')) instruction = 'Gira fuerte a la izquierda';
-      else if (mod.includes('slight right')) instruction = 'Gira ligeramente a la derecha';
-      else if (mod.includes('slight left')) instruction = 'Gira ligeramente a la izquierda';
-      else if (mod.includes('right')) instruction = 'Gira a la derecha';
-      else if (mod.includes('left')) instruction = 'Gira a la izquierda';
-      else if (mod.includes('straight')) instruction = 'Sigue recto';
-      else instruction = 'Gira según la vía';
-      instruction = appendRoad(instruction);
-      break;
-    }
-
-    case 'continue':
-      instruction = appendRoad('Sigue recto');
-      break;
-
-    case 'new name':
-      if (ref || name) instruction = `Continúa por ${roadLabel(name, ref)}`;
-      else instruction = 'Continúa por la misma vía';
-      break;
-
-    case 'notification':
-      instruction = (maneuver as any).instruction || 'Atención al trazado';
-      break;
-
-    case 'arrive':
-      instruction = isOnRouteNow ? 'Continúa hacia el destino' : 'Incorpórate a la ruta';
-      break;
-
+function turnLabel(modifier: string): string {
+  switch (modifier) {
+    case 'uturn':
+      return 'Da la vuelta';
+    case 'sharp left':
+      return 'Gira fuerte a la izquierda';
+    case 'sharp right':
+      return 'Gira fuerte a la derecha';
+    case 'slight left':
+      return 'Gira ligeramente a la izquierda';
+    case 'slight right':
+      return 'Gira ligeramente a la derecha';
+    case 'left':
+      return 'Gira a la izquierda';
+    case 'right':
+      return 'Gira a la derecha';
     default:
-      if (type === 'depart') {
-        instruction = appendRoad('Inicia el recorrido');
-      } else if (destinations) {
-        instruction = `Hacia ${destinations}`;
-        detail = roadLabel(name, ref) || null;
-      } else {
-        instruction = appendRoad('Sigue la ruta');
-      }
+      return 'Sigue el trazado';
   }
-
-  return { instruction, detail };
 }
+
+function maneuverLabel(m: RouteManeuver): string {
+  return m.kind === 'roundabout' ? 'Rotonda' : turnLabel(m.modifier);
+}
+
+const CARDINALS = ['norte', 'noreste', 'este', 'sureste', 'sur', 'suroeste', 'oeste', 'noroeste'];
+function cardinal(deg: number): string {
+  return CARDINALS[Math.round((((deg % 360) + 360) % 360) / 45) % 8];
+}
+
+/** Fija el rumbo OSRM de vuelta al trazado; se pide poco, con límite de frecuencia. */
+const RETURN_FETCH_COOLDOWN_MS = 8000;
+const RETURN_FETCH_MIN_MOVE_M = 25;
 
 export const useNavigation = (currentLocation: { lat: number; lng: number } | null, routeGeoJSON: any) => {
-  const [navState, setNavState] = useState<NavState>({
-    distanceToNext: null,
-    bearingToNext: null,
-    isOnRoute: false,
-    instruction: 'Esperando ruta...',
-    instructionDetail: null,
-    maneuverLocation: null,
-    routeGeometry: null,
-    roundaboutExit: null,
-  });
+  const [navState, setNavState] = useState<NavState>(IDLE);
 
-  const lastFetchLoc = useRef<{ lat: number; lng: number } | null>(null);
-  const currentTarget = useRef<{ lat: number; lng: number } | null>(null);
-  const lastFetchAtRef = useRef(0);
-  const activeRequestRef = useRef<AbortController | null>(null);
+  /** Índice del trazado original: distancias acumuladas y maniobras, sin recalcular nada. */
+  const index: RouteIndex | null = useMemo(() => {
+    if (!routeGeoJSON) return null;
+    const parsed = parseRouteData(routeGeoJSON);
+    if (!parsed) return null;
+    return buildRouteIndex(getLineCoordinates(parsed));
+  }, [routeGeoJSON]);
+
+  /** Curvas revirados del trazado (radio <= CURVE_ALERT_MAX_RADIUS_M), calculadas una vez por ruta. */
+  const curves = useMemo(() => (index ? detectRouteCurves(index) : []), [index]);
+
+  const prevRef = useRef<{ onRoute: boolean; alongM: number | null }>({ onRoute: false, alongM: null });
+  const returnGeomRef = useRef<any>(null);
+  const returnFetchRef = useRef({ at: 0, lat: Number.NaN, lng: Number.NaN });
+  const returnCtrlRef = useRef<AbortController | null>(null);
+  /** Inicio del viaje sobre esta ruta: instante y distancia por el trazado (para la velocidad media real). */
+  const tripRef = useRef<{ t0: number; m0: number } | null>(null);
+
+  useEffect(() => {
+    prevRef.current = { onRoute: false, alongM: null };
+    returnGeomRef.current = null;
+    tripRef.current = null;
+  }, [index]);
 
   useEffect(() => {
     return () => {
-      activeRequestRef.current?.abort();
+      returnCtrlRef.current?.abort();
     };
   }, []);
 
   useEffect(() => {
     if (!routeGeoJSON) {
-      setNavState((prev) => ({
-        ...prev,
-        instruction: 'Sin ruta cargada',
-        instructionDetail: null,
-        routeGeometry: null,
-        roundaboutExit: null,
-      }));
+      setNavState({ ...IDLE, instruction: 'Sin ruta cargada' });
+      return;
+    }
+    if (!index) {
+      setNavState({ ...IDLE, instruction: 'Ruta no válida' });
       return;
     }
     if (!currentLocation) {
-      setNavState((prev) => ({
-        ...prev,
-        instruction: 'Buscando GPS...',
-        instructionDetail: null,
-        routeGeometry: null,
-        roundaboutExit: null,
-      }));
+      setNavState({ ...IDLE, instruction: 'Buscando GPS...' });
       return;
     }
 
-    try {
-      let coords: number[][] = [];
-      const parsedGeoJSON = parseRouteData(routeGeoJSON);
+    const st = evaluateRouteStatus(index, currentLocation.lat, currentLocation.lng, prevRef.current);
+    prevRef.current = { onRoute: st.onRoute, alongM: st.alongM };
+    const { proj } = st;
+    const snapped = { lat: proj.lat, lng: proj.lng };
 
-      if (!parsedGeoJSON) return;
+    // Tiempo restante y hora de llegada. Velocidad media: la del viaje (incluye paradas y semáforos) cuando hay
+    // >= 3 min y >= 2 km recorridos por el trazado; antes, la de referencia por densidad de curvas (ver routeProgress.ts).
+    const nowMs = Date.now();
+    if (st.onRoute && !tripRef.current) tripRef.current = { t0: nowMs, m0: st.alongM };
+    const trip = tripRef.current;
+    const tripS = trip ? (nowMs - trip.t0) / 1000 : 0;
+    const tripM = trip ? st.alongM - trip.m0 : 0;
+    const tripObserved = tripS >= TRIP_MIN_S && tripM >= TRIP_MIN_M;
+    const avgSpeedKmh = tripObserved
+      ? (tripM / tripS) * 3.6
+      : fallbackAverageSpeedKmh(index.totalM, curves.length);
+    const remainingTimeS = st.remainingM / (avgSpeedKmh / 3.6);
 
-      if (parsedGeoJSON.features && parsedGeoJSON.features.length > 0) {
-        const feature = parsedGeoJSON.features.find((f: any) => f.geometry.type === 'LineString');
-        if (feature) coords = feature.geometry.coordinates;
-      } else if (parsedGeoJSON.type === 'LineString') {
-        coords = parsedGeoJSON.coordinates;
-      }
+    const common = {
+      isOnRoute: st.onRoute,
+      snapped,
+      segmentIndex: proj.segmentIndex,
+      alongT: proj.alongT,
+      alongM: st.alongM,
+      remainingM: Math.round(st.remainingM),
+      offRouteM: proj.offRouteM,
+      roundaboutExit: null as number | null,
+      curveAhead: st.onRoute ? nextCurveAhead(curves, st.alongM, CURVE_WARN_DISTANCE_M) : null,
+      avgSpeedKmh: Math.round(avgSpeedKmh),
+      avgSpeedObserved: tripObserved,
+      remainingTimeS: Math.round(remainingTimeS),
+      etaMs: nowMs + remainingTimeS * 1000,
+    };
 
-      if (coords.length === 0) return;
-
-      let minDistance = Infinity;
-      let closestIndex = 0;
-
-      for (let i = 0; i < coords.length; i++) {
-        const dist = getDistance(currentLocation.lat, currentLocation.lng, coords[i][1], coords[i][0]);
-        if (dist < minDistance) {
-          minDistance = dist;
-          closestIndex = i;
-        }
-      }
-
-      const isOnRoute = minDistance < 50;
-
-      let targetPoint: { lat: number; lng: number };
-      if (!isOnRoute) {
-        targetPoint = { lat: coords[closestIndex][1], lng: coords[closestIndex][0] };
-      } else {
-        let targetIndex = closestIndex;
-        let distAhead = 0;
-        // Más horizonte que 500 m para anticipar salidas de autovía y rotondas enlazadas
-        while (targetIndex < coords.length - 1 && distAhead < 900) {
-          targetIndex++;
-          distAhead += getDistance(
-            coords[targetIndex - 1][1],
-            coords[targetIndex - 1][0],
-            coords[targetIndex][1],
-            coords[targetIndex][0]
-          );
-        }
-        targetPoint = { lat: coords[targetIndex][1], lng: coords[targetIndex][0] };
-      }
-
+    if (!st.onRoute) {
+      const bearing = getBearing(currentLocation.lat, currentLocation.lng, proj.lat, proj.lng);
+      const offM = Math.round(proj.offRouteM);
       const now = Date.now();
-      const shouldFetch =
-        !lastFetchLoc.current ||
-        getDistance(currentLocation.lat, currentLocation.lng, lastFetchLoc.current.lat, lastFetchLoc.current.lng) > 40 ||
-        !currentTarget.current ||
-        getDistance(targetPoint.lat, targetPoint.lng, currentTarget.current.lat, currentTarget.current.lng) > 100;
-      const fetchCooldownPassed = now - lastFetchAtRef.current > 3500;
-
-      if (shouldFetch && fetchCooldownPassed) {
-        lastFetchLoc.current = currentLocation;
-        currentTarget.current = targetPoint;
-        lastFetchAtRef.current = now;
-
-        if (activeRequestRef.current) {
-          activeRequestRef.current.abort();
-        }
+      const rf = returnFetchRef.current;
+      const movedM = Number.isFinite(rf.lat)
+        ? getDistance(currentLocation.lat, currentLocation.lng, rf.lat, rf.lng)
+        : Number.POSITIVE_INFINITY;
+      if (now - rf.at > RETURN_FETCH_COOLDOWN_MS && movedM > RETURN_FETCH_MIN_MOVE_M) {
+        rf.at = now;
+        rf.lat = currentLocation.lat;
+        rf.lng = currentLocation.lng;
+        returnCtrlRef.current?.abort();
         const controller = new AbortController();
-        activeRequestRef.current = controller;
-
+        returnCtrlRef.current = controller;
         requestJson<any>(
-          `https://router.project-osrm.org/route/v1/driving/${currentLocation.lng},${currentLocation.lat};${targetPoint.lng},${targetPoint.lat}?steps=true&overview=full&geometries=geojson`,
-          { signal: controller.signal, timeoutMs: 9000, retries: 1, backoffMs: 400 }
+          `https://router.project-osrm.org/route/v1/driving/${currentLocation.lng},${currentLocation.lat};${proj.lng},${proj.lat}?overview=full&geometries=geojson`,
+          { signal: controller.signal, timeoutMs: 9000, retries: 0 }
         )
           .then((data) => {
-            if (data.code === 'Ok' && data.routes.length > 0) {
-              const route = data.routes[0];
-              const steps = route.legs[0].steps;
-              const geometry = route.geometry;
-
-              const nextStep = pickNextManeuverStep(steps);
-              if (!nextStep?.maneuver) return;
-
-              const maneuver = nextStep.maneuver;
-              const { instruction, detail } = buildStepInstruction(nextStep, isOnRoute);
-
-              const maneuverLoc = { lat: maneuver.location[1], lng: maneuver.location[0] };
-              const rbExit = getRoundaboutExitNumber(maneuver as Record<string, unknown>);
-
-              setNavState({
-                distanceToNext: Math.round(getDistance(currentLocation.lat, currentLocation.lng, maneuverLoc.lat, maneuverLoc.lng)),
-                bearingToNext: maneuver.bearing_after,
-                isOnRoute,
-                instruction,
-                instructionDetail: detail,
-                maneuverLocation: maneuverLoc,
-                routeGeometry: geometry,
-                maneuverType: maneuver.type,
-                maneuverModifier: maneuver.modifier || '',
-                roundaboutExit:
-                  maneuver.type === 'roundabout' ||
-                  maneuver.type === 'rotary' ||
-                  maneuver.type === 'roundabout turn'
-                    ? rbExit
-                    : null,
-              });
-            }
+            const geom = data?.code === 'Ok' ? data.routes?.[0]?.geometry : null;
+            if (!geom) return;
+            returnGeomRef.current = geom;
+            setNavState((prev) => (prev.isOnRoute ? prev : { ...prev, routeGeometry: geom }));
           })
           .catch((err) => {
-            if (err?.name === 'AbortError') return;
-            console.error('OSRM error', err);
-            setNavState((prev) => ({
-              ...prev,
-              distanceToNext: Math.round(minDistance),
-              isOnRoute,
-              instruction: isOnRoute ? 'Sigue la ruta' : 'Dirígete a la ruta',
-              instructionDetail: null,
-              routeGeometry: null,
-              maneuverType: undefined,
-              maneuverModifier: undefined,
-              roundaboutExit: null,
-            }));
+            if (err?.name !== 'AbortError') console.warn('OSRM return path unavailable', err);
           });
-      } else {
-        setNavState((prev) => {
-          if (prev.maneuverLocation) {
-            return {
-              ...prev,
-              distanceToNext: Math.round(
-                getDistance(currentLocation.lat, currentLocation.lng, prev.maneuverLocation.lat, prev.maneuverLocation.lng)
-              ),
-              isOnRoute,
-            };
-          }
-          return { ...prev, isOnRoute };
-        });
       }
-    } catch (e) {
-      console.error('Navigation error', e);
+      setNavState({
+        ...common,
+        distanceToNext: offM,
+        bearingToNext: bearing,
+        instruction: 'Te has salido del trazado',
+        instructionDetail: `Vuelve al trazado azul, hacia el ${cardinal(bearing)}. Tu ruta no ha cambiado.`,
+        maneuverLocation: snapped,
+        routeGeometry: returnGeomRef.current,
+        maneuverType: undefined,
+        maneuverModifier: undefined,
+      });
+      return;
     }
-  }, [currentLocation, routeGeoJSON]);
+
+    // En ruta: se cancela cualquier guía de vuelta pendiente.
+    returnCtrlRef.current?.abort();
+    returnGeomRef.current = null;
+
+    const { next, afterNext } = st;
+    if (!next) {
+      setNavState({
+        ...common,
+        distanceToNext: Math.round(st.remainingM),
+        bearingToNext: null,
+        instruction: 'Llegada al final del trazado',
+        instructionDetail: st.remainingM > 20 ? 'Sigue el trazado azul hasta el final.' : null,
+        maneuverLocation: null,
+        routeGeometry: null,
+        maneuverType: undefined,
+        maneuverModifier: undefined,
+      });
+      return;
+    }
+
+    const distanceToNext = Math.round(st.nextDistM ?? 0);
+    const afterGap = afterNext
+      ? afterNext.alongM - (next.kind === 'roundabout' ? next.exitAlongM ?? next.alongM : next.alongM)
+      : null;
+    const luego =
+      afterNext && afterGap != null
+        ? `Luego: ${maneuverLabel(afterNext)} en ${formatNavDistanceMeters(Math.max(0, afterGap))}.`
+        : null;
+
+    let instruction: string;
+    let detail: string | null;
+    if (next.kind === 'roundabout') {
+      if (st.inRoundabout) {
+        instruction = 'Estás en la rotonda';
+        detail = 'Sal por la salida que marca el trazado azul.';
+      } else {
+        instruction = 'Entra en la rotonda';
+        detail = 'Sal por la salida que marca el trazado azul.';
+      }
+    } else {
+      instruction = turnLabel(next.modifier);
+      detail = null;
+    }
+    if (luego) detail = detail ? `${detail} ${luego}` : luego;
+
+    setNavState({
+      ...common,
+      distanceToNext,
+      bearingToNext: next.bearingAfter,
+      instruction,
+      instructionDetail: detail,
+      maneuverLocation: { lat: next.lat, lng: next.lng },
+      routeGeometry: null,
+      maneuverType: next.kind === 'roundabout' ? 'roundabout' : 'turn',
+      maneuverModifier: next.modifier,
+    });
+  }, [currentLocation, index, routeGeoJSON, curves]);
 
   return navState;
 };

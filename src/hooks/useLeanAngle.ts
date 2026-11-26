@@ -8,7 +8,7 @@ import {
 import {
   buildBikeBasisAtCalibration,
   leanDegFromGravityInBikeFrame,
-  rollRateFromGyro,
+  leanRateRadFromGyro,
   rotationFromTo,
 } from '../lib/motorcycleLean/geometry';
 import {
@@ -20,6 +20,13 @@ import {
 import { PocketInstabilityTracker } from '../lib/motorcycleLean/pocketDetection';
 import { evaluateCurvePlausibility, lateralAccelMagnitude } from '../lib/motorcycleLean/curveDetection';
 import {
+  clearStoredMotionPermission,
+  motionPermissionApiExists,
+  readStoredMotionPermission,
+  requestMotionPermission,
+} from '../lib/motionPermission';
+import {
+  AccelSignDetector,
   getRemappedRotationRateDeg,
   getScreenOrientationAngleDeg,
   orientationBucket,
@@ -58,7 +65,13 @@ export const useLeanAngle = (
   const [leanAngle, setLeanAngle] = useState(0);
   const [maxLeanLeft, setMaxLeanLeft] = useState(0);
   const [maxLeanRight, setMaxLeanRight] = useState(0);
-  const [permissionGranted, setPermissionGranted] = useState<boolean | null>(null);
+  /** true/false según la decisión recordada (localStorage); null = nunca preguntado o pendiente de gesto. */
+  const [permissionGranted, setPermissionGranted] = useState<boolean | null>(() => {
+    const stored = readStoredMotionPermission();
+    return stored === 'granted' ? true : stored === 'denied' ? false : null;
+  });
+  /** Se marca en cuanto llega un evento de sensor; si no llega nunca, el permiso guardado está caducado. */
+  const sensorSeenRef = useRef(false);
   const [offsetHandlebar, setOffsetHandlebar] = useState(0);
   const [offsetPocket, setOffsetPocket] = useState(0);
 
@@ -87,48 +100,33 @@ export const useLeanAngle = (
   const straightAccumSecRef = useRef(0);
   /** Último bucket de orientación (0/90/180/270): al cambiar, el marco IMU respecto a la app cambia → recalibrar. */
   const lastOrientationBucketRef = useRef<0 | 90 | 180 | 270>(0);
+  /** Normaliza el signo del acelerómetro (iOS lo da invertido respecto a la norma W3C). */
+  const accelSign = useRef(new AccelSignDetector());
 
   useEffect(() => {
     speedRef.current = speedMps;
   }, [speedMps]);
 
-  const requestPermission = useCallback(async () => {
-    const DO = DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<'granted' | 'denied'> };
-    const DM = DeviceMotionEvent as unknown as { requestPermission?: () => Promise<'granted' | 'denied'> };
-
-    if (typeof DO.requestPermission !== 'function' && typeof DM.requestPermission !== 'function') {
-      setPermissionGranted(true);
-      return;
-    }
-
-    try {
-      if (typeof DO.requestPermission === 'function') {
-        const state = await DO.requestPermission();
-        if (state !== 'granted') {
-          setPermissionGranted(false);
-          return;
-        }
-        if (typeof DM.requestPermission === 'function') {
-          try {
-            await DM.requestPermission();
-          } catch {
-            /* WebKit */
-          }
-        }
-        setPermissionGranted(true);
-        return;
-      }
-      if (typeof DM.requestPermission === 'function') {
-        const ms = await DM.requestPermission();
-        setPermissionGranted(ms === 'granted');
-        return;
-      }
-      setPermissionGranted(true);
-    } catch (error) {
-      console.error('Error requesting device motion/orientation permission:', error);
-      setPermissionGranted(false);
-    }
+  /**
+   * Delega en el punto único `requestMotionPermission`. Sin `manual`, un 'denied' guardado no
+   * vuelve a pedirse (no insistir en cada ruta). `manual: true` solo desde el botón de ajustes.
+   */
+  const requestPermission = useCallback(async (opts?: { manual?: boolean }) => {
+    const r = await requestMotionPermission({ manual: opts?.manual === true });
+    setPermissionGranted(r === 'granted' ? true : r === 'denied' ? false : null);
   }, []);
+
+  // Permiso guardado como concedido pero sin eventos de sensor (iOS lo puede revocar tras recargar):
+  // se borra la decisión y se vuelve a pedir con un toque del usuario (banner en el mapa).
+  useEffect(() => {
+    if (permissionGranted !== true || !motionPermissionApiExists()) return;
+    const id = window.setTimeout(() => {
+      if (sensorSeenRef.current) return;
+      clearStoredMotionPermission();
+      setPermissionGranted(null);
+    }, 6000);
+    return () => window.clearTimeout(id);
+  }, [permissionGranted]);
 
   useEffect(() => {
     try {
@@ -210,10 +208,13 @@ export const useLeanAngle = (
     const assumedHz = 30;
     const dtDefault = 1 / assumedHz;
 
-    const updateMotionStationary = (event: DeviceMotionEvent, screenDeg: number) => {
-      const rr = event.rotationRate;
-      const accLin = event.acceleration;
-      const accg = event.accelerationIncludingGravity;
+    type Vec = { x: number | null; y: number | null; z: number | null } | null;
+    const updateMotionStationary = (
+      rr: DeviceMotionEvent['rotationRate'],
+      accLin: Vec,
+      accg: Vec,
+      screenDeg: number
+    ) => {
 
       const wRemapStationary = getRemappedRotationRateDeg(
         rr as { x?: number; y?: number; z?: number; alpha?: number; beta?: number; gamma?: number } | null,
@@ -265,16 +266,31 @@ export const useLeanAngle = (
       motionStationaryRef.current = motionStationaryScoreRef.current >= 14;
     };
 
+    const onOrientation = (ev: DeviceOrientationEvent) => {
+      sensorSeenRef.current = true;
+      accelSign.current.onOrientation(ev.beta, ev.gamma);
+    };
+
     const onMotion = (ev: DeviceMotionEvent) => {
+      sensorSeenRef.current = true;
       try {
-        const accg = ev.accelerationIncludingGravity;
-        const accLin = ev.acceleration;
+        const rawG = ev.accelerationIncludingGravity;
+        const rawLin = ev.acceleration;
         const rr = ev.rotationRate;
-        if (!accg || accg.x == null || accg.y == null || accg.z == null) return;
+        if (!rawG || rawG.x == null || rawG.y == null || rawG.z == null) return;
+
+        // Llevar el acelerómetro a la convención W3C antes de cualquier cálculo.
+        const signChanged = accelSign.current.vote(rawG.x, rawG.y, rawG.z);
+        const s = accelSign.current.sign;
+        const accg = { x: rawG.x * s, y: rawG.y * s, z: rawG.z * s };
+        const accLin =
+          rawLin && rawLin.x != null && rawLin.y != null && rawLin.z != null
+            ? { x: rawLin.x * s, y: rawLin.y * s, z: rawLin.z * s }
+            : null;
 
         const screenDeg = getScreenOrientationAngleDeg();
         const ob = orientationBucket(screenDeg);
-        if (ob !== lastOrientationBucketRef.current) {
+        if (ob !== lastOrientationBucketRef.current || signChanged) {
           lastOrientationBucketRef.current = ob;
           calibratedRef.current = false;
           gLpInit.current = false;
@@ -284,7 +300,7 @@ export const useLeanAngle = (
           prevGravUnitRef.current = null;
         }
 
-        updateMotionStationary(ev, screenDeg);
+        updateMotionStationary(rr, accLin, accg, screenDeg);
 
         const now =
           typeof ev.timeStamp === 'number' && ev.timeStamp > 0 ? ev.timeStamp : performance.now();
@@ -294,7 +310,7 @@ export const useLeanAngle = (
         }
         lastTs.current = now;
 
-        const gLoc = remapDeviceVectorToNaturalPortrait(accg.x!, accg.y!, accg.z!, screenDeg);
+        const gLoc = remapDeviceVectorToNaturalPortrait(accg.x, accg.y, accg.z, screenDeg);
         gRaw.current[0] = gLoc[0];
         gRaw.current[1] = gLoc[1];
         gRaw.current[2] = gLoc[2];
@@ -305,7 +321,7 @@ export const useLeanAngle = (
         );
         const rrForPocket = { x: wRemap[0], y: wRemap[1], z: wRemap[2] };
         const accLinForPocket =
-          accLin && accLin.x != null && accLin.y != null && accLin.z != null
+          accLin
             ? (() => {
                 const a = remapDeviceVectorToNaturalPortrait(accLin.x, accLin.y, accLin.z, screenDeg);
                 return { x: a[0], y: a[1], z: a[2] };
@@ -356,8 +372,7 @@ export const useLeanAngle = (
           leanDegFromGravityInBikeFrame(gUnit.current, RAlign.current, gbScratch.current) * LEAN_SENSOR_SIGN;
         const thetaAccRad = leanDegAccel * RAD;
 
-        const omegaRoll =
-          rollRateFromGyro(wx, wy, wz, forwardCal.current) * LEAN_SENSOR_SIGN;
+        const omegaRoll = leanRateRadFromGyro(wx, wy, wz, RAlign.current) * LEAN_SENSOR_SIGN;
 
         const yawAboutG = yawRateAboutGravityDegPerSec(
           wx,
@@ -370,14 +385,14 @@ export const useLeanAngle = (
 
         const speed = speedRef.current ?? 0;
         const speedAbs = Math.abs(speed);
-        let kinDeg = kinematicLeanDegFromSpeedAndYaw(speedAbs, yawAboutG) * LEAN_SENSOR_SIGN;
-        if (Math.abs(leanDegAccel) > 4 && Math.abs(kinDeg) > 4 && Math.sign(leanDegAccel) !== Math.sign(kinDeg)) {
-          kinDeg = -kinDeg;
-        }
+        // Con el acelerómetro ya en convención W3C, ĝ apunta hacia arriba: ω·ĝ > 0 = giro a la izquierda
+        // → a_lat > 0 → con LEAN_SENSOR_SIGN queda negativo (izquierda). Ya no hace falta «adivinar» el signo
+        // comparando con el acelerómetro (en curva coordinada el acelerómetro marca ~0 y fallaba).
+        const kinDeg = kinematicLeanDegFromSpeedAndYaw(speedAbs, yawAboutG) * LEAN_SENSOR_SIGN;
         const thetaKinRad = kinDeg * RAD;
 
         let lateralA = 0;
-        if (accLin && accLin.x != null && accLin.y != null && accLin.z != null) {
+        if (accLin) {
           const aL = remapDeviceVectorToNaturalPortrait(accLin.x, accLin.y, accLin.z, screenDeg);
           lateralA = lateralAccelMagnitude(
             aL[0],
@@ -515,8 +530,12 @@ export const useLeanAngle = (
       }
     };
 
+    window.addEventListener('deviceorientation', onOrientation, true);
     window.addEventListener('devicemotion', onMotion, true);
-    return () => window.removeEventListener('devicemotion', onMotion, true);
+    return () => {
+      window.removeEventListener('deviceorientation', onOrientation, true);
+      window.removeEventListener('devicemotion', onMotion, true);
+    };
   }, [permissionGranted, calibrationOffset, calibrationProfile, applyBikeCalibrationFromGravity]);
 
   const resetMaxLean = () => {

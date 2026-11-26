@@ -1,9 +1,16 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Peer from 'simple-peer';
 import socket from '../lib/socket';
-import { getWebRtcPeerConfig } from '../lib/webrtcPeerConfig';
+import { getWebRtcPeerConfig, preloadIceServers } from '../lib/webrtcPeerConfig';
 
 const REMOTE_AUDIO_ROOT_ID = 'motoride-remote-audio-root';
+
+/** Si un enlace no llega a conectar en este tiempo se rehace. */
+const PEER_CONNECT_TIMEOUT_MS = 20000;
+/** Tiempo en «disconnected» antes de rehacer el enlace (ICE a veces se recupera solo). */
+const PEER_DISCONNECTED_GRACE_MS = 7000;
+const WATCHDOG_MS = 4000;
+const MAX_RETRY_DELAY_MS = 15000;
 
 function getOrCreateRemoteAudioRoot(): HTMLElement {
   let el = document.getElementById(REMOTE_AUDIO_ROOT_ID);
@@ -51,9 +58,26 @@ function micErrorMessage(err: unknown): string {
   return 'No se pudo usar el micrófono. Abre MotoRide en el navegador (no dentro de Instagram/Facebook), con HTTPS o localhost, y no en modo incógnito si el navegador bloquea el mic ahí.';
 }
 
+type PeerMeta = {
+  createdAt: number;
+  connected: boolean;
+  disconnectedSince: number | null;
+};
+
+/** Estado ICE/conexión del RTCPeerConnection interno de simple-peer. */
+function peerConnectionState(peer: Peer.Instance): string {
+  const pc = (peer as unknown as { _pc?: RTCPeerConnection })._pc;
+  if (!pc) return 'closed';
+  return pc.connectionState || pc.iceConnectionState || 'new';
+}
+
 /**
- * Cada par WebRTC tiene un único iniciador (por orden de socket.id) para evitar doble oferta.
- * Cada simple-peer usa un clon del MediaStream local.
+ * Voz grupal en malla WebRTC (simple-peer) con señalización por Socket.IO.
+ *
+ * - Cada par tiene un único iniciador (orden de socket.id) para evitar doble oferta.
+ * - Cada enlace se vigila: si falla, se cae o no llega a conectar, se rehace solo ese enlace
+ *   (con reintentos crecientes) sin tirar la malla entera.
+ * - Si cae el socket (cambia el socket.id) se reconstruye la sala completa al reconectar.
  */
 export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true) {
   const [isVoiceActive, setIsVoiceActive] = useState(false);
@@ -61,16 +85,20 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
   const [micError, setMicError] = useState<string | null>(null);
   const masterStreamRef = useRef<MediaStream | null>(null);
   const peersRef = useRef<{ [key: string]: Peer.Instance }>({});
+  const peerMetaRef = useRef<{ [key: string]: PeerMeta }>({});
   const peerStreamsRef = useRef<{ [key: string]: MediaStream }>({});
   const audioRefs = useRef<{ [key: string]: HTMLAudioElement }>({});
+  /** socket.id de los demás que están ahora en la sala de voz (según el servidor). */
+  const voiceMembersRef = useRef<Set<string>>(new Set());
+  const retryTimersRef = useRef<{ [key: string]: ReturnType<typeof setTimeout> }>({});
+  const retryAttemptsRef = useRef<{ [key: string]: number }>({});
   const canUseVoiceRef = useRef(canUseVoice);
   canUseVoiceRef.current = canUseVoice;
   const joinedVoiceRoomRef = useRef<string | null>(null);
-  /** Evita re-montar listeners de socket al activar voz (desregistrar en ese momento perdía señales WebRTC). */
   const isVoiceActiveRef = useRef(false);
   /** Socket desconectado mientras la voz sigue “activa” (intención de reconectar). */
   const [voiceTransportLost, setVoiceTransportLost] = useState(false);
-  /** Malla WebRTC en reconstrucción tras reconexión o vuelta al primer plano. */
+  /** Malla WebRTC en reconstrucción tras reconexión. */
   const [voiceMeshResetting, setVoiceMeshResetting] = useState(false);
   const meshResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -113,6 +141,17 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
     return myId.localeCompare(remoteSocketId) > 0;
   };
 
+  const clearRetry = (peerId: string) => {
+    const t = retryTimersRef.current[peerId];
+    if (t) clearTimeout(t);
+    delete retryTimersRef.current[peerId];
+  };
+
+  const clearAllRetries = () => {
+    Object.keys(retryTimersRef.current).forEach(clearRetry);
+    retryAttemptsRef.current = {};
+  };
+
   const stopPeerMedia = (peerId: string) => {
     const s = peerStreamsRef.current[peerId];
     if (s) {
@@ -127,15 +166,15 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
 
   const removePeer = (peerId: string) => {
     const peer = peersRef.current[peerId];
+    // Quitar del mapa ANTES de destruir: los eventos close/error del peer viejo ya no lo encuentran.
+    delete peersRef.current[peerId];
+    delete peerMetaRef.current[peerId];
     if (peer) {
       try {
-        if (!(peer as any).destroyed) {
-          peer.destroy();
-        }
+        if (!(peer as unknown as { destroyed?: boolean }).destroyed) peer.destroy();
       } catch {
         /* ignore */
       }
-      delete peersRef.current[peerId];
     }
     stopPeerMedia(peerId);
     if (audioRefs.current[peerId]) {
@@ -152,19 +191,9 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
     setPeers({ ...peersRef.current });
   };
 
-  const rebuildVoiceRoom = useCallback(
-    (gid?: string | null) => {
-      const targetGroup = gid || groupId;
-      if (!targetGroup || !canUseVoiceRef.current || !masterStreamRef.current) return;
-      startMeshResetUi();
-      // Tras reconexión del socket, recreamos malla WebRTC para evitar peers colgados.
-      Object.keys(peersRef.current).forEach((peerId) => removePeer(peerId));
-      socket.emit('join-voice', targetGroup);
-      joinedVoiceRoomRef.current = targetGroup;
-      setIsVoiceActive(true);
-    },
-    [groupId, startMeshResetUi]
-  );
+  const removeAllPeers = () => {
+    Object.keys(peersRef.current).forEach((peerId) => removePeer(peerId));
+  };
 
   const playRemoteAudio = useCallback((el: HTMLAudioElement) => {
     el.volume = 1;
@@ -206,6 +235,128 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
     playRemoteAudio(audio);
   };
 
+  /** Refs a funciones que se llaman entre sí (crear ↔ reintentar). */
+  const createPeerRef = useRef<(remoteId: string, initiator: boolean) => Peer.Instance | null>(() => null);
+  const scheduleRetryRef = useRef<(remoteId: string) => void>(() => {});
+
+  createPeerRef.current = (remoteId: string, initiator: boolean) => {
+    if (!canUseVoiceRef.current || !masterStreamRef.current) return null;
+    if (peersRef.current[remoteId]) removePeer(remoteId);
+
+    let localStream: MediaStream;
+    try {
+      localStream = masterStreamRef.current.clone();
+    } catch {
+      return null;
+    }
+    peerStreamsRef.current[remoteId] = localStream;
+
+    const peer = new Peer({
+      initiator,
+      trickle: true,
+      stream: localStream,
+      config: getWebRtcPeerConfig(),
+    });
+    const isCurrent = () => peersRef.current[remoteId] === peer;
+
+    peer.on('signal', (signal) => {
+      if (!isCurrent()) return;
+      socket.emit('webrtc-signal', { target: remoteId, signal });
+    });
+    peer.on('stream', (stream) => {
+      if (!isCurrent()) return;
+      addAudioStream(remoteId, stream);
+    });
+    peer.on('connect', () => {
+      if (!isCurrent()) return;
+      const meta = peerMetaRef.current[remoteId];
+      if (meta) {
+        meta.connected = true;
+        meta.disconnectedSince = null;
+      }
+      retryAttemptsRef.current[remoteId] = 0;
+    });
+    const onDead = () => {
+      if (!isCurrent()) return;
+      removePeer(remoteId);
+      scheduleRetryRef.current(remoteId);
+    };
+    peer.on('close', onDead);
+    peer.on('error', onDead);
+
+    peersRef.current[remoteId] = peer;
+    peerMetaRef.current[remoteId] = { createdAt: Date.now(), connected: false, disconnectedSince: null };
+    setPeers({ ...peersRef.current });
+    return peer;
+  };
+
+  scheduleRetryRef.current = (remoteId: string) => {
+    clearRetry(remoteId);
+    if (!isVoiceActiveRef.current || !voiceMembersRef.current.has(remoteId)) return;
+    const attempt = (retryAttemptsRef.current[remoteId] ?? 0) + 1;
+    retryAttemptsRef.current[remoteId] = attempt;
+    const delay = Math.min(MAX_RETRY_DELAY_MS, 800 * 2 ** Math.min(attempt - 1, 5));
+    retryTimersRef.current[remoteId] = setTimeout(() => {
+      delete retryTimersRef.current[remoteId];
+      if (
+        !isVoiceActiveRef.current ||
+        !masterStreamRef.current ||
+        !socket.connected ||
+        !voiceMembersRef.current.has(remoteId) ||
+        peersRef.current[remoteId]
+      ) {
+        return;
+      }
+      if (isInitiatorVersus(remoteId)) {
+        createPeerRef.current(remoteId, true);
+      } else {
+        // El otro lado es el iniciador: le pedimos que rehaga el enlace con nosotros.
+        socket.emit('voice-peer-reset', { target: remoteId });
+      }
+    }, delay);
+  };
+
+  const rebuildVoiceRoom = useCallback(
+    (gid?: string | null) => {
+      const targetGroup = gid || groupId;
+      if (!targetGroup || !canUseVoiceRef.current || !masterStreamRef.current) return;
+      startMeshResetUi();
+      // Tras reconexión del socket (nuevo socket.id) recreamos la malla completa.
+      clearAllRetries();
+      removeAllPeers();
+      voiceMembersRef.current.clear();
+      socket.emit('join-voice', targetGroup);
+      joinedVoiceRoomRef.current = targetGroup;
+      setIsVoiceActive(true);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [groupId, startMeshResetUi]
+  );
+
+  /** Revisa cada enlace y rehace los que están caídos o no llegaron a conectar. */
+  const checkPeerHealth = useCallback(() => {
+    if (!isVoiceActiveRef.current) return;
+    const now = Date.now();
+    Object.keys(peersRef.current).forEach((id) => {
+      const peer = peersRef.current[id];
+      const meta = peerMetaRef.current[id];
+      if (!peer || !meta) return;
+      const st = peerConnectionState(peer);
+      let dead = st === 'failed' || st === 'closed';
+      if (!dead && (st === 'disconnected')) {
+        if (meta.disconnectedSince == null) meta.disconnectedSince = now;
+        dead = now - meta.disconnectedSince > PEER_DISCONNECTED_GRACE_MS;
+      } else if (!dead) {
+        meta.disconnectedSince = null;
+      }
+      if (!dead && !meta.connected && now - meta.createdAt > PEER_CONNECT_TIMEOUT_MS) dead = true;
+      if (dead) {
+        removePeer(id);
+        scheduleRetryRef.current(id);
+      }
+    });
+  }, []);
+
   /** Safari/iOS: reanudar altavoz al volver al primer plano o al tocar la pantalla. */
   useEffect(() => {
     if (!isVoiceActive) return;
@@ -217,7 +368,10 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
       });
     };
     const onVis = () => {
-      if (document.visibilityState === 'visible') resumeAll();
+      if (document.visibilityState === 'visible') {
+        resumeAll();
+        checkPeerHealth();
+      }
     };
     const onTouchResume = () => {
       const n = Date.now();
@@ -225,48 +379,25 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
       lastTouchResume = n;
       resumeAll();
     };
+    const watchdog = window.setInterval(checkPeerHealth, WATCHDOG_MS);
     document.addEventListener('visibilitychange', onVis);
     document.addEventListener('touchstart', onTouchResume, { passive: true });
     window.addEventListener('pageshow', resumeAll);
     return () => {
+      window.clearInterval(watchdog);
       document.removeEventListener('visibilitychange', onVis);
       document.removeEventListener('touchstart', onTouchResume);
       window.removeEventListener('pageshow', resumeAll);
     };
-  }, [isVoiceActive, playRemoteAudio]);
+  }, [isVoiceActive, playRemoteAudio, checkPeerHealth]);
 
   useEffect(() => {
     const gid = groupId;
     return () => {
-      Object.keys(peersRef.current).forEach((peerId) => {
-        try {
-          const p = peersRef.current[peerId];
-          if (p && !(p as any).destroyed) p.destroy();
-        } catch {
-          /* ignore */
-        }
-      });
-      peersRef.current = {};
-      Object.keys(peerStreamsRef.current).forEach((key) => {
-        const s = peerStreamsRef.current[key];
-        try {
-          s.getTracks().forEach((t) => t.stop());
-        } catch {
-          /* ignore */
-        }
-      });
-      peerStreamsRef.current = {};
-      Object.keys(audioRefs.current).forEach((key) => {
-        const a = audioRefs.current[key];
-        try {
-          a.pause();
-          a.srcObject = null;
-          a.remove();
-        } catch {
-          /* ignore */
-        }
-      });
-      audioRefs.current = {};
+      clearAllRetries();
+      removeAllPeers();
+      voiceMembersRef.current.clear();
+      Object.keys(peerStreamsRef.current).forEach((key) => stopPeerMedia(key));
       if (masterStreamRef.current) {
         masterStreamRef.current.getTracks().forEach((track) => track.stop());
         masterStreamRef.current = null;
@@ -284,127 +415,84 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
         socket.emit('leave-voice', gid);
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupId, canUseVoice]);
 
   useEffect(() => {
     if (!groupId || !canUseVoice) return;
 
-    const handleUserJoined = (callerId: string) => {
+    /** El servidor avisa de que `remoteId` ha entrado (o vuelto a entrar) en la sala: enlace nuevo. */
+    const handleUserJoined = (remoteId: string) => {
       if (!canUseVoiceRef.current || !masterStreamRef.current) return;
-      if (peersRef.current[callerId]) return;
-
-      let localStream: MediaStream;
-      try {
-        localStream = masterStreamRef.current.clone();
-      } catch {
-        return;
-      }
-      peerStreamsRef.current[callerId] = localStream;
-
-      const peer = new Peer({
-        initiator: isInitiatorVersus(callerId),
-        trickle: true,
-        stream: localStream,
-        config: getWebRtcPeerConfig(),
-      });
-
-      peer.on('signal', (signal) => {
-        socket.emit('webrtc-signal', {
-          target: callerId,
-          signal,
-        });
-      });
-
-      peer.on('stream', (stream) => {
-        addAudioStream(callerId, stream);
-      });
-
-      peer.on('close', () => {
-        removePeer(callerId);
-      });
-
-      peer.on('error', () => {
-        removePeer(callerId);
-      });
-
-      peersRef.current[callerId] = peer;
-      setPeers({ ...peersRef.current });
+      if (!remoteId || remoteId === socket.id) return;
+      voiceMembersRef.current.add(remoteId);
+      clearRetry(remoteId);
+      retryAttemptsRef.current[remoteId] = 0;
+      createPeerRef.current(remoteId, isInitiatorVersus(remoteId));
     };
 
     const handleSignal = (data: { caller: string; signal: any }) => {
       if (!canUseVoiceRef.current || !masterStreamRef.current) return;
-
-      const { caller, signal } = data;
+      const { caller, signal } = data || ({} as { caller: string; signal: any });
+      if (!caller || !signal) return;
+      voiceMembersRef.current.add(caller);
 
       let peer = peersRef.current[caller];
-
-      if (!peer) {
-        let localStream: MediaStream;
-        try {
-          localStream = masterStreamRef.current.clone();
-        } catch {
-          return;
+      const isOffer = signal.type === 'offer';
+      if (isOffer) {
+        // Una oferta nueva sobre un enlace ya conectado o propio = el otro lado reinició: empezar de cero.
+        const existing = peer as unknown as { initiator?: boolean; connected?: boolean } | undefined;
+        if (existing && (existing.initiator || existing.connected)) {
+          removePeer(caller);
+          peer = undefined as unknown as Peer.Instance;
         }
-        peerStreamsRef.current[caller] = localStream;
-
-        peer = new Peer({
-          initiator: false,
-          trickle: true,
-          stream: localStream,
-          config: getWebRtcPeerConfig(),
-        });
-
-        peer.on('signal', (sig) => {
-          socket.emit('webrtc-signal', {
-            target: caller,
-            signal: sig,
-          });
-        });
-
-        peer.on('stream', (stream) => {
-          addAudioStream(caller, stream);
-        });
-
-        peer.on('close', () => {
-          removePeer(caller);
-        });
-
-        peer.on('error', () => {
-          removePeer(caller);
-        });
-
-        peersRef.current[caller] = peer;
-        setPeers({ ...peersRef.current });
+        if (!peer) {
+          clearRetry(caller);
+          peer = createPeerRef.current(caller, false) as Peer.Instance;
+          if (!peer) return;
+        }
+      } else if (!peer) {
+        // Candidato/renegociación de un enlace que ya no existe: ignorar.
+        return;
       }
 
       try {
         peer.signal(signal);
       } catch {
         removePeer(caller);
+        scheduleRetryRef.current(caller);
       }
     };
 
-    const handleUserLeft = (callerId: string) => {
-      removePeer(callerId);
+    const handleUserLeft = (remoteId: string) => {
+      voiceMembersRef.current.delete(remoteId);
+      clearRetry(remoteId);
+      delete retryAttemptsRef.current[remoteId];
+      removePeer(remoteId);
+    };
+
+    /** El otro lado (no iniciador) nos pide rehacer el enlace. */
+    const handlePeerReset = (data: { caller: string }) => {
+      const remoteId = data?.caller;
+      if (!remoteId || !isVoiceActiveRef.current || !masterStreamRef.current) return;
+      voiceMembersRef.current.add(remoteId);
+      clearRetry(remoteId);
+      createPeerRef.current(remoteId, isInitiatorVersus(remoteId));
     };
 
     socket.on('user-joined-voice', handleUserJoined);
     socket.on('webrtc-signal', handleSignal);
     socket.on('user-left-voice', handleUserLeft);
+    socket.on('voice-peer-reset', handlePeerReset);
 
-    /** Siempre limpiar “sin red” al volver el transporte; el rebuild puede no ejecutarse si falta stream. */
+    /** Al volver el socket (nuevo socket.id) hay que volver a entrar en la sala de voz. */
     const onSocketTransportRestored = () => {
       try {
         if (isVoiceActiveRef.current && joinedVoiceRoomRef.current) {
           setVoiceTransportLost(false);
         }
         const gid = joinedVoiceRoomRef.current;
-        if (
-          gid === groupId &&
-          isVoiceActiveRef.current &&
-          masterStreamRef.current &&
-          canUseVoiceRef.current
-        ) {
+        if (gid === groupId && isVoiceActiveRef.current && masterStreamRef.current && canUseVoiceRef.current) {
           rebuildVoiceRoom(gid);
         }
       } catch {
@@ -413,47 +501,27 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
     };
 
     const handleSocketDisconnect = () => {
-      // No desactivamos voz: mantenemos intención activa y reconstruimos al reconectar.
-      Object.keys(peersRef.current).forEach((peerId) => removePeer(peerId));
+      // No desactivamos voz: mantenemos la intención y reconstruimos al reconectar.
+      clearAllRetries();
+      removeAllPeers();
+      voiceMembersRef.current.clear();
       if (isVoiceActiveRef.current && joinedVoiceRoomRef.current) {
         setVoiceTransportLost(true);
       }
     };
 
-    const handleBrowserOnline = () => {
-      try {
-        if (socket.connected && isVoiceActiveRef.current && joinedVoiceRoomRef.current) {
-          setVoiceTransportLost(false);
-        }
-      } catch {
-        /* ignore */
-      }
-    };
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && isVoiceActiveRef.current && joinedVoiceRoomRef.current === groupId) {
-        // Safari/iOS puede congelar WebRTC al volver de segundo plano; forzamos reenganche.
-        rebuildVoiceRoom(groupId);
-      }
-    };
-
     socket.on('connect', onSocketTransportRestored);
-    /** En socket.io v4 el Manager emite `reconnect` al recuperar la sesión; redundante con `connect` pero cubre casos raros. */
-    socket.io.on('reconnect', onSocketTransportRestored);
     socket.on('disconnect', handleSocketDisconnect);
-    window.addEventListener('online', handleBrowserOnline);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       socket.off('user-joined-voice', handleUserJoined);
       socket.off('webrtc-signal', handleSignal);
       socket.off('user-left-voice', handleUserLeft);
+      socket.off('voice-peer-reset', handlePeerReset);
       socket.off('connect', onSocketTransportRestored);
-      socket.io.off('reconnect', onSocketTransportRestored);
       socket.off('disconnect', handleSocketDisconnect);
-      window.removeEventListener('online', handleBrowserOnline);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupId, canUseVoice, rebuildVoiceRoom]);
 
   useEffect(() => {
@@ -466,7 +534,9 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
       }
       masterStreamRef.current = null;
     }
-    Object.keys(peersRef.current).forEach((peerId) => removePeer(peerId));
+    clearAllRetries();
+    removeAllPeers();
+    voiceMembersRef.current.clear();
     setIsVoiceActive(false);
     setPeers({});
     joinedVoiceRoomRef.current = null;
@@ -476,6 +546,7 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
     if (groupId) {
       socket.emit('leave-voice', groupId);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canUseVoice, groupId, clearMeshResetTimer]);
 
   const toggleVoice = () => {
@@ -485,7 +556,9 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
       setVoiceTransportLost(false);
       setVoiceMeshResetting(false);
       clearMeshResetTimer();
-      Object.keys(peersRef.current).forEach((peerId) => removePeer(peerId));
+      clearAllRetries();
+      removeAllPeers();
+      voiceMembersRef.current.clear();
       if (masterStreamRef.current) {
         masterStreamRef.current.getTracks().forEach((track) => track.stop());
         masterStreamRef.current = null;
@@ -522,6 +595,7 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
         echoCancellation: true,
         noiseSuppression: true,
         autoGainControl: true,
+        channelCount: 1,
       },
       video: false,
     };
@@ -531,6 +605,9 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
     const acquire = (constraints: MediaStreamConstraints) =>
       withTimeout(gUM(constraints), 20000, timeoutMsg);
 
+    // getUserMedia debe pedirse dentro del gesto (iOS); las credenciales TURN se cargan en paralelo.
+    const icePromise = preloadIceServers();
+
     acquire(constraintsIdeal)
       .catch((e: unknown) => {
         const n = e && typeof e === 'object' && 'name' in e ? String((e as DOMException).name) : '';
@@ -539,7 +616,7 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
         }
         throw e;
       })
-      .then((stream: MediaStream) => {
+      .then(async (stream: MediaStream) => {
         if (!canUseVoiceRef.current) {
           stream.getTracks().forEach((t) => t.stop());
           return;
@@ -549,7 +626,9 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
         setIsVoiceActive(true);
         setMicError(null);
         try {
-          const AC = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+          const AC =
+            window.AudioContext ||
+            (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
           if (AC) {
             const ctx = new AC();
             void ctx.resume().finally(() => {
@@ -563,11 +642,10 @@ export function useVoiceChat(groupId: string | null, canUseVoice: boolean = true
         } catch {
           /* ignore */
         }
-        // Tras el render: los listeners de `user-joined-voice` / `webrtc-signal` deben estar activos antes del join.
-        queueMicrotask(() => {
-          if (!canUseVoiceRef.current || joinedVoiceRoomRef.current !== groupId || !masterStreamRef.current) return;
-          socket.emit('join-voice', groupId);
-        });
+        await icePromise;
+        if (!canUseVoiceRef.current || joinedVoiceRoomRef.current !== groupId || !masterStreamRef.current) return;
+        voiceMembersRef.current.clear();
+        socket.emit('join-voice', groupId);
       })
       .catch((err: unknown) => {
         console.error('Error accessing microphone:', err);

@@ -94,29 +94,29 @@ export const GroupPanel: React.FC<GroupPanelProps> = ({ currentGroup, setCurrent
 
   if (currentGroup) {
     return (
-      <div className="bg-white rounded-t-3xl shadow-[0_-4px_20px_rgba(0,0,0,0.1)] p-6 pb-8">
+      <div className="mr-sheet rounded-t-[var(--radius-sheet)] rounded-b-none border-b-0 p-5 pb-[max(2rem,env(safe-area-inset-bottom,0px))] sm:p-6">
         <div className="flex justify-between items-center mb-4">
           <div>
-            <h2 className="text-2xl font-bold text-gray-900">{currentGroup.name}</h2>
-            <p className="text-sm text-gray-500 font-mono">ID para unirse: {currentGroup.id}</p>
+            <h2 className="text-3xl uppercase text-zinc-50">{currentGroup.name}</h2>
+            <p className="font-mono text-xs text-zinc-500">ID para unirse: {currentGroup.id}</p>
           </div>
           <button 
             onClick={() => setCurrentGroupId(null)}
-            className="text-sm text-orange-600 font-medium px-3 py-1 bg-orange-50 rounded-full"
+            className="mr-focus rounded-full border border-orange-500/30 bg-orange-500/10 px-3 py-1 text-sm font-semibold text-orange-300 transition-colors hover:bg-orange-500/20"
           >
             Salir
           </button>
         </div>
 
         <div className="flex items-center gap-4 mb-6">
-          <div className="flex items-center gap-2 text-gray-600 bg-gray-50 px-3 py-2 rounded-lg">
+          <div className="flex items-center gap-2 rounded-[var(--radius-control)] bg-white/[0.04] px-3 py-2 text-zinc-300">
             <Users size={18} />
             <span className="font-medium">{currentGroup.members?.length || 0} moteros</span>
           </div>
           
           <button 
             onClick={() => fileInputRef.current?.click()}
-            className="flex items-center gap-2 bg-orange-500 text-white px-4 py-2 rounded-lg font-medium hover:bg-orange-600 transition-colors flex-1 justify-center"
+            className="mr-focus flex flex-1 items-center justify-center gap-2 rounded-[var(--radius-control)] bg-orange-500 px-4 py-2 font-bold text-zinc-950 transition-colors hover:bg-orange-400"
           >
             <Upload size={18} />
             <span>Subir GPX</span>
@@ -134,70 +134,70 @@ export const GroupPanel: React.FC<GroupPanelProps> = ({ currentGroup, setCurrent
   }
 
   return (
-    <div className="bg-white rounded-t-3xl shadow-[0_-4px_20px_rgba(0,0,0,0.1)] p-6 pb-8">
-      <h2 className="text-2xl font-bold text-gray-900 mb-6">Tus Rutas</h2>
+    <div className="mr-sheet rounded-t-[var(--radius-sheet)] rounded-b-none border-b-0 p-5 pb-[max(2rem,env(safe-area-inset-bottom,0px))] sm:p-6">
+      <h2 className="mb-5 text-3xl uppercase text-zinc-50">Tus grupos</h2>
       
       <div className="flex flex-col gap-4">
         {!isCreating && !isJoining ? (
           <>
             <button 
               onClick={() => setIsCreating(true)}
-              className="flex items-center justify-center gap-2 w-full bg-orange-500 text-white py-3 rounded-xl font-medium hover:bg-orange-600 transition-colors"
+              className="mr-focus flex w-full items-center justify-center gap-2 rounded-[var(--radius-control)] bg-orange-500 py-3 font-bold text-zinc-950 transition-colors hover:bg-orange-400"
             >
               <Plus size={20} />
-              Crear nuevo grupo
+              Crear grupo
             </button>
             <button 
               onClick={() => setIsJoining(true)}
-              className="flex items-center justify-center gap-2 w-full bg-gray-100 text-gray-800 py-3 rounded-xl font-medium hover:bg-gray-200 transition-colors"
+              className="mr-focus flex w-full items-center justify-center gap-2 rounded-[var(--radius-control)] border border-white/[0.1] bg-white/[0.04] py-3 font-semibold text-zinc-100 transition-colors hover:bg-white/[0.08]"
             >
               <LogIn size={20} />
               Unirse a un grupo
             </button>
           </>
         ) : isCreating ? (
-          <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
+          <div className="mr-enter space-y-4">
             <input 
               type="text" 
               placeholder="Nombre del grupo" 
-              className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-orange-500"
+              className="mr-focus w-full rounded-[var(--radius-control)] border border-white/[0.1] bg-zinc-950/70 px-4 py-3 text-zinc-100 placeholder:text-zinc-600 focus:border-orange-500 focus:outline-none"
               value={newGroupName}
               onChange={(e) => setNewGroupName(e.target.value)}
             />
             <div className="flex gap-2">
               <button 
                 onClick={() => setIsCreating(false)}
-                className="flex-1 py-3 rounded-xl font-medium text-gray-600 bg-gray-100"
+                className="mr-focus flex-1 rounded-[var(--radius-control)] border border-white/[0.1] py-3 font-semibold text-zinc-300 transition-colors hover:bg-white/[0.05]"
               >
                 Cancelar
               </button>
               <button 
                 onClick={handleCreateGroup}
-                className="flex-1 py-3 rounded-xl font-medium text-white bg-orange-500"
+                className="mr-focus flex-1 rounded-[var(--radius-control)] bg-orange-500 py-3 font-bold text-zinc-950 transition-colors hover:bg-orange-400"
               >
                 Crear
               </button>
             </div>
           </div>
         ) : (
-          <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
+          <div className="mr-enter space-y-4">
             <input 
               type="text" 
               placeholder="ID del grupo" 
-              className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-orange-500 font-mono uppercase"
+              className="mr-focus w-full rounded-[var(--radius-control)] border border-white/[0.1] bg-zinc-950/70 px-4 py-3 text-zinc-100 placeholder:text-zinc-600 focus:border-orange-500 focus:outline-none font-mono uppercase"
               value={joinCode}
               onChange={(e) => setJoinCode(e.target.value)}
             />
             <div className="flex gap-2">
               <button 
                 onClick={() => setIsJoining(false)}
-                className="flex-1 py-3 rounded-xl font-medium text-gray-600 bg-gray-100"
+                className="mr-focus flex-1 rounded-[var(--radius-control)] border border-white/[0.1] py-3 font-semibold text-zinc-300 transition-colors hover:bg-white/[0.05]"
               >
                 Cancelar
               </button>
               <button 
                 onClick={handleJoinGroup}
-                className="flex-1 py-3 rounded-xl font-medium text-white bg-orange-500"
+                className="mr-focus flex-1 rounded-[var(--radius-control)] bg-orange-500 py-3 font-bold text-zinc-950 transition-colors hover:bg-orange-400"
               >
                 Unirse
               </button>

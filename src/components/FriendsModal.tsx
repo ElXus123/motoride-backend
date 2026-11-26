@@ -4,6 +4,8 @@ import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { X, Search, UserPlus, UserMinus, User as UserIcon, Play, Check, Clock, Ban, MessageCircle } from 'lucide-react';
 import PremiumBadge from './PremiumBadge';
+import { AvatarFrame } from './AvatarFrame';
+import { resolvePeerFrameId } from '../lib/frames';
 import FriendDirectChatModal from './FriendDirectChatModal';
 import MedalShowcase from './MedalShowcase';
 import { formatRideCardSubtitle, formatRideCardTitle, rideHistoryPointsEarned } from '../lib/rideHistoryDisplay';
@@ -202,6 +204,15 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
     setSelectedUser(friendUser);
     setHistoryBlockedMessage(null);
     const fid = friendUser.uid || friendUser.id;
+    // Marco equipado del amigo: se lee de users/{uid} al abrir el perfil (la lista puede no traerlo).
+    getDoc(doc(db, 'users', fid))
+      .then((s) => {
+        const frameId = s.exists() ? s.data()?.profileFrameId ?? null : null;
+        setSelectedUser((prev: any) => (prev && (prev.uid || prev.id) === fid ? { ...prev, profileFrameId: frameId } : prev));
+      })
+      .catch(() => {
+        /* sin marco si no se puede leer */
+      });
     const canViewHistory = friendsIds.includes(fid);
     if (!canViewHistory) {
       setSelectedUserHistory([]);
@@ -230,11 +241,11 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
       onClick={onClose}
     >
       <div
-        className="bg-zinc-900 border border-zinc-800 w-full max-w-2xl h-[80vh] rounded-3xl overflow-hidden shadow-2xl flex flex-col animate-in fade-in zoom-in duration-200"
+        className="mr-sheet flex h-[80vh] w-full max-w-2xl flex-col overflow-hidden animate-in fade-in zoom-in duration-200"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="p-6 border-b border-zinc-800 flex items-center justify-between shrink-0">
-          <h2 className="text-xl font-bold flex items-center gap-2">
+          <h2 className="flex items-center gap-2 text-2xl uppercase text-zinc-50">
             {selectedUser ? (
               <button onClick={() => setSelectedUser(null)} className="text-orange-500 hover:text-orange-400 mr-2">
                 &larr; Volver
@@ -250,19 +261,21 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
           {selectedUser ? (
             <div className="space-y-6">
               <div className="flex items-center gap-4">
-                <div
-                  className={`w-20 h-20 rounded-full overflow-hidden border-2 bg-zinc-800 ${
-                    selectedUser.isPremium === true ? 'border-amber-500' : 'border-orange-500'
-                  }`}
-                >
-                  {selectedUser.photoURL ? (
-                    <img src={selectedUser.photoURL} alt="Avatar" className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center">
-                      <UserIcon size={32} className="text-zinc-500" />
-                    </div>
-                  )}
-                </div>
+                <AvatarFrame frameId={resolvePeerFrameId(selectedUser.profileFrameId)} size={80} className="shrink-0">
+                  <div
+                    className={`w-20 h-20 rounded-full overflow-hidden border-2 bg-zinc-800 ${
+                      selectedUser.isPremium === true ? 'border-amber-500' : 'border-orange-500'
+                    }`}
+                  >
+                    {selectedUser.photoURL ? (
+                      <img src={selectedUser.photoURL} alt="Avatar" className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <UserIcon size={32} className="text-zinc-500" />
+                      </div>
+                    )}
+                  </div>
+                </AvatarFrame>
                 <div>
                   <h3 className="text-2xl font-bold flex items-center gap-2 flex-wrap">
                     {selectedUser.displayName}
@@ -277,11 +290,11 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="bg-zinc-800 px-4 py-3 rounded-2xl text-center border border-zinc-700">
-                  <p className="text-[10px] text-zinc-400 uppercase font-bold tracking-wider mb-1">Km Totales</p>
+                  <p className="text-[11px] text-zinc-400 uppercase font-bold tracking-wider mb-1">Km Totales</p>
                   <p className="font-black text-xl text-white">{(selectedUser.totalDistance || 0).toFixed(1)}</p>
                 </div>
                 <div className="bg-zinc-800 px-4 py-3 rounded-2xl text-center border border-zinc-700">
-                  <p className="text-[10px] text-zinc-400 uppercase font-bold tracking-wider mb-1">Curvas Totales</p>
+                  <p className="text-[11px] text-zinc-400 uppercase font-bold tracking-wider mb-1">Curvas Totales</p>
                   <p className="font-black text-xl text-white">{(selectedUser.totalLeftTurns || 0) + (selectedUser.totalRightTurns || 0)}</p>
                 </div>
               </div>
@@ -326,7 +339,7 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                         <p className="text-sm text-zinc-500">{formatRideCardSubtitle(ride.endTime)}</p>
                         <div className="flex flex-wrap items-baseline gap-x-8 gap-y-1 mt-1">
                           <span className="text-sm">
-                            <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                            <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
                               Dist.{' '}
                             </span>
                             <span className="font-semibold text-white tabular-nums">
@@ -334,7 +347,7 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                             </span>
                           </span>
                           <span className="text-sm">
-                            <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                            <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
                               Pts{' '}
                             </span>
                             <span className="font-bold text-orange-400 tabular-nums">
@@ -473,7 +486,7 @@ export default function FriendsModal({ onClose, onRepeatRoute }: { onClose: () =
                     {friends.map(friend => {
                       const fid = friend.uid || friend.id;
                       return (
-                      <div key={fid} className="flex items-center justify-between bg-zinc-900 border border-zinc-800 p-3 rounded-xl hover:border-orange-500/50 transition-colors">
+                      <div key={fid} className="flex items-center justify-between rounded-[var(--radius-control)] border border-white/[0.07] bg-white/[0.03] p-3 transition-colors hover:border-orange-500/40">
                         <div className="flex items-center gap-3 cursor-pointer flex-1" onClick={() => viewProfile({ ...friend, uid: fid })}>
                           <div className="w-10 h-10 rounded-full overflow-hidden bg-zinc-800 shrink-0">
                             {friend.photoURL ? <img src={friend.photoURL} alt="" className="w-full h-full object-cover" /> : <UserIcon size={20} className="m-auto h-full text-zinc-500" />}

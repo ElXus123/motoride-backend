@@ -44,7 +44,7 @@ export const useLocationTracking = (
     const onSyncRequest = () => {
       const p = lastSocketPayloadRef.current;
       if (!p || p.groupId !== groupId) return;
-      socket.emit('update-location', { ...p, timestamp: Date.now() });
+      socket.volatile.emit('update-location', { ...p, timestamp: Date.now() });
     };
     socket.on('location-sync-request', onSyncRequest);
     return () => {
@@ -82,8 +82,15 @@ export const useLocationTracking = (
   useEffect(() => {
     if (!isActive || !user || !groupId) return;
 
-    let watchId: number;
-    let intervalId: NodeJS.Timeout;
+    let watchId: number | null = null;
+    let intervalId: ReturnType<typeof setInterval> | undefined;
+    let restartTimer: ReturnType<typeof setTimeout> | undefined;
+    let lastFixWallClock = 0;
+    let disposed = false;
+
+    /** Último fix aceptado (para filtrar saltos y calcular velocidad si el GPS no la da). */
+    let prevFix: { lat: number; lng: number; t: number; acc: number } | null = null;
+    let consecutiveRejects = 0;
 
     const startTracking = () => {
       if (!navigator.geolocation) {
@@ -96,15 +103,58 @@ export const useLocationTracking = (
       let lastSpeed = 0;
       let lastHeading = 0;
 
-      watchId = navigator.geolocation.watchPosition(
+      const startWatch = () => {
+        if (watchId != null) {
+          navigator.geolocation.clearWatch(watchId);
+          watchId = null;
+        }
+        watchId = navigator.geolocation.watchPosition(
         (position) => {
-          const { latitude, longitude, speed: gpsSpeed, heading: gpsHeading, accuracy } = position.coords;
+          const { latitude, longitude, speed: rawSpeed, heading: rawHeading, accuracy } = position.coords;
+          if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+          const fixTs = typeof position.timestamp === 'number' && position.timestamp > 0 ? position.timestamp : Date.now();
+          const acc = accuracy != null && Number.isFinite(accuracy) && accuracy > 0 ? accuracy : 50;
+
+          // --- Filtro de fijos (sin bloquear para siempre: tras 3 rechazos seguidos se acepta) ---
+          if (prevFix) {
+            const dtSec = (fixTs - prevFix.t) / 1000;
+            if (dtSec <= 0) return; // duplicado o desordenado (iOS a veces repite el último)
+            const jump = getDistance(prevFix.lat, prevFix.lng, latitude, longitude);
+            const impliedMps = jump / dtSec;
+            const tooImprecise = acc > 80 && prevFix.acc < 40 && dtSec < 15;
+            const impossibleJump = impliedMps > 85 && jump > acc + prevFix.acc; // > ~300 km/h
+            if ((tooImprecise || impossibleJump) && consecutiveRejects < 3) {
+              consecutiveRejects += 1;
+              return;
+            }
+          }
+          consecutiveRejects = 0;
+          lastFixWallClock = Date.now();
+
+          // iOS da -1 (y otros null) cuando no hay velocidad/rumbo: no tratarlo como dato.
+          let gpsSpeed: number | null =
+            rawSpeed != null && Number.isFinite(rawSpeed) && rawSpeed >= 0 ? rawSpeed : null;
+          if (gpsSpeed == null && prevFix) {
+            const dtSec = (fixTs - prevFix.t) / 1000;
+            const moved = getDistance(prevFix.lat, prevFix.lng, latitude, longitude);
+            if (dtSec >= 0.5 && dtSec <= 10) {
+              // Movimiento por debajo del ruido del GPS = parado.
+              gpsSpeed = moved > Math.max(3, (acc + prevFix.acc) * 0.35) ? moved / dtSec : 0;
+            }
+          }
+          // Rumbo del GPS solo es fiable en marcha; parado oscila y hace girar el mapa.
+          const gpsHeading: number | null =
+            rawHeading != null && Number.isFinite(rawHeading) && rawHeading >= 0 && (gpsSpeed == null || gpsSpeed >= 1.2)
+              ? rawHeading
+              : null;
+          prevFix = { lat: latitude, lng: longitude, t: fixTs, acc };
+
           setError(null);
-          
+
           lastLat = latitude;
           lastLng = longitude;
-          lastSpeed = gpsSpeed || 0;
-          lastHeading = gpsHeading || 0;
+          lastSpeed = gpsSpeed ?? 0;
+          if (gpsHeading != null) lastHeading = gpsHeading;
 
           setSpeed(gpsSpeed); // meters per second
           setHeading(gpsHeading);
@@ -153,19 +203,20 @@ export const useLocationTracking = (
               uid: user.uid,
               lat: latitude,
               lng: longitude,
-              speed: gpsSpeed || 0,
-              heading: gpsHeading || 0,
+              speed: gpsSpeed ?? 0,
+              heading: lastHeading,
               score: extraDataRef.current?.score || 0,
               timestamp: now,
               photoURL: extraDataRef.current?.photoURL || '',
               displayName: extraDataRef.current?.displayName || 'Motero',
               alert: extraDataRef.current?.alert || null,
-              level: extraDataRef.current?.level || 1
+              level: extraDataRef.current?.level || 1,
+              profileFrameId: extraDataRef.current?.profileFrameId || 'none'
             };
             lastSocketPayloadRef.current = payload;
             if (!skipBurst) {
               lastSocketEmitRef.current = { t: now, lat: latitude, lng: longitude, alertKey };
-              socket.emit('update-location', payload);
+              socket.volatile.emit('update-location', payload);
             }
 
             // Fallback persistence for cross-client visibility if socket packets are missed.
@@ -183,16 +234,19 @@ export const useLocationTracking = (
               setDoc(
                 doc(db, 'locations', user.uid),
                 {
+                  // Necesario para que las reglas dejen leer esta ubicación solo a miembros de este grupo.
+                  groupId,
                   uid: user.uid,
                   lat: latitude,
                   lng: longitude,
-                  speed: gpsSpeed || 0,
-                  heading: gpsHeading || 0,
+                  speed: gpsSpeed ?? 0,
+                  heading: lastHeading,
                   score: extraDataRef.current?.score || 0,
                   timestamp: now,
                   photoURL: extraDataRef.current?.photoURL || '',
                   displayName: extraDataRef.current?.displayName || 'Motero',
-                  level: extraDataRef.current?.level || 1
+                  level: extraDataRef.current?.level || 1,
+              profileFrameId: extraDataRef.current?.profileFrameId || 'none'
                 },
                 { merge: true }
               ).catch(() => {
@@ -206,21 +260,55 @@ export const useLocationTracking = (
           setHorizontalAccuracy(null);
           if (err.code === 1) {
             setError('Permiso de GPS denegado');
-          } else if (err.code === 2) {
+            return;
+          }
+          if (err.code === 2) {
             setError('Sin señal GPS, reconectando');
           } else if (err.code === 3) {
             setError('GPS tardando en responder, reintentando');
           } else {
             setError(err.message);
           }
+          // Algunos navegadores (sobre todo iOS) dejan el watch muerto tras un error: reiniciarlo.
+          scheduleRestart(3000);
         },
         {
           enableHighAccuracy,
-          // Fijaciones recientes del SO: menos despertares del chip y menos TIMEOUT en señal débil (túnel/bosque).
-          maximumAge: 2500,
-          timeout: 18000
+          // Posiciones de como mucho 1 s: en moto 2,5 s de antigüedad son ~60 m de retraso a 90 km/h.
+          maximumAge: 1000,
+          timeout: 15000
         }
       );
+      };
+
+      const scheduleRestart = (ms: number) => {
+        if (restartTimer) clearTimeout(restartTimer);
+        restartTimer = setTimeout(() => {
+          restartTimer = undefined;
+          if (!disposed) startWatch();
+        }, ms);
+      };
+
+      startWatch();
+
+      // Vigilante: si no llega ningún fix en 20 s con la app visible, reiniciar el watch.
+      const stallCheck = setInterval(() => {
+        if (disposed || document.visibilityState !== 'visible') return;
+        if (lastFixWallClock > 0 && Date.now() - lastFixWallClock > 20000 && !restartTimer) {
+          startWatch();
+          lastFixWallClock = Date.now();
+        }
+      }, 5000);
+
+      // Al volver del segundo plano iOS/Android suelen tener el watch congelado.
+      const onVisible = () => {
+        if (document.visibilityState === 'visible' && !disposed) startWatch();
+      };
+      document.addEventListener('visibilitychange', onVisible);
+      cleanupExtras = () => {
+        clearInterval(stallCheck);
+        document.removeEventListener('visibilitychange', onVisible);
+      };
 
       // Also emit every 5 seconds to ensure new users see everyone even if stationary
       intervalId = setInterval(() => {
@@ -245,19 +333,24 @@ export const useLocationTracking = (
             photoURL: extraDataRef.current?.photoURL || '',
             displayName: extraDataRef.current?.displayName || 'Motero',
             alert: extraDataRef.current?.alert || null,
-            level: extraDataRef.current?.level || 1
+            level: extraDataRef.current?.level || 1,
+              profileFrameId: extraDataRef.current?.profileFrameId || 'none'
           };
           lastSocketPayloadRef.current = payload;
           lastSocketEmitRef.current = { t, lat: lastLat, lng: lastLng, alertKey };
-          socket.emit('update-location', payload);
+          socket.volatile.emit('update-location', payload);
         }
       }, 5000);
     };
 
+    let cleanupExtras: () => void = () => {};
     startTracking();
 
     return () => {
-      if (watchId) {
+      disposed = true;
+      cleanupExtras();
+      if (restartTimer) clearTimeout(restartTimer);
+      if (watchId != null) {
         navigator.geolocation.clearWatch(watchId);
       }
       if (intervalId) {

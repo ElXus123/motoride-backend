@@ -1,5 +1,9 @@
+import { useState } from 'react';
+
 /**
- * Splash con logo de la app (sin spinner naranja): uso en carga de auth y en MainApp.
+ * Pantalla de carga de marca: logo del icono + una línea de ruta que se dibuja en bucle.
+ * Si el WebP no carga, cae al PNG de 512 px; nunca deja un hueco vacío.
+ * Sin spinner genérico: el trazo de ruta es el indicador de progreso.
  */
 export default function AppLogoSplash({
   className = '',
@@ -9,38 +13,52 @@ export default function AppLogoSplash({
   /** Tailwind z-index (p. ej. z-[9999] bajo MainApp). */
   zClassName?: string;
 }) {
+  const [src, setSrc] = useState('/ICONO-512.webp');
+
   return (
     <div
-      className={`fixed inset-0 ${zClassName} flex flex-col items-center justify-center bg-black ${className}`}
-      role="alert"
+      className={`fixed inset-0 ${zClassName} flex flex-col items-center justify-center overflow-hidden bg-zinc-950 px-6 ${className}`}
+      role="status"
       aria-live="polite"
     >
+      {/* Horizonte tenue: un resplandor ámbar bajo el logo, sin gradientes de plantilla */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 bottom-0 h-1/2 bg-[radial-gradient(ellipse_70%_60%_at_50%_100%,rgba(245,138,31,0.14),transparent_70%)]"
+      />
+
       <div className="relative flex flex-col items-center">
-        <div className="relative mb-8">
-          <div className="flex h-24 w-24 items-center justify-center rounded-2xl overflow-hidden ring-4 ring-orange-500/20 shadow-[0_0_60px_-15px_rgba(249,115,22,0.5)]">
-            <img
-              src="/ICONO.png"
-              alt=""
-              className="absolute inset-0 h-full w-full object-cover"
-              aria-hidden
-            />
-            <div
-              className="absolute inset-0 whats-new-logo-gleam pointer-events-none mix-blend-overlay"
-              style={{
-                background:
-                  'linear-gradient(105deg, transparent 0%, rgba(255,255,255,0.45) 45%, rgba(255,255,255,0.15) 55%, transparent 100%)',
-                width: '42%',
-                height: '160%',
-                top: '-30%',
-              }}
-            />
-          </div>
-          <div
-            className="absolute left-0 top-0 h-24 w-24 scale-y-[-1] [transform:rotateX(12deg)_scaleY(-1)] origin-top [mask-image:linear-gradient(to_bottom,rgba(0,0,0,0.5)_0%,rgba(0,0,0,0.2)_45%,transparent_100%)] [webkit-mask-image:linear-gradient(to_bottom,rgba(0,0,0,0.5)_0%,rgba(0,0,0,0.2)_45%,transparent_100%)] mix-blend-overlay blur-[0.35px] brightness-105"
-            aria-hidden
+        <img
+          src={src}
+          alt="MotoRide"
+          width={112}
+          height={112}
+          decoding="async"
+          fetchPriority="high"
+          onError={() => setSrc('/icon-512.png')}
+          className="mr-logo-breathe h-28 w-28 rounded-[1.75rem] object-cover"
+        />
+
+        <svg
+          className="mt-9 h-8 w-56"
+          viewBox="0 0 224 32"
+          fill="none"
+          aria-hidden
+        >
+          <path d="M4 22 C 40 22, 52 6, 92 10 S 150 28, 220 8" stroke="rgb(39 38 35)" strokeWidth="3" strokeLinecap="round" />
+          <path
+            d="M4 22 C 40 22, 52 6, 92 10 S 150 28, 220 8"
+            stroke="#f58a1f"
+            strokeWidth="3"
+            strokeLinecap="round"
+            pathLength={100}
+            className="mr-route-travel"
+            style={{ strokeDasharray: '34 66' }}
           />
-        </div>
-        <p className="text-sm font-semibold text-zinc-300">Cargando MotoRide</p>
+        </svg>
+
+        <p className="mr-display mt-1 text-lg uppercase tracking-[0.18em] text-zinc-300">MotoRide</p>
+        <p className="mr-eyebrow mt-3 text-[0.625rem] text-orange-400/80">Preparando la ruta…</p>
       </div>
     </div>
   );

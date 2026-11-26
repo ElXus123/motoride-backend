@@ -1,82 +1,70 @@
 import { useState, useEffect, useRef } from 'react';
-import {
-  getLineCoordinates,
-  snapPointToRouteDetailed,
-  routeDrivingBearing,
-  lerpAngleDegrees,
-} from '../lib/navigationPose';
-import { getBearing } from '../lib/geoUtils';
+import { getLineCoordinates, routeDrivingBearing, lerpAngleDegrees } from '../lib/navigationPose';
 
 type NavLike = {
-  routeGeometry?: any;
-  maneuverLocation?: { lat: number; lng: number } | null;
-  bearingToNext?: number | null;
-  distanceToNext?: number | null;
+  isOnRoute?: boolean;
+  snapped?: { lat: number; lng: number } | null;
+  segmentIndex?: number;
+  alongT?: number;
 };
 
+/** Velocidad (m/s) a partir de la que el GPS/COG se considera fiable para el rumbo. */
+const MIN_GPS_HEADING_MPS = 2.5;
+const MIN_COG_MPS = 0.8;
+
 /**
- * Rumbo estable para la flecha del mapa (tipo Waze/Maps embebido):
- * en ruta → tangente a la polilínea; fuera → GPS + COG suavizado.
+ * Rumbo estable para la flecha del mapa.
+ * - En ruta: tangente del trazado ORIGINAL (no de la guía OSRM), así la flecha sigue la curva real.
+ * - Fuera de ruta: GPS o COG suavizado, solo si hay velocidad suficiente.
+ * - Parado: se mantiene el último rumbo (no salta a 0° ni al rumbo ruidoso del GPS).
  */
 export function useNavigationHeading(
   gpsHeading: number | null,
   speedMps: number | null,
   courseOverGround: number | null,
-  currentLocation: { lat: number; lng: number } | null,
+  _currentLocation: { lat: number; lng: number } | null,
   parsedRouteGeo: any | null,
   navState: NavLike
 ): number {
   const [displayHeading, setDisplayHeading] = useState(0);
   const hasLockRef = useRef(false);
 
-  const routeGeo = navState.routeGeometry || parsedRouteGeo;
-  const distM = navState.distanceToNext;
+  const onRoute = !!navState.isOnRoute && !!navState.snapped;
+  const segIdx = navState.segmentIndex ?? 0;
+  const alongT = navState.alongT ?? 0;
 
   useEffect(() => {
     const speed = speedMps ?? 0;
-    const snap =
-      currentLocation && routeGeo ? snapPointToRouteDetailed(currentLocation.lat, currentLocation.lng, routeGeo) : null;
-    const coords = routeGeo ? getLineCoordinates(routeGeo) : [];
+    const coords = parsedRouteGeo ? getLineCoordinates(parsedRouteGeo) : [];
+    const gpsOk = gpsHeading != null && Number.isFinite(gpsHeading);
+    const cogOk = courseOverGround != null && Number.isFinite(courseOverGround);
 
-    const ON_ROUTE_M = 45;
     let target: number | null = null;
-
-    if (snap && snap.distanceMeters <= ON_ROUTE_M && coords.length >= 2) {
-      target = routeDrivingBearing(coords, snap.segmentIndex, snap.alongT);
-      const man = navState.maneuverLocation;
-      if (distM != null && distM < 140 && man && currentLocation) {
-        const towardManeuver = getBearing(currentLocation.lat, currentLocation.lng, man.lat, man.lng);
-        const w = Math.max(0, Math.min(0.22, ((140 - distM) / 140) * 0.35));
-        target = lerpAngleDegrees(target, towardManeuver, w);
-      }
-      const osrmBearing = navState.bearingToNext;
-      if (osrmBearing != null && typeof osrmBearing === 'number' && distM != null && distM < 90) {
-        target = lerpAngleDegrees(target, osrmBearing, 0.12);
-      }
-    } else if (gpsHeading != null && Number.isFinite(gpsHeading) && speed >= 2.5) {
-      target = gpsHeading;
-    } else if (courseOverGround != null && Number.isFinite(courseOverGround) && speed >= 0.8) {
-      target = courseOverGround;
-    } else if (gpsHeading != null && Number.isFinite(gpsHeading)) {
-      target = gpsHeading;
+    if (onRoute && coords.length >= 2) {
+      target = routeDrivingBearing(coords, segIdx, alongT);
+    } else if (gpsOk && speed >= MIN_GPS_HEADING_MPS) {
+      target = gpsHeading as number;
+    } else if (cogOk && speed >= MIN_COG_MPS) {
+      target = courseOverGround as number;
+    } else if (gpsOk && !hasLockRef.current) {
+      // Primer rumbo disponible aunque estés parado: mejor que 0°.
+      target = gpsHeading as number;
     }
 
-    if (target == null) {
-      return;
-    }
+    // Sin dato fiable (parado / sin GPS): conservar el último rumbo mostrado.
+    if (target == null || !Number.isFinite(target)) return;
 
     setDisplayHeading((prev) => {
       if (!hasLockRef.current) {
         hasLockRef.current = true;
         return target as number;
       }
-      const onRoute = snap != null && snap.distanceMeters <= ON_ROUTE_M;
       const alpha = onRoute
         ? speed > 10
-          ? 0.52
+          ? 0.5
           : speed > 5
-            ? 0.4
-            : 0.3
+            ? 0.38
+            : 0.28
         : speed > 8
           ? 0.45
           : speed > 3
@@ -84,20 +72,7 @@ export function useNavigationHeading(
             : 0.22;
       return lerpAngleDegrees(prev, target as number, alpha);
     });
-  }, [
-    gpsHeading,
-    speedMps,
-    courseOverGround,
-    currentLocation?.lat,
-    currentLocation?.lng,
-    parsedRouteGeo,
-    navState.routeGeometry,
-    navState.maneuverLocation?.lat,
-    navState.maneuverLocation?.lng,
-    navState.bearingToNext,
-    distM,
-    routeGeo,
-  ]);
+  }, [gpsHeading, speedMps, courseOverGround, onRoute, segIdx, alongT, parsedRouteGeo]);
 
   return displayHeading;
 }

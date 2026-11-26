@@ -342,7 +342,10 @@ export const purgeStaleOpenGroups = onSchedule(
         .get();
       for (const doc of groupSnap.docs) {
         const d = doc.data();
-        if (d.isRecording === true) {
+        // Cerrar la app ya no termina la ruta: una ruta «grabando» se respeta solo mientras sea razonable
+        // (≤ 36 h desde que empezó); más allá se considera abandonada y se borra.
+        const startedAt = typeof d.startTime === 'number' ? d.startTime : d.createdAt;
+        if (d.isRecording === true && typeof startedAt === 'number' && now - startedAt < 36 * 60 * 60 * 1000) {
           skipped += 1;
           continue;
         }

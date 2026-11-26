@@ -1,5 +1,13 @@
-import { useId, type ReactNode, type ReactElement } from 'react';
+import { memo } from 'react';
 import type { MedalDefinition } from '../lib/achievements';
+
+/**
+ * Medallas en pixel art (rejilla 32×32 escalada sin suavizado).
+ *
+ * Cada medalla = moneda pixelada con el color de la medalla + un sprite que representa el logro
+ * (moto, casco, carretera, señal de curvas, velocímetro, tortuga, herradura, concha del Camino…)
+ * + una cinta con la cifra cuando el logro tiene escalones (km, curvas, km/h, grados, nivel).
+ */
 
 type Props = {
   def: MedalDefinition;
@@ -7,1048 +15,827 @@ type Props = {
   className?: string;
 };
 
-type GlyphCommon = {
-  ring: string;
-  core: string;
-  accent: string;
-  s: number;
-  className?: string;
-  defsId: string;
+const N = 32;
+type Grid = (string | null)[][];
+
+/* ───────────── utilidades de dibujo ───────────── */
+
+function newGrid(): Grid {
+  return Array.from({ length: N }, () => Array<string | null>(N).fill(null));
+}
+
+function put(g: Grid, x: number, y: number, c: string | null) {
+  const xi = Math.round(x);
+  const yi = Math.round(y);
+  if (xi < 0 || yi < 0 || xi >= N || yi >= N || c == null) return;
+  g[yi][xi] = c;
+}
+
+function line(g: Grid, x0: number, y0: number, x1: number, y1: number, c: string) {
+  x0 = Math.round(x0);
+  y0 = Math.round(y0);
+  x1 = Math.round(x1);
+  y1 = Math.round(y1);
+  const dx = Math.abs(x1 - x0);
+  const dy = -Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1;
+  const sy = y0 < y1 ? 1 : -1;
+  let err = dx + dy;
+  for (;;) {
+    put(g, x0, y0, c);
+    if (x0 === x1 && y0 === y1) break;
+    const e2 = 2 * err;
+    if (e2 >= dy) {
+      err += dy;
+      x0 += sx;
+    }
+    if (e2 <= dx) {
+      err += dx;
+      y0 += sy;
+    }
+  }
+}
+
+/** Rellena celdas cuyo centro cumple `test(dx, dy)` respecto a (cx, cy). */
+function fillWhere(g: Grid, cx: number, cy: number, r: number, c: string, test: (d: number, dx: number, dy: number) => boolean) {
+  for (let y = Math.floor(cy - r - 1); y <= Math.ceil(cy + r + 1); y++) {
+    for (let x = Math.floor(cx - r - 1); x <= Math.ceil(cx + r + 1); x++) {
+      const dx = x - cx;
+      const dy = y - cy;
+      const d = Math.hypot(dx, dy);
+      if (test(d, dx, dy)) put(g, x, y, c);
+    }
+  }
+}
+
+function disc(g: Grid, cx: number, cy: number, r: number, c: string) {
+  fillWhere(g, cx, cy, r, c, (d) => d <= r);
+}
+
+function ring(g: Grid, cx: number, cy: number, r0: number, r1: number, c: string) {
+  fillWhere(g, cx, cy, r1, c, (d) => d > r0 && d <= r1);
+}
+
+/** Dibuja filas de texto: cada carácter es una clave de paleta ('.' = vacío). */
+function rows(g: Grid, ox: number, oy: number, art: string[], pal: Record<string, string>) {
+  art.forEach((row, y) => {
+    for (let x = 0; x < row.length; x++) {
+      const ch = row[x];
+      if (ch === '.' || ch === ' ') continue;
+      const c = pal[ch];
+      if (c) put(g, ox + x, oy + y, c);
+    }
+  });
+}
+
+function shade(hex: string, amt: number): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return hex;
+  const n = parseInt(m[1], 16);
+  const ch = (v: number) => {
+    const t = amt < 0 ? 0 : 255;
+    const p = Math.abs(amt);
+    return Math.round((t - v) * p + v);
+  };
+  const r = ch((n >> 16) & 255);
+  const gg = ch((n >> 8) & 255);
+  const b = ch(n & 255);
+  return `#${((1 << 24) | (r << 16) | (gg << 8) | b).toString(16).slice(1)}`;
+}
+
+/* ───────────── fuente pixel 3×5 para la cinta ───────────── */
+
+const FONT: Record<string, string[]> = {
+  '0': ['111', '101', '101', '101', '111'],
+  '1': ['010', '110', '010', '010', '111'],
+  '2': ['111', '001', '111', '100', '111'],
+  '3': ['111', '001', '111', '001', '111'],
+  '4': ['101', '101', '111', '001', '001'],
+  '5': ['111', '100', '111', '001', '111'],
+  '6': ['111', '100', '111', '101', '111'],
+  '7': ['111', '001', '010', '010', '010'],
+  '8': ['111', '101', '111', '101', '111'],
+  '9': ['111', '101', '111', '001', '111'],
+  K: ['101', '110', '100', '110', '101'],
+  '.': ['0', '0', '0', '0', '1'],
+  '°': ['11', '11', '00', '00', '00'],
+  X: ['101', '101', '010', '101', '101'],
 };
 
-/** IDs reales de achievements.ts → categoría de glifo (los prefijos km_/rides_ no existían). */
-const KM_MEDAL_IDS = new Set([
-  'twentyfive_km',
-  'fifty_km',
-  'one_hundred_km',
-  'two_hundred_km',
-  'three_hundred_km',
-  'five_hundred_km',
-  'seven_hundred_fifty_km',
-  'one_thousand_km',
-  'one_thousand_five_hundred_km',
-  'two_thousand_five_hundred_km',
-  'five_thousand_km',
+function textWidth(t: string): number {
+  let w = 0;
+  for (const ch of t) w += (FONT[ch]?.[0].length ?? 3) + 1;
+  return Math.max(0, w - 1);
+}
+
+function drawText(g: Grid, x: number, y: number, t: string, c: string) {
+  let cx = x;
+  for (const ch of t) {
+    const glyph = FONT[ch];
+    if (!glyph) {
+      cx += 4;
+      continue;
+    }
+    glyph.forEach((row, gy) => {
+      for (let gx = 0; gx < row.length; gx++) if (row[gx] === '1') put(g, cx + gx, y + gy, c);
+    });
+    cx += glyph[0].length + 1;
+  }
+}
+
+/* ───────────── paleta base de sprites ───────────── */
+
+const K = '#07070b';
+const BASE_PAL: Record<string, string> = {
+  k: K,
+  w: '#ffffff',
+  l: '#d1d5db',
+  g: '#9ca3af',
+  d: '#4b5563',
+  y: '#facc15',
+  o: '#f97316',
+  O: '#c2410c',
+  R: '#ef4444',
+  m: '#991b1b',
+  b: '#93c5fd',
+  B: '#2563eb',
+  G: '#4ade80',
+  e: '#15803d',
+  n: '#7c4a1e',
+  s: '#e5e7eb',
+  S: '#94a3b8',
+  h: '#fef3c7',
+  p: '#c084fc',
+};
+
+type SpriteCtx = {
+  g: Grid;
+  /** Origen de la caja de 16×16 del sprite. */
+  ox: number;
+  oy: number;
+  pal: Record<string, string>;
+};
+
+type Sprite = (c: SpriteCtx) => void;
+
+const art = (a: string[], extra?: Record<string, string>): Sprite => (c) =>
+  rows(c.g, c.ox, c.oy, a, extra ? { ...c.pal, ...extra } : c.pal);
+
+/* ───────────── sprites (16×16) ───────────── */
+
+const MOTO = art([
+  '................',
+  '................',
+  '................',
+  '............kk..',
+  '...........k....',
+  '....kk.....k....',
+  '...kaakkkkkk....',
+  '..krrrrrrrrrk...',
+  '..kkrrrrrrrrkk..',
+  '...kkddddkkkwwk.',
+  '.kkkk.dddd.kkkk.',
+  'kk..kkggggkk..kk',
+  'k.ll.k....k.ll.k',
+  'k.ll.k....k.ll.k',
+  'kk..kk....kk..kk',
+  '.kkkk......kkkk.',
 ]);
 
-const KM_DISTANCE_BY_ID: Record<string, number> = {
-  twentyfive_km: 25,
-  fifty_km: 50,
-  one_hundred_km: 100,
-  two_hundred_km: 200,
-  three_hundred_km: 300,
-  five_hundred_km: 500,
-  seven_hundred_fifty_km: 750,
-  one_thousand_km: 1000,
-  one_thousand_five_hundred_km: 1500,
-  two_thousand_five_hundred_km: 2500,
-  five_thousand_km: 5000,
-};
-
-/** `first_ride` tiene glifo propio (GlyphFirstRide). */
-const RIDES_MEDAL_IDS = new Set(['ten_rides', 'fifty_rides']);
-
-const RIDES_COUNT_BY_ID: Record<string, 10 | 50> = {
-  ten_rides: 10,
-  fifty_rides: 50,
-};
-
-const CURVES_MEDAL_IDS = new Set([
-  'twentyfive_curves',
-  'one_hundred_curves',
-  'two_hundred_fifty_curves',
-  'five_hundred_curves',
-  'one_thousand_curves',
+const HELMET = art([
+  '................',
+  '................',
+  '.....kkkkkk.....',
+  '...kkrrrrrrkk...',
+  '..krrrrrrrrrrk..',
+  '.krraarrrrrrrrk.',
+  '.kraarrrrrrrrrk.',
+  'krrarrrrkkkkkkkk',
+  'krrrrrrkbbbbbbbk',
+  'krrrrrrkbwbbbbbk',
+  'krrrrrrkbbbbbbbk',
+  'krrrrrrrkkkkkkkk',
+  '.krrrrrrrrrrrk..',
+  '.kkrrrrrrrrrkk..',
+  '...kkkkkkkkkk...',
+  '................',
 ]);
 
-const CURVE_COUNT_BY_ID: Record<string, number> = {
-  twentyfive_curves: 25,
-  one_hundred_curves: 100,
-  two_hundred_fifty_curves: 250,
-  five_hundred_curves: 500,
-  one_thousand_curves: 1000,
+const FLAG = art([
+  '................',
+  '.a..............',
+  '.kwwrrwwrrwwrr..',
+  '.kwwrrwwrrwwrr..',
+  '.krrwwrrwwrrww..',
+  '.krrwwrrwwrrww..',
+  '.kwwrrwwrrwwrr..',
+  '.kwwrrwwrrwwrr..',
+  '.krrwwrrwwrrww..',
+  '.krrwwrrwwrrww..',
+  '.k..............',
+  '.k..............',
+  '.k..............',
+  '.k..............',
+  '.k..............',
+  'kkk.............',
+]);
+
+const ROAD: Sprite = ({ g, ox, oy, pal }) => {
+  // Montañas al fondo
+  rows(g, ox, oy, ['...a........a...', '..aaa......aaa..', '.aaaaa....aaaaa.'], pal);
+  const top = 3;
+  for (let y = top; y < 16; y++) {
+    const L = Math.max(0, 6 - Math.floor((y - top) / 2));
+    const R = 15 - L;
+    for (let x = L; x <= R; x++) put(g, ox + x, oy + y, pal.d);
+    put(g, ox + L, oy + y, pal.w);
+    put(g, ox + R, oy + y, pal.w);
+    const dash = (y - top) % 4 < 2;
+    if (dash) {
+      put(g, ox + 7, oy + y, pal.y);
+      put(g, ox + 8, oy + y, pal.y);
+    }
+  }
 };
 
-/** Texto legible en la chapa según umbral (km acumulados). */
-function formatKmLabel(km: number): string {
-  if (km === 1000) return '1k';
-  if (km === 1500) return '1.5k';
-  if (km === 2500) return '2.5k';
-  if (km === 5000) return '5k';
-  return String(km);
-}
+const CURVE_SIGN = art([
+  '.......kk.......',
+  '......kyyk......',
+  '.....kyyyyk.....',
+  '....kyyykyyk....',
+  '...kyyykkkyyk...',
+  '..kyyyyykkyyyk..',
+  '.kyyyyykkyyyyyk.',
+  'kyyyyykkyyyyyyyk',
+  'kyyyyykkyyyyyyyk',
+  '.kyyyyykkyyyyyk.',
+  '..kyyyyykkyyyk..',
+  '...kyyyykkyyk...',
+  '....kyykkyyk....',
+  '.....kykkyk.....',
+  '......kyyk......',
+  '.......kk.......',
+]);
 
-function formatCurveLabel(n: number): string {
-  if (n >= 1000) return '1k';
-  return String(n);
-}
+/** Velocímetro con la aguja según el nivel (0 = izquierda, 1 = derecha). */
+const gauge = (frac: number): Sprite => ({ g, ox, oy, pal }) => {
+  const cx = ox + 7.5;
+  const cy = oy + 10.5;
+  fillWhere(g, cx, cy, 8, K, (d, _dx, dy) => d <= 8 && dy <= 0.6);
+  fillWhere(g, cx, cy, 7, pal.d, (d, _dx, dy) => d <= 7 && dy <= 0.6);
+  // Arco de escala: blanco → amarillo → rojo
+  fillWhere(g, cx, cy, 7, pal.w, (d, dx, dy) => {
+    if (d <= 5.6 || d > 7 || dy > 0.6) return false;
+    const a = Math.atan2(-dy, dx); // π (izq) … 0 (der)
+    return a > Math.PI * 0.5;
+  });
+  fillWhere(g, cx, cy, 7, pal.y, (d, dx, dy) => {
+    if (d <= 5.6 || d > 7 || dy > 0.6) return false;
+    const a = Math.atan2(-dy, dx);
+    return a <= Math.PI * 0.5 && a > Math.PI * 0.22;
+  });
+  fillWhere(g, cx, cy, 7, pal.R, (d, dx, dy) => {
+    if (d <= 5.6 || d > 7 || dy > 0.6) return false;
+    const a = Math.atan2(-dy, dx);
+    return a <= Math.PI * 0.22;
+  });
+  const ang = Math.PI * (1 - frac);
+  line(g, cx, cy, cx + Math.cos(ang) * 5.2, cy - Math.sin(ang) * 5.2, pal.o);
+  line(g, cx + 0.5, cy, cx + 0.5 + Math.cos(ang) * 5.2, cy - Math.sin(ang) * 5.2, pal.o);
+  disc(g, cx, cy, 1.2, pal.w);
+  for (let x = 0; x < 16; x++) put(g, ox + x, oy + 11, K);
+};
 
-function levelRomanLabel(id: string): string {
-  if (id === 'level_5') return 'V';
-  if (id === 'level_10') return 'X';
-  if (id === 'level_15') return 'XV';
-  if (id === 'level_20') return 'XX';
-  if (id === 'level_25') return 'XXV';
-  return '★';
-}
+const TURTLE = art([
+  '................',
+  '................',
+  '................',
+  '................',
+  '....kkkkkk......',
+  '...kGGeeGGk.....',
+  '..kGeGGGGeGk.kk.',
+  '.kGGeGGGGeGGkGGk',
+  '.kGeeeeeeeeGkGwk',
+  'kkkkkkkkkkkkkGGk',
+  '.khhhhhhhhhhk...',
+  '.kGGk....kGGk...',
+  '.kkk......kkk...',
+  '................',
+  '................',
+  '................',
+]);
 
-function leanDegreeLabel(id: string): string {
-  if (id === 'lean_30') return '30°';
-  if (id === 'lean_epic_45') return '45°';
-  if (id === 'lean_line') return '55°';
-  return '°';
-}
+const SHIELD = art([
+  '................',
+  '..kkkkkkkkkkkk..',
+  '..kGGGGGGGGGGk..',
+  '..kGGGGGGGGGGk..',
+  '..kGGGGGGGGwwk..',
+  '..kGGGGGGGwwGk..',
+  '..kGwwGGGwwGGk..',
+  '..kGGwwGwwGGGk..',
+  '..kGGGwwwGGGGk..',
+  '...kGGGwGGGGk...',
+  '...kGGGGGGGGk...',
+  '....kGGGGGGk....',
+  '.....kGGGGk.....',
+  '......kGGk......',
+  '.......kk.......',
+  '................',
+]);
 
-/** Giro visual al pivotar en la rueda trasera (suave, legible en chapa pequeña). */
-function leanVisualTiltDeg(label: string): number {
-  const n = parseInt(label, 10);
-  if (!Number.isFinite(n)) return -22;
-  return -Math.min(32, 7 + n * 0.38);
-}
+const BOLT = art([
+  '................',
+  '.........kkkk...',
+  '........kyyyk...',
+  'aaa....kyyyk....',
+  '......kyyyk.....',
+  '.....kyyyk......',
+  '....kyyyykkkk...',
+  '...kyyyyyyyyk...',
+  '...kkkkkyyyk....',
+  '.......kyyk.....',
+  '......kyyk...aaa',
+  '.....kyyk.......',
+  '....kyyk........',
+  '...kyk.....aa...',
+  '...kk...........',
+  '................',
+]);
 
-/** Cinta con pliegue central y colas (estilo chapa / arcade). `defs` fuera del grupo filtrado — evita glitches en Safari. */
-function RibbonDeluxe({ accent, ring, defsId }: { accent: string; ring: string; defsId: string }) {
-  const g = `${defsId}-rib`;
-  return (
-    <>
-      <defs>
-        <linearGradient id={g} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor={accent} stopOpacity={1} />
-          <stop offset="38%" stopColor="#fafafa" stopOpacity={0.35} />
-          <stop offset="55%" stopColor={ring} stopOpacity={0.98} />
-          <stop offset="100%" stopColor={accent} stopOpacity={0.72} />
-        </linearGradient>
-      </defs>
-      <g filter={`url(#${defsId}-dropshadow)`}>
-        <path
-          d="M28 44.5 L20 54 L24.5 48.5 L28 46.2 L31.5 48.5 L36 54 L28 44.5 Z"
-          fill={`url(#${g})`}
-          stroke={ring}
-          strokeWidth={0.6}
-          strokeOpacity={0.5}
-        />
-        <path d="M20 54 L22 50.5 M36 54 L34 50.5" stroke={ring} strokeWidth={0.8} strokeLinecap="round" opacity={0.6} />
-        <path d="M28 46.2 L28 44.5" stroke={ring} strokeWidth={0.9} strokeOpacity={0.35} strokeLinecap="round" />
-      </g>
-    </>
+/** Moto tumbada: `deg` grados respecto a la vertical, con arco del ángulo. */
+const lean = (deg: number): Sprite => ({ g, ox, oy, pal }) => {
+  const px = ox + 4;
+  const py = oy + 14;
+  for (let x = 0; x < 16; x++) put(g, ox + x, py + 1, pal.w);
+  const a = (deg * Math.PI) / 180;
+  const len = 11;
+  const tx = px + Math.sin(a) * len;
+  const ty = py - Math.cos(a) * len;
+  // Arco entre la vertical y la moto
+  for (let t = 0; t <= a; t += 0.05) {
+    put(g, px + Math.sin(t) * 6, py - Math.cos(t) * 6, pal.y);
+  }
+  line(g, px, py, px, py - 7, pal.d);
+  // Cuerpo de la moto (grueso)
+  line(g, px, py, tx, ty, K);
+  line(g, px + 1, py, tx + 1, ty, pal.r);
+  line(g, px + 2, py, tx + 2, ty, pal.r);
+  line(g, px + 3, py, tx + 3, ty, K);
+  disc(g, px + 1.5, py - 0.5, 1.6, K);
+  disc(g, tx + 1.5, ty, 1.4, pal.a);
+  // Chispas de la rodillera
+  put(g, px + 6, py - 1, pal.o);
+  put(g, px + 8, py - 2, pal.y);
+  put(g, px + 7, py, pal.o);
+};
+
+const HORSESHOE = art([
+  '................',
+  '................',
+  '..kkk......kkk..',
+  '.kssk......kssk.',
+  '.ksdk......kdsk.',
+  'kssk........kssk',
+  'ksdk........kdsk',
+  'kssk........kssk',
+  'ksdk........kdsk',
+  'kssk........kssk',
+  'kssk........kssk',
+  '.ksskk....kkssk.',
+  '.kssssssssssssk.',
+  '..kssssssssssk..',
+  '....kkkkkkkk....',
+  '................',
+]);
+
+const trophy = (metal: string): Sprite =>
+  art(
+    [
+      '................',
+      '................',
+      'kkkkTTTTTTTTkkkk',
+      'kT.kTwTTTTTTk.Tk',
+      'kT.kTwTTTTTTk.Tk',
+      '.kTkTTTTTTTTkTk.',
+      '..kkTTTTTTTTkk..',
+      '....kTTTTTTk....',
+      '.....kTTTTk.....',
+      '......kTTk......',
+      '......kTTk......',
+      '.....kTTTTk.....',
+      '....kkkkkkkk....',
+      '....kddddddk....',
+      '....kkkkkkkk....',
+      '................',
+    ],
+    { T: metal }
   );
-}
 
-/** Marco metálico común: bisel, viñeta y sombra. */
-function MedalFrame({
-  defsId,
-  ring,
-  core,
-  accent,
-  children,
-}: {
-  defsId: string;
-  ring: string;
-  core: string;
-  accent: string;
-  children: ReactNode;
-}) {
-  const gMetal = `${defsId}-metal`;
-  const gVig = `${defsId}-vig`;
-  return (
-    <>
-      <defs>
-        <linearGradient id={gMetal} x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor={accent} stopOpacity={0.65} />
-          <stop offset="35%" stopColor={ring} stopOpacity={0.95} />
-          <stop offset="72%" stopColor={core} stopOpacity={1} />
-          <stop offset="100%" stopColor={core} stopOpacity={0.88} />
-        </linearGradient>
-        <radialGradient id={gVig} cx="32%" cy="26%" r="72%">
-          <stop offset="0%" stopColor="#ffffff" stopOpacity={0.18} />
-          <stop offset="38%" stopColor={core} stopOpacity={0.12} />
-          <stop offset="100%" stopColor={core} stopOpacity={0.94} />
-        </radialGradient>
-        <filter id={`${defsId}-dropshadow`} x="-30%" y="-30%" width="160%" height="160%">
-          <feDropShadow dx="0" dy="1.2" stdDeviation="1.4" floodColor="#000000" floodOpacity="0.5" />
-        </filter>
-        <clipPath id={`${defsId}-clip`}>
-          <circle cx="28" cy="27" r="17.4" />
-        </clipPath>
-      </defs>
-      <circle cx="28" cy="27" r="21.8" fill="none" stroke={`url(#${gMetal})`} strokeWidth={2.8} />
-      <circle cx="28" cy="27" r="19.5" fill={`url(#${gVig})`} stroke={ring} strokeWidth={1.2} strokeOpacity={0.85} />
-      <ellipse cx="28" cy="19" rx="11" ry="6.5" fill="#ffffff" fillOpacity={0.08} />
-      <ellipse cx="28" cy="35" rx="12" ry="5" fill="#000000" fillOpacity={0.12} />
-      <circle cx="28" cy="27" r="17.2" fill="none" stroke={accent} strokeWidth={0.45} strokeOpacity={0.28} />
-      <g clipPath={`url(#${defsId}-clip)`}>{children}</g>
-      <RibbonDeluxe accent={accent} ring={ring} defsId={defsId} />
-    </>
+const SHELL: Sprite = ({ g, ox, oy, pal }) => {
+  const cx = ox + 7.5;
+  const by = oy + 13;
+  // Abanico
+  fillWhere(g, cx, by, 10, K, (d, _dx, dy) => d <= 10 && dy <= 0);
+  fillWhere(g, cx, by, 9, pal.y, (d, _dx, dy) => d <= 9 && dy <= 0);
+  for (const deg of [-62, -36, -12, 12, 36, 62]) {
+    const a = (deg * Math.PI) / 180;
+    line(g, cx, by - 1, cx + Math.sin(a) * 8, by - 1 - Math.cos(a) * 8, pal.O);
+  }
+  // Borde ondulado
+  for (let x = -9; x <= 9; x += 3) put(g, cx + x, by - Math.sqrt(Math.max(0, 81 - x * x)), pal.h);
+  // Charnela
+  rows(g, ox, by, ['....kkkkkkkk....', '.....kyyyyk.....', '......kkkk......'], pal);
+};
+
+const COFFEE = art([
+  '................',
+  '................',
+  '................',
+  '....w..w..w.....',
+  '.....w..w..w....',
+  '....w..w..w.....',
+  '................',
+  '..kkkkkkkkkk....',
+  '..kwwwwwwwwkkk..',
+  '..kwnnnnnnwk.k..',
+  '..kwwwwwwwwk.k..',
+  '..kwwwwwwwwkkk..',
+  '...kwwwwwwk.....',
+  '.kkkkkkkkkkkk...',
+  '..kssssssssk....',
+  '...kkkkkkkk.....',
+]);
+
+const DIAMOND: Sprite = ({ g, ox, oy, pal }) => {
+  rows(
+    g,
+    ox,
+    oy,
+    [
+      '.............w..',
+      '............www.',
+      '.............w..',
+      '....kkkkkkkk....',
+      '...kwbbwbbwbk...',
+      '..kwbbwbbwbbbk..',
+      '.kkkkkkkkkkkkkk.',
+      '..kbwbbbbbbbbk..',
+      '...kbwbbbbbbk...',
+      '....kbwbbbbk....',
+      '.....kbwbbk.....',
+      '......kbbk......',
+      '.......kk.......',
+      '..w.............',
+      '.www............',
+      '..w.............',
+    ],
+    pal
   );
+};
+
+const CROWN = art([
+  '................',
+  '................',
+  '................',
+  '................',
+  '..k....k....k...',
+  '.kyk..kyk..kyk..',
+  '.kyyk.kyk.kyyk..',
+  '.kyyykyyykyyyk..',
+  '.kyyyyyyyyyyyk..',
+  '.kyRyyyByyyRyk..',
+  '.kyyyyyyyyyyyk..',
+  '.kkkkkkkkkkkkk..',
+  '................',
+  '................',
+  '................',
+  '................',
+]);
+
+const DICE = art([
+  '................',
+  '................',
+  '...kkkkkkkkkk...',
+  '..kwwwwwwwwwwk..',
+  '..kwkkwwwwkkwk..',
+  '..kwkkwwwwkkwk..',
+  '..kwwwwwwwwwwk..',
+  '..kwwwwRRwwwwk..',
+  '..kwwwwRRwwwwk..',
+  '..kwwwwwwwwwwk..',
+  '..kwkkwwwwkkwk..',
+  '..kwkkwwwwkkwk..',
+  '..kwwwwwwwwwwk..',
+  '...kkkkkkkkkk...',
+  '................',
+  '................',
+]);
+
+const MOON: Sprite = ({ g, ox, oy, pal }) => {
+  const cx = ox + 7;
+  const cy = oy + 8;
+  disc(g, cx, cy, 6.4, K);
+  disc(g, cx, cy, 5.6, pal.h);
+  // Recortar el creciente: '' = transparente
+  fillWhere(g, cx + 3, cy - 2.2, 5, '', (d) => d <= 4.8);
+  for (const [x, y] of [
+    [12, 2],
+    [14, 6],
+    [11, 12],
+    [3, 1],
+  ]) {
+    put(g, ox + x, oy + y, pal.y);
+  }
+  put(g, ox + 13, oy + 2, pal.w);
+  put(g, ox + 12, oy + 1, pal.w);
+  put(g, ox + 12, oy + 3, pal.w);
+  put(g, ox + 11, oy + 2, pal.w);
+};
+
+const COMPASS: Sprite = ({ g, ox, oy, pal }) => {
+  const cx = ox + 7.5;
+  const cy = oy + 7.5;
+  disc(g, cx, cy, 7.4, K);
+  disc(g, cx, cy, 6.5, pal.h);
+  ring(g, cx, cy, 5.4, 6.5, pal.a);
+  // Aguja: norte rojo, sur blanco
+  for (let i = 0; i <= 5; i++) {
+    const w = Math.max(0, 1.6 - i * 0.3);
+    line(g, cx - w, cy - i, cx + w, cy - i, pal.R);
+    line(g, cx - w, cy + i, cx + w, cy + i, pal.d);
+  }
+  put(g, cx, cy, K);
+  put(g, cx, oy - 0.5, pal.w);
+};
+
+const GEAR: Sprite = ({ g, ox, oy, pal }) => {
+  const cx = ox + 7.5;
+  const cy = oy + 7.5;
+  for (let i = 0; i < 8; i++) {
+    const a = (i * Math.PI) / 4;
+    disc(g, cx + Math.cos(a) * 6, cy + Math.sin(a) * 6, 1.7, K);
+  }
+  disc(g, cx, cy, 6.2, K);
+  for (let i = 0; i < 8; i++) {
+    const a = (i * Math.PI) / 4;
+    disc(g, cx + Math.cos(a) * 6, cy + Math.sin(a) * 6, 1.1, pal.S);
+  }
+  disc(g, cx, cy, 5.3, pal.S);
+  ring(g, cx, cy, 3.2, 4.2, pal.l);
+  disc(g, cx, cy, 2.2, K);
+};
+
+const CROSSHAIR: Sprite = ({ g, ox, oy, pal }) => {
+  const cx = ox + 7.5;
+  const cy = oy + 7.5;
+  CURVE_SIGN_SMALL({ g, ox: ox + 4, oy: oy + 4, pal });
+  ring(g, cx, cy, 6, 7.2, pal.R);
+  line(g, cx, oy - 0.5, cx, oy + 3, pal.R);
+  line(g, cx, oy + 12, cx, oy + 15.5, pal.R);
+  line(g, ox - 0.5, cy, ox + 3, cy, pal.R);
+  line(g, ox + 12, cy, ox + 15.5, cy, pal.R);
+};
+
+/** Trazado en chicane con salida (blanca) y meta (roja): la “trazada” ideal. */
+const TRACE: Sprite = ({ g, ox, oy, pal }) => {
+  const path: [number, number][] = [
+    [2, 13],
+    [6, 8],
+    [9, 6],
+    [12, 10],
+    [13, 3],
+  ];
+  for (let i = 1; i < path.length; i++) {
+    const [x0, y0] = path[i - 1];
+    const [x1, y1] = path[i];
+    line(g, ox + x0, oy + y0 + 1, ox + x1, oy + y1 + 1, K);
+    line(g, ox + x0, oy + y0, ox + x1, oy + y1, pal.a);
+  }
+  disc(g, ox + 2, oy + 13, 1.4, pal.w);
+  disc(g, ox + 13, oy + 3, 1.4, pal.R);
+};
+
+const CURVE_SIGN_SMALL = art([
+  '...kk...',
+  '..kyyk..',
+  '.kykyyk.',
+  'kyykkyyk',
+  'kyykkyyk',
+  '.kyykyk.',
+  '..kyyk..',
+  '...kk...',
+]);
+
+/* ───────────── qué sprite y cifra lleva cada medalla ───────────── */
+
+type MedalLook = { sprite: Sprite; label?: string };
+
+const KM_LABEL: Record<string, string> = {
+  ten_km: '10',
+  twentyfive_km: '25',
+  fifty_km: '50',
+  one_hundred_km: '100',
+  two_hundred_km: '200',
+  three_hundred_km: '300',
+  five_hundred_km: '500',
+  seven_hundred_fifty_km: '750',
+  one_thousand_km: '1K',
+  one_thousand_five_hundred_km: '1.5K',
+  two_thousand_five_hundred_km: '2.5K',
+  five_thousand_km: '5K',
+};
+
+const CURVES_LABEL: Record<string, string> = {
+  ten_curves: '10',
+  twentyfive_curves: '25',
+  one_hundred_curves: '100',
+  two_hundred_fifty_curves: '250',
+  five_hundred_curves: '500',
+  one_thousand_curves: '1K',
+};
+
+const LEVEL_LABEL: Record<string, string> = {
+  level_3: '3',
+  level_5: '5',
+  level_10: '10',
+  level_15: '15',
+  level_20: '20',
+  level_25: '25',
+};
+
+function lookFor(id: string): MedalLook {
+  if (KM_LABEL[id]) return { sprite: ROAD, label: KM_LABEL[id] };
+  if (CURVES_LABEL[id]) return { sprite: CURVE_SIGN, label: CURVES_LABEL[id] };
+  if (LEVEL_LABEL[id]) return { sprite: CROWN, label: LEVEL_LABEL[id] };
+  switch (id) {
+    case 'first_ride':
+      return { sprite: MOTO, label: '1' };
+    case 'twenty_rides':
+      return { sprite: MOTO, label: '20' };
+    case 'lean_20':
+      return { sprite: lean(20), label: '20°' };
+    case 'trazada':
+      return { sprite: TRACE };
+    case 'ten_rides':
+      return { sprite: HELMET, label: '10' };
+    case 'fifty_rides':
+      return { sprite: FLAG, label: '50' };
+    case 'speed_safe':
+      return { sprite: SHIELD };
+    case 'speed_turtle':
+      return { sprite: TURTLE };
+    case 'club_80':
+      return { sprite: gauge(0.45), label: '80' };
+    case 'speed_hundred':
+      return { sprite: gauge(0.62), label: '100' };
+    case 'speed_over_120':
+      return { sprite: gauge(0.8), label: '120' };
+    case 'huracan':
+      return { sprite: BOLT, label: '150' };
+    case 'lean_30':
+      return { sprite: lean(30), label: '30°' };
+    case 'lean_epic_45':
+      return { sprite: lean(45), label: '45°' };
+    case 'lean_line':
+      return { sprite: lean(55), label: '55°' };
+    case 'mule':
+      return { sprite: HORSESHOE };
+    case 'silver_road':
+      return { sprite: trophy('#e2e8f0') };
+    case 'gold_odyssey':
+      return { sprite: trophy('#facc15') };
+    case 'curve_hunter':
+      return { sprite: CROSSHAIR };
+    case 'compass_rose':
+      return { sprite: COMPASS };
+    case 'peregrino':
+      return { sprite: SHELL };
+    case 'chain_master':
+      return { sprite: GEAR };
+    case 'coffee_loop':
+      return { sprite: COFFEE };
+    case 'mirror_polish':
+      return { sprite: DIAMOND };
+    case 'night_style':
+      return { sprite: MOON };
+    case 'wildcard':
+      return { sprite: DICE };
+    default:
+      return { sprite: trophy('#facc15') };
+  }
 }
 
-function wrapMedal(common: GlyphCommon, inner: ReactNode): ReactElement {
-  const { s, className, defsId, ring, core, accent } = common;
+/* ───────────── composición de la medalla ───────────── */
+
+function buildMedal(def: MedalDefinition): Grid {
+  const g = newGrid();
+  const ringC = def.ring;
+  const ringDark = shade(ringC, -0.38);
+  const ringLight = shade(ringC, 0.35);
+  const core = def.core;
+  const coreLight = shade(core, 0.1);
+  const c = 15.5;
+
+  // Moneda: contorno, aro con luz arriba-izquierda y sombra abajo-derecha, centro con bisel
+  fillWhere(g, c, c, 15.6, K, (d) => d <= 15.6);
+  fillWhere(g, c, c, 14.6, ringC, (d) => d <= 14.6);
+  fillWhere(g, c, c, 14.6, ringLight, (d, dx, dy) => d <= 14.6 && d > 12.4 && dx + dy < -9);
+  fillWhere(g, c, c, 14.6, ringDark, (d, dx, dy) => d <= 14.6 && d > 12.4 && dx + dy > 9);
+  // Remaches del aro
+  for (let i = 0; i < 8; i++) {
+    const a = (i * Math.PI) / 4 + Math.PI / 8;
+    put(g, c + Math.cos(a) * 13.5, c + Math.sin(a) * 13.5, def.accent);
+  }
+  fillWhere(g, c, c, 12.4, K, (d) => d <= 12.4);
+  fillWhere(g, c, c, 11.6, core, (d) => d <= 11.6);
+  // Tramado suave en el centro (look retro)
+  fillWhere(g, c, c, 11.6, coreLight, (d, dx, dy) => d <= 11.6 && dx + dy < 0 && (Math.round(dx) + Math.round(dy)) % 2 === 0);
+
+  const look = lookFor(def.id);
+  const pal: Record<string, string> = { ...BASE_PAL, a: def.accent, r: ringC };
+  const hasLabel = !!look.label;
+  look.sprite({ g, ox: 8, oy: hasLabel ? 5 : 8, pal });
+
+  if (look.label) {
+    const tw = textWidth(look.label);
+    const x0 = Math.floor(16 - tw / 2) - 3;
+    const x1 = x0 + tw + 5;
+    const y0 = 23;
+    const y1 = 29;
+    // Colas de la cinta
+    for (let y = y0 + 2; y <= y1 - 1; y++) {
+      put(g, x0 - 2, y, K);
+      put(g, x1 + 2, y, K);
+      put(g, x0 - 1, y, ringDark);
+      put(g, x1 + 1, y, ringDark);
+    }
+    put(g, x0 - 1, y0 + 1, K);
+    put(g, x1 + 1, y0 + 1, K);
+    put(g, x0 - 1, y1, K);
+    put(g, x1 + 1, y1, K);
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const edge = y === y0 || y === y1 || x === x0 || x === x1;
+        put(g, x, y, edge ? K : y === y0 + 1 ? ringLight : ringC);
+      }
+    }
+    drawText(g, x0 + 3, y0 + 1, look.label, K);
+    drawText(g, x0 + 3, y0 + 1, look.label, '#ffffff');
+  }
+  return g;
+}
+
+/** Convierte la rejilla en rects (uniendo tramos del mismo color por fila). */
+function toRects(g: Grid): { x: number; y: number; w: number; c: string }[] {
+  const out: { x: number; y: number; w: number; c: string }[] = [];
+  for (let y = 0; y < N; y++) {
+    let x = 0;
+    while (x < N) {
+      const c = g[y][x];
+      if (!c) {
+        x++;
+        continue;
+      }
+      let w = 1;
+      while (x + w < N && g[y][x + w] === c) w++;
+      out.push({ x, y, w, c });
+      x += w;
+    }
+  }
+  return out;
+}
+
+const cache = new Map<string, { x: number; y: number; w: number; c: string }[]>();
+
+export function medalRects(def: MedalDefinition) {
+  const key = `${def.id}|${def.ring}|${def.core}|${def.accent}`;
+  let r = cache.get(key);
+  if (!r) {
+    r = toRects(buildMedal(def));
+    cache.set(key, r);
+  }
+  return r;
+}
+
+function MedalGlyph({ def, size = 56, className = '' }: Props) {
+  const rects = medalRects(def);
   return (
-    <svg width={s} height={s} viewBox="0 0 56 56" className={className} aria-hidden>
-      <MedalFrame defsId={defsId} ring={ring} core={core} accent={accent}>
-        {inner}
-      </MedalFrame>
+    <svg
+      width={size}
+      height={size}
+      viewBox={`0 0 ${N} ${N}`}
+      shapeRendering="crispEdges"
+      className={className}
+      role="img"
+      aria-label={def.title}
+      style={{ imageRendering: 'pixelated' }}
+    >
+      {rects.map((r, i) => (
+        <rect key={i} x={r.x} y={r.y} width={r.w} height={1} fill={r.c} />
+      ))}
     </svg>
   );
 }
 
-/** Kilómetros acumulados: número del hito + cuentakilómetros (dial) + carretera. */
-function GlyphKm(p: GlyphCommon & { km: number }) {
-  const { ring, accent, defsId, km } = p;
-  const label = formatKmLabel(km);
-  const fs = label.length >= 4 ? 11 : label.length >= 3 ? 13 : 15;
-  const inner = (
-    <>
-      <defs>
-        <linearGradient id={`${defsId}-road`} x1="28" y1="14" x2="28" y2="40" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#3f3f46" stopOpacity={0.95} />
-          <stop offset="50%" stopColor="#27272a" stopOpacity={1} />
-          <stop offset="100%" stopColor="#0a0a0b" stopOpacity={1} />
-        </linearGradient>
-      </defs>
-      {/* Carretera en perspectiva (solo contexto) */}
-      <path d="M19 15 L37 15 L33 38 L23 38 Z" fill={`url(#${defsId}-road)`} stroke={ring} strokeWidth={0.5} strokeOpacity={0.4} />
-      <path d="M27.5 15 L27.5 36" stroke="#fbbf24" strokeWidth={0.9} strokeDasharray="2 2" strokeLinecap="round" opacity={0.75} />
-      {/* Dial tipo odómetro */}
-      <rect x="14" y="17" width="28" height="22" rx="2.5" fill="#0c0c0e" stroke={ring} strokeWidth={0.9} opacity={0.92} />
-      <text
-        x="28"
-        y="33.5"
-        textAnchor="middle"
-        fill={accent}
-        fontSize={fs}
-        fontWeight={900}
-        fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
-      >
-        {label}
-      </text>
-      <text x="28" y="37.5" textAnchor="middle" fill={ring} fontSize="5.5" fontWeight={700} fontFamily="system-ui, sans-serif" opacity={0.85}>
-        km
-      </text>
-      <path d="M16 40 h24" stroke={accent} strokeWidth={1.2} strokeLinecap="round" opacity={0.35} />
-    </>
-  );
-  return wrapMedal(p, inner);
-}
-
-/** Rutas completadas: número grande + trazo de ruta (varias salidas). */
-function GlyphRides(p: GlyphCommon & { count: 10 | 50 }) {
-  const { ring, accent, defsId, count } = p;
-  const inner = (
-    <>
-      <defs>
-        <linearGradient id={`${defsId}-route`} x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor={accent} stopOpacity={0.25} />
-          <stop offset="50%" stopColor={accent} stopOpacity={1} />
-          <stop offset="100%" stopColor={accent} stopOpacity={0.35} />
-        </linearGradient>
-      </defs>
-      <text x="28" y="24" textAnchor="middle" fill={accent} fontSize={count === 50 ? 20 : 22} fontWeight={900} fontFamily="system-ui, sans-serif">
-        {count}
-      </text>
-      <text x="28" y="31" textAnchor="middle" fill={ring} fontSize="6.5" fontWeight={800} fontFamily="system-ui, sans-serif" opacity={0.9}>
-        rutas
-      </text>
-      <path
-        d="M12 38 Q20 32 28 36 T44 34"
-        fill="none"
-        stroke={`url(#${defsId}-route)`}
-        strokeWidth={2.4}
-        strokeLinecap="round"
-      />
-      <circle cx="14" cy="36.5" r="2" fill={accent} stroke={ring} strokeWidth={0.5} />
-      <circle cx="28" cy="37.5" r="2" fill={accent} stroke={ring} strokeWidth={0.5} />
-      <circle cx="40" cy="35.5" r="2" fill={accent} stroke={ring} strokeWidth={0.5} />
-    </>
-  );
-  return wrapMedal(p, inner);
-}
-
-/** Curvas contadas: S clara + número de curvas superadas. */
-function GlyphCurves(p: GlyphCommon & { count: number }) {
-  const { ring, accent, defsId, count } = p;
-  const label = formatCurveLabel(count);
-  const fs = label.length >= 3 ? 14 : 16;
-  const inner = (
-    <>
-      <defs>
-        <linearGradient id={`${defsId}-curve`} x1="0" y1="1" x2="1" y2="0">
-          <stop offset="0%" stopColor={accent} stopOpacity={0.85} />
-          <stop offset="100%" stopColor={ring} stopOpacity={1} />
-        </linearGradient>
-      </defs>
-      <text x="28" y="19" textAnchor="middle" fill={accent} fontSize={fs} fontWeight={900} fontFamily="system-ui, sans-serif">
-        {label}
-      </text>
-      <text x="28" y="25" textAnchor="middle" fill={ring} fontSize="6" fontWeight={700} fontFamily="system-ui, sans-serif" opacity={0.88}>
-        curvas
-      </text>
-      <path
-        d="M11 38 C16 22 22 22 28 30 C34 38 40 38 45 22"
-        fill="none"
-        stroke="#ffffff"
-        strokeWidth={4.5}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        opacity={0.1}
-      />
-      <path
-        d="M11 38 C16 22 22 22 28 30 C34 38 40 38 45 22"
-        fill="none"
-        stroke={`url(#${defsId}-curve)`}
-        strokeWidth={3}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path d="M14 40 L16 36 M40 24 L42 20" stroke={accent} strokeWidth={1} strokeLinecap="round" opacity={0.45} />
-    </>
-  );
-  return wrapMedal(p, inner);
-}
-
-/** Tumbada: silueta clara, pocas piezas; pivote en rueda trasera. */
-function GlyphLean(props: GlyphCommon & { label: string }) {
-  const { label, ...common } = props;
-  const { ring, accent, defsId } = common;
-  const tilt = leanVisualTiltDeg(label);
-  const pivotX = 17.2;
-  const pivotY = 35.4;
-  const inner = (
-    <>
-      <defs>
-        <linearGradient id={`${defsId}-lean-road`} x1="0.5" y1="1" x2="0.5" y2="0">
-          <stop offset="0%" stopColor="#18181b" />
-          <stop offset="100%" stopColor="#3a3a42" />
-        </linearGradient>
-        <linearGradient id={`${defsId}-lean-body`} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor={accent} stopOpacity={0.95} />
-          <stop offset="100%" stopColor={ring} stopOpacity={0.75} />
-        </linearGradient>
-      </defs>
-      <ellipse cx="28" cy="40.5" rx="17" ry="3" fill={`url(#${defsId}-lean-road)`} opacity={0.88} />
-      <ellipse cx="28" cy="40.5" rx="14" ry="2" fill="#000000" fillOpacity={0.12} />
-      <g transform={`rotate(${tilt} ${pivotX} ${pivotY})`}>
-        <circle cx="17.2" cy="35.4" r="5" fill="#0a0a0b" stroke={ring} strokeWidth={1.25} />
-        <circle cx="17.2" cy="35.4" r="2.2" fill={accent} fillOpacity={0.12} />
-        <circle cx="37.2" cy="32.2" r="4.6" fill="#0a0a0b" stroke={ring} strokeWidth={1.15} />
-        <circle cx="37.2" cy="32.2" r="1.9" fill={accent} fillOpacity={0.1} />
-        <path
-          d="M17.2 35.4 L26 20.5 L37.2 32.2"
-          fill="none"
-          stroke={`url(#${defsId}-lean-body)`}
-          strokeWidth={2.6}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        <path
-          d="M23 26 L26.5 19.5 L33 23.5 L31 28.5 L23 26 Z"
-          fill={accent}
-          fillOpacity={0.5}
-          stroke={ring}
-          strokeWidth={0.5}
-          strokeLinejoin="round"
-        />
-        <path d="M31 28.5 L36.8 32" stroke={ring} strokeWidth={1.85} strokeLinecap="round" />
-        <circle cx="27" cy="17.8" r="2.5" fill={accent} fillOpacity={0.42} stroke={ring} strokeWidth={0.5} />
-      </g>
-      <text x="28" y="13" textAnchor="middle" fill={accent} fontSize="12" fontWeight={900} fontFamily="system-ui, sans-serif">
-        {label}
-      </text>
-      <text x="28" y="43.8" textAnchor="middle" fill={ring} fontSize="5.2" fontWeight={600} opacity={0.72}>
-        tumbada
-      </text>
-    </>
-  );
-  return wrapMedal(common, inner);
-}
-
-/** Velocímetro con marcas y aguja. */
-function GlyphSpeedo(props: GlyphCommon & { label: string }) {
-  const { label, ...common } = props;
-  const { ring, accent, defsId } = common;
-  const ticks = [-60, -40, -20, 0, 20, 40, 60].map((angle, i) => {
-    const rad = ((angle - 90) * Math.PI) / 180;
-    const r1 = i % 2 === 0 ? 12.5 : 11.5;
-    const r2 = 14.8;
-    const cx = 28;
-    const cy = 34;
-    return (
-      <line
-        key={angle}
-        x1={cx + r1 * Math.cos(rad)}
-        y1={cy + r1 * Math.sin(rad)}
-        x2={cx + r2 * Math.cos(rad)}
-        y2={cy + r2 * Math.sin(rad)}
-        stroke={i % 2 === 0 ? accent : ring}
-        strokeWidth={i % 2 === 0 ? 1.4 : 0.8}
-        strokeLinecap="round"
-        opacity={0.9}
-      />
-    );
-  });
-  const inner = (
-    <>
-      <defs>
-        <linearGradient id={`${defsId}-gauge`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={accent} stopOpacity={0.5} />
-          <stop offset="100%" stopColor={ring} stopOpacity={0.15} />
-        </linearGradient>
-      </defs>
-      <path
-        d="M14 34 A14 14 0 0 1 42 34"
-        fill="none"
-        stroke="#000000"
-        strokeOpacity={0.25}
-        strokeWidth={4}
-        strokeLinecap="round"
-      />
-      <path
-        d="M14 34 A14 14 0 0 1 42 34"
-        fill="none"
-        stroke={`url(#${defsId}-gauge)`}
-        strokeWidth={3}
-        strokeLinecap="round"
-      />
-      {ticks}
-      <path d="M28 34 L36 20" stroke="#000000" strokeOpacity={0.35} strokeWidth={3.2} strokeLinecap="round" />
-      <path d="M28 34 L36 20" stroke={accent} strokeWidth={2.4} strokeLinecap="round" />
-      <circle cx="28" cy="34" r="3" fill={ring} stroke={accent} strokeWidth={0.8} />
-      <text x="28" y="41" textAnchor="middle" fill={accent} fontSize="11" fontWeight={900} fontFamily="system-ui, sans-serif">
-        <tspan>{label}</tspan>
-        <tspan fill={ring} fontSize="6" fontWeight={700} opacity={0.82}>
-          {' '}
-          km/h
-        </tspan>
-      </text>
-    </>
-  );
-  return wrapMedal(common, inner);
-}
-
-/** Escudo de nivel con galones y relieve. */
-function GlyphLevel(props: GlyphCommon & { roman: string }) {
-  const { roman, ...common } = props;
-  const { ring, accent, defsId } = common;
-  const inner = (
-    <>
-      <defs>
-        <linearGradient id={`${defsId}-shield`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={accent} stopOpacity={0.55} />
-          <stop offset="100%" stopColor={ring} stopOpacity={0.25} />
-        </linearGradient>
-      </defs>
-      <path
-        d="M16 17 L40 17 L38 38 L28 43 L18 38 Z"
-        fill={`url(#${defsId}-shield)`}
-        stroke={accent}
-        strokeWidth={1.2}
-        strokeLinejoin="round"
-      />
-      <path d="M18 19 L38 19" stroke="#ffffff" strokeOpacity={0.12} strokeWidth={1} strokeLinecap="round" />
-      <path d="M20 21 h16 M20 25 h14" stroke={ring} strokeWidth={0.9} strokeLinecap="round" opacity={0.5} />
-      <path d="M22 17 L28 12 L34 17" fill="none" stroke={accent} strokeWidth={1.4} strokeLinecap="round" />
-      <text x="28" y="35" textAnchor="middle" fill="#000000" fillOpacity={0.25} fontSize="14" fontWeight={900} fontFamily="Georgia, serif">
-        {roman}
-      </text>
-      <text x="28" y="34.5" textAnchor="middle" fill={accent} fontSize="14" fontWeight={900} fontFamily="Georgia, serif">
-        {roman}
-      </text>
-      <text x="28" y="40" textAnchor="middle" fill={ring} fontSize="5.5" fontWeight={700} opacity={0.75}>
-        nivel
-      </text>
-    </>
-  );
-  return wrapMedal(common, inner);
-}
-
-function dualStatFontSize(a: string, b: string): number {
-  const m = Math.max(a.length, b.length);
-  if (m > 16) return 5.5;
-  if (m > 12) return 6.5;
-  if (m > 9) return 7;
-  return 8;
-}
-
-/** Maestro: 50 rutas + 400 km (cadena de logros). */
-function GlyphChainMaster(p: GlyphCommon) {
-  const { ring, accent } = p;
-  const inner = (
-    <>
-      <g fill="none" stroke={accent} strokeWidth={1.5} strokeLinecap="round">
-        <ellipse cx="21" cy="19" rx="4.5" ry="3.2" />
-        <ellipse cx="35" cy="19" rx="4.5" ry="3.2" />
-        <path d="M25.5 19 h5" stroke={ring} strokeWidth={2} />
-      </g>
-      <text x="28" y="32" textAnchor="middle" fill={accent} fontSize={7} fontWeight={900} fontFamily="system-ui, sans-serif">
-        50 rutas
-      </text>
-      <text x="28" y="41" textAnchor="middle" fill={ring} fontSize={7} fontWeight={800} fontFamily="system-ui, sans-serif" opacity={0.95}>
-        400 km
-      </text>
-    </>
-  );
-  return wrapMedal(p, inner);
-}
-
-/** Nunca superaste 120 km/h: señal tipo “límite” en verde + check. */
-function GlyphPrudent(p: GlyphCommon) {
-  const { ring, accent, core } = p;
-  const inner = (
-    <>
-      <circle cx="28" cy="29" r="13" fill={core} stroke="#22c55e" strokeWidth={2.8} />
-      <circle cx="28" cy="29" r="10.5" fill="#14532d" opacity={0.45} />
-      <path d="M21 29 L25.5 33.5 L35 22" fill="none" stroke={accent} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" />
-      <text x="28" y="18" textAnchor="middle" fill={accent} fontSize="8" fontWeight={900} fontFamily="system-ui, sans-serif">
-        máx 120
-      </text>
-      <text x="28" y="41" textAnchor="middle" fill={ring} fontSize="5.5" fontWeight={700} opacity={0.85}>
-        km/h
-      </text>
-    </>
-  );
-  return wrapMedal(p, inner);
-}
-
-/** Máximo &lt; 90 km/h: tortuga + tope de velocidad. */
-function GlyphTurtle(p: GlyphCommon) {
-  const { ring, accent } = p;
-  const inner = (
-    <>
-      <ellipse cx="26" cy="30" rx="11" ry="6.5" fill={accent} fillOpacity={0.25} stroke={ring} strokeWidth={1} />
-      <ellipse cx="26" cy="29" rx="7" ry="4.5" fill={accent} fillOpacity={0.35} stroke={ring} strokeWidth={0.6} />
-      <path d="M17 30 Q22 26 26 28 Q30 26 35 30" fill="none" stroke={ring} strokeWidth={0.9} opacity={0.55} />
-      <circle cx="36" cy="27" r="3.2" fill={accent} stroke={ring} strokeWidth={0.7} />
-      <circle cx="35.2" cy="26.2" r="0.9" fill={ring} />
-      <path d="M15 29 L12 29 M15 31 L11 31" stroke={accent} strokeWidth={1.6} strokeLinecap="round" />
-      <text x="28" y="16" textAnchor="middle" fill={accent} fontSize="9" fontWeight={900} fontFamily="system-ui, sans-serif">
-        ≤90
-      </text>
-      <text x="28" y="41" textAnchor="middle" fill={ring} fontSize="5.5" fontWeight={700} opacity={0.8}>
-        km/h máx
-      </text>
-    </>
-  );
-  return wrapMedal(p, inner);
-}
-
-/** Rayo eléctrico + 120+. */
-function GlyphSpeedCrack(p: GlyphCommon) {
-  const { ring, accent, defsId } = p;
-  const inner = (
-    <>
-      <defs>
-        <linearGradient id={`${defsId}-bolt`} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#fef08a" stopOpacity={1} />
-          <stop offset="100%" stopColor={accent} stopOpacity={0.95} />
-        </linearGradient>
-      </defs>
-      <path d="M18 37 L25 21 L27 28 L33 17 L35 35 L30 30 L28 38 Z" fill="#000000" fillOpacity={0.2} />
-      <path d="M17 38 L24 20 L27 28 L32 16 L36 36 L30 30 L28 38 Z" fill={`url(#${defsId}-bolt)`} stroke={ring} strokeWidth={0.55} />
-      <g stroke={accent} strokeWidth={1.2} strokeLinecap="round" opacity={0.5}>
-        <path d="M12 24 L16 22 M40 20 L44 18" />
-      </g>
-      <text x="28" y="14" textAnchor="middle" fill={accent} fontSize="8" fontWeight={900} fontFamily="system-ui, sans-serif">
-        ≥120 km/h
-      </text>
-    </>
-  );
-  return wrapMedal(p, inner);
-}
-
-/** Huracán — espiral de viento. */
-function GlyphHuracan(p: GlyphCommon) {
-  const { ring, accent, defsId } = p;
-  const inner = (
-    <>
-      <defs>
-        <linearGradient id={`${defsId}-wind`} x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor={accent} stopOpacity={0.2} />
-          <stop offset="50%" stopColor={accent} stopOpacity={1} />
-          <stop offset="100%" stopColor={accent} stopOpacity={0.3} />
-        </linearGradient>
-      </defs>
-      <path
-        d="M38 20 Q22 18 20 28 Q18 36 38 34"
-        fill="none"
-        stroke={`url(#${defsId}-wind)`}
-        strokeWidth={3}
-        strokeLinecap="round"
-      />
-      <path
-        d="M34 16 Q16 20 18 32 Q20 40 38 38"
-        fill="none"
-        stroke={ring}
-        strokeWidth={1.4}
-        strokeLinecap="round"
-        opacity={0.55}
-      />
-      <g fill={accent} opacity={0.9}>
-        <circle cx="16" cy="22" r="1.5" />
-        <circle cx="40" cy="26" r="1.5" />
-        <circle cx="22" cy="34" r="1.5" />
-      </g>
-      <text x="28" y="13" textAnchor="middle" fill={accent} fontSize="10" fontWeight={900} fontFamily="system-ui, sans-serif">
-        ≥150 km/h
-      </text>
-    </>
-  );
-  return wrapMedal(p, inner);
-}
-
-/** Parada café: taza + requisitos 10 rutas / 80 km. */
-function GlyphCoffeeLoop(p: GlyphCommon) {
-  const { ring, accent, defsId } = p;
-  const lineA = '10 rutas';
-  const lineB = '80 km';
-  const fs = dualStatFontSize(lineA, lineB);
-  const inner = (
-    <>
-      <defs>
-        <linearGradient id={`${defsId}-cup`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={accent} stopOpacity={0.4} />
-          <stop offset="100%" stopColor="#44403c" stopOpacity={0.9} />
-        </linearGradient>
-      </defs>
-      <path
-        d="M17 14 h10 q2.5 0 2.5 2.5 v5 q0 2.5 -2.5 2.5 h-8 q-2.5 0 -2.5 -2.5 v-5 q0 -2.5 2.5 -2.5"
-        fill={`url(#${defsId}-cup)`}
-        stroke={accent}
-        strokeWidth={0.9}
-      />
-      <path d="M27.5 16 h3 q1.2 0 1.2 1.5 v1.2" fill="none" stroke={accent} strokeWidth={0.9} strokeLinecap="round" />
-      <g stroke={accent} strokeWidth={0.7} strokeLinecap="round" fill="none" opacity={0.65}>
-        <path d="M20 11 Q20.5 9 21 11" />
-        <path d="M22 10.5 Q22.5 8.5 23 10.5" />
-        <path d="M24 11 Q24.5 9 25 11" />
-      </g>
-      <text x="28" y="33" textAnchor="middle" fill={accent} fontSize={fs} fontWeight={900} fontFamily="system-ui, sans-serif">
-        {lineA}
-      </text>
-      <text x="28" y="41" textAnchor="middle" fill={ring} fontSize={fs} fontWeight={800} fontFamily="system-ui, sans-serif" opacity={0.95}>
-        {lineB}
-      </text>
-    </>
-  );
-  return wrapMedal(p, inner);
-}
-
-/** Rosa de los vientos + 100 curvas y 15 rutas. */
-function GlyphCompassRose(p: GlyphCommon) {
-  const { ring, accent, defsId, core } = p;
-  const lineA = '100 curvas';
-  const lineB = '15 rutas';
-  const fs = dualStatFontSize(lineA, lineB);
-  const inner = (
-    <>
-      <defs>
-        <linearGradient id={`${defsId}-n`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#fca5a5" stopOpacity={1} />
-          <stop offset="100%" stopColor={ring} stopOpacity={0.9} />
-        </linearGradient>
-        <linearGradient id={`${defsId}-s`} x1="0" y1="1" x2="0" y2="0">
-          <stop offset="0%" stopColor="#93c5fd" stopOpacity={1} />
-          <stop offset="100%" stopColor={ring} stopOpacity={0.85} />
-        </linearGradient>
-      </defs>
-      <circle cx="28" cy="17" r="7.5" fill="none" stroke={accent} strokeWidth={0.45} strokeOpacity={0.38} />
-      <circle cx="28" cy="17" r="1.6" fill={core} stroke={accent} strokeWidth={0.55} />
-      <path d="M28 11 L30.5 18 L28 23 L25.5 18 Z" fill={`url(#${defsId}-n)`} stroke={ring} strokeWidth={0.35} />
-      <path d="M21 17 L26.5 16 L35 17 L26.5 18 Z" fill={`url(#${defsId}-s)`} stroke={ring} strokeWidth={0.35} />
-      <text x="28" y="10.5" textAnchor="middle" fill={accent} fontSize="5" fontWeight={900}>
-        N
-      </text>
-      <text x="28" y="30" textAnchor="middle" fill={accent} fontSize={fs} fontWeight={900} fontFamily="system-ui, sans-serif">
-        {lineA}
-      </text>
-      <text x="28" y="40" textAnchor="middle" fill={ring} fontSize={fs} fontWeight={800} fontFamily="system-ui, sans-serif" opacity={0.95}>
-        {lineB}
-      </text>
-    </>
-  );
-  return wrapMedal(p, inner);
-}
-
-/** Peregrino: vieira + 1000 km y 20 rutas (Camino). */
-function GlyphPeregrino(p: GlyphCommon) {
-  const { ring, accent, defsId } = p;
-  const lineA = '1000 km';
-  const lineB = '20 rutas';
-  const fs = dualStatFontSize(lineA, lineB);
-  const inner = (
-    <>
-      <defs>
-        <radialGradient id={`${defsId}-shell`} cx="40%" cy="35%" r="65%">
-          <stop offset="0%" stopColor={accent} stopOpacity={0.55} />
-          <stop offset="100%" stopColor={ring} stopOpacity={0.35} />
-        </radialGradient>
-      </defs>
-      <path
-        d="M28 12 Q37 19 36 26 Q35 31 28 33 Q21 31 20 26 Q19 19 28 12"
-        fill={`url(#${defsId}-shell)`}
-        stroke={ring}
-        strokeWidth={1.1}
-      />
-      <path d="M28 16 Q31 21 28 30 Q25 21 28 16" fill="none" stroke={accent} strokeWidth={0.85} strokeLinecap="round" opacity={0.75} />
-      <text x="28" y="36" textAnchor="middle" fill={accent} fontSize={Math.min(fs, 7)} fontWeight={900} fontFamily="system-ui, sans-serif">
-        {lineA}
-      </text>
-      <text x="28" y="42.5" textAnchor="middle" fill={ring} fontSize={Math.min(fs, 7)} fontWeight={800} fontFamily="system-ui, sans-serif" opacity={0.95}>
-        {lineB}
-      </text>
-    </>
-  );
-  return wrapMedal(p, inner);
-}
-
-/** Cazador de curvas: 150 curvas + 300 km + mira sobre una S. */
-function GlyphCurveHunter(p: GlyphCommon) {
-  const { ring, accent } = p;
-  const lineA = '150 curvas';
-  const lineB = '300 km';
-  const fs = dualStatFontSize(lineA, lineB);
-  const inner = (
-    <>
-      <path
-        d="M10 18 Q18 14 24 20 Q30 26 38 16"
-        fill="none"
-        stroke={ring}
-        strokeWidth={2.2}
-        strokeLinecap="round"
-        opacity={0.75}
-      />
-      <circle cx="28" cy="17" r="6.5" fill="none" stroke={accent} strokeWidth={1} opacity={0.85} />
-      <path d="M24 14 L32 20 M32 14 L24 20" stroke={accent} strokeWidth={0.9} strokeLinecap="round" opacity={0.55} />
-      <circle cx="28" cy="17" r="1.4" fill={accent} />
-      <text x="28" y="32" textAnchor="middle" fill={accent} fontSize={fs} fontWeight={900} fontFamily="system-ui, sans-serif">
-        {lineA}
-      </text>
-      <text x="28" y="41" textAnchor="middle" fill={ring} fontSize={fs} fontWeight={800} fontFamily="system-ui, sans-serif" opacity={0.95}>
-        {lineB}
-      </text>
-    </>
-  );
-  return wrapMedal(p, inner);
-}
-
-/** Ruta plateada: 800 km + 40 rutas + triángulo plateado (tramo). */
-function GlyphSilverRoad(p: GlyphCommon) {
-  const { accent, defsId, ring } = p;
-  const lineA = '800 km';
-  const lineB = '40 rutas';
-  const fs = dualStatFontSize(lineA, lineB);
-  const inner = (
-    <>
-      <defs>
-        <linearGradient id={`${defsId}-ag`} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#f8fafc" stopOpacity={0.95} />
-          <stop offset="50%" stopColor={accent} stopOpacity={0.85} />
-          <stop offset="100%" stopColor="#94a3b8" stopOpacity={0.7} />
-        </linearGradient>
-      </defs>
-      <path
-        d="M17 22 L28 12 L39 22"
-        fill="none"
-        stroke={`url(#${defsId}-ag)`}
-        strokeWidth={2.8}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        opacity={0.9}
-      />
-      <text x="28" y="32" textAnchor="middle" fill={accent} fontSize={fs} fontWeight={900} fontFamily="system-ui, sans-serif">
-        {lineA}
-      </text>
-      <text x="28" y="41" textAnchor="middle" fill={ring} fontSize={fs} fontWeight={800} fontFamily="system-ui, sans-serif" opacity={0.95}>
-        {lineB}
-      </text>
-    </>
-  );
-  return wrapMedal(p, inner);
-}
-
-/** Odisea dorada: 2000 km + 75 rutas + sol (viaje largo). */
-function GlyphGoldOdyssey(p: GlyphCommon) {
-  const { ring, accent, defsId } = p;
-  const lineA = '2000 km';
-  const lineB = '75 rutas';
-  const fs = dualStatFontSize(lineA, lineB);
-  const inner = (
-    <>
-      <defs>
-        <radialGradient id={`${defsId}-sun`} cx="50%" cy="40%" r="55%">
-          <stop offset="0%" stopColor="#fde047" stopOpacity={0.95} />
-          <stop offset="70%" stopColor={accent} stopOpacity={0.65} />
-          <stop offset="100%" stopColor={ring} stopOpacity={0.3} />
-        </radialGradient>
-      </defs>
-      <circle cx="28" cy="16" r="7" fill={`url(#${defsId}-sun)`} />
-      {[0, 45, 90, 135, 180, 225, 270, 315].map((deg) => {
-        const r = ((deg - 90) * Math.PI) / 180;
-        return (
-          <line
-            key={deg}
-            x1={28 + 8 * Math.cos(r)}
-            y1={16 + 8 * Math.sin(r)}
-            x2={28 + 10.5 * Math.cos(r)}
-            y2={16 + 10.5 * Math.sin(r)}
-            stroke="#facc15"
-            strokeWidth={1}
-            strokeLinecap="round"
-            opacity={0.85}
-          />
-        );
-      })}
-      <text x="28" y="31" textAnchor="middle" fill={accent} fontSize={fs} fontWeight={900} fontFamily="system-ui, sans-serif">
-        {lineA}
-      </text>
-      <text x="28" y="41" textAnchor="middle" fill={ring} fontSize={fs} fontWeight={800} fontFamily="system-ui, sans-serif" opacity={0.95}>
-        {lineB}
-      </text>
-    </>
-  );
-  return wrapMedal(p, inner);
-}
-
-/** Cromado: 300 curvas + 600 km + brillo tipo depósito. */
-function GlyphMirrorPolish(p: GlyphCommon) {
-  const { ring, accent, defsId } = p;
-  const lineA = '300 curvas';
-  const lineB = '600 km';
-  const fs = dualStatFontSize(lineA, lineB);
-  const inner = (
-    <>
-      <defs>
-        <linearGradient id={`${defsId}-chrome`} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#ffffff" stopOpacity={0.55} />
-          <stop offset="40%" stopColor={accent} stopOpacity={0.35} />
-          <stop offset="100%" stopColor="#71717a" stopOpacity={0.5} />
-        </linearGradient>
-      </defs>
-      <ellipse cx="28" cy="17" rx="9" ry="5" fill="none" stroke={`url(#${defsId}-chrome)`} strokeWidth={1.6} opacity={0.75} />
-      <path d="M18 15 L22 20 M38 15 L34 20" stroke="#f4f4f5" strokeWidth={1.4} strokeLinecap="round" opacity={0.85} />
-      <text x="28" y="32" textAnchor="middle" fill={accent} fontSize={fs} fontWeight={900} fontFamily="system-ui, sans-serif">
-        {lineA}
-      </text>
-      <text x="28" y="41" textAnchor="middle" fill={ring} fontSize={fs} fontWeight={800} fontFamily="system-ui, sans-serif" opacity={0.95}>
-        {lineB}
-      </text>
-    </>
-  );
-  return wrapMedal(p, inner);
-}
-
-/** Mula: 200 km + 10 rutas (carga constante). */
-function GlyphMule(p: GlyphCommon) {
-  const { ring, accent } = p;
-  const lineA = '200 km';
-  const lineB = '10 rutas';
-  const fs = dualStatFontSize(lineA, lineB);
-  const inner = (
-    <>
-      <path
-        d="M16 18 h8 l2 4 h-12 l2 -4 z"
-        fill={accent}
-        fillOpacity={0.2}
-        stroke={accent}
-        strokeWidth={0.9}
-      />
-      <path
-        d="M32 18 h8 l2 4 h-12 l2 -4 z"
-        fill={accent}
-        fillOpacity={0.2}
-        stroke={accent}
-        strokeWidth={0.9}
-      />
-      <path d="M22 18 v-3 M34 18 v-3" stroke={ring} strokeWidth={1.2} strokeLinecap="round" />
-      <text x="28" y="15" textAnchor="middle" fill={accent} fontSize="5.5" fontWeight={900} opacity={0.8}>
-        alforjas
-      </text>
-      <text x="28" y="33" textAnchor="middle" fill={accent} fontSize={fs} fontWeight={900} fontFamily="system-ui, sans-serif">
-        {lineA}
-      </text>
-      <text x="28" y="41" textAnchor="middle" fill={ring} fontSize={fs} fontWeight={800} fontFamily="system-ui, sans-serif" opacity={0.95}>
-        {lineB}
-      </text>
-    </>
-  );
-  return wrapMedal(p, inner);
-}
-
-/** Espíritu libre: dados + azar (sin regla fija). */
-function GlyphWildcard(p: GlyphCommon) {
-  const { ring, accent } = p;
-  const inner = (
-    <>
-      <g transform="rotate(-10 28 28)">
-        <rect x="16" y="16" width="24" height="24" rx="4" fill={ring} fillOpacity={0.4} stroke={accent} strokeWidth={1.5} />
-        <rect x="18" y="18" width="20" height="20" rx="2.5" fill="none" stroke="#ffffff" strokeOpacity={0.12} strokeWidth={0.6} />
-        <circle cx="23" cy="23" r="2.4" fill={accent} />
-        <circle cx="33" cy="33" r="2.4" fill={accent} />
-        <circle cx="28" cy="28" r="1.8" fill={accent} opacity={0.6} />
-      </g>
-      <text x="28" y="13" textAnchor="middle" fill={accent} fontSize="11" fontWeight={900} fontFamily="system-ui, sans-serif">
-        ?
-      </text>
-      <text x="28" y="44" textAnchor="middle" fill={ring} fontSize="5.5" fontWeight={700} opacity={0.75}>
-        al azar
-      </text>
-    </>
-  );
-  return wrapMedal(p, inner);
-}
-
-/** Primera ruta terminada: meta + “1 ruta”. */
-function GlyphFirstRide(p: GlyphCommon) {
-  const { ring, accent, core } = p;
-  const inner = (
-    <>
-      <path d="M17 13 v20" stroke={ring} strokeWidth={2} strokeLinecap="round" />
-      <path d="M17 13 Q23 12.5 29 14 L29 21 Q23 20.5 17 20 Z" fill={core} stroke={accent} strokeWidth={0.75} />
-      <g>
-        <rect x="18" y="14" width="4.5" height="4.5" fill={accent} />
-        <rect x="23.5" y="14" width="4.5" height="4.5" fill="#fafafa" opacity={0.92} />
-        <rect x="18" y="18.5" width="4.5" height="4.5" fill="#fafafa" opacity={0.92} />
-        <rect x="23.5" y="18.5" width="4.5" height="4.5" fill={accent} />
-      </g>
-      <text x="28" y="36" textAnchor="middle" fill={accent} fontSize="11" fontWeight={900} fontFamily="system-ui, sans-serif">
-        1ª ruta
-      </text>
-      <text x="28" y="42" textAnchor="middle" fill={ring} fontSize="5.5" fontWeight={700} opacity={0.8}>
-        meta
-      </text>
-    </>
-  );
-  return wrapMedal(p, inner);
-}
-
-/** Noche: 500 km + 25 rutas + luna. */
-function GlyphNightStyle(p: GlyphCommon) {
-  const { ring, accent, defsId } = p;
-  const lineA = '500 km';
-  const lineB = '25 rutas';
-  const fs = dualStatFontSize(lineA, lineB);
-  const inner = (
-    <>
-      <defs>
-        <linearGradient id={`${defsId}-moon`} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#e0e7ff" stopOpacity={0.95} />
-          <stop offset="100%" stopColor={accent} stopOpacity={0.45} />
-        </linearGradient>
-      </defs>
-      <path
-        d="M38 13 A8 8 0 1 1 26 16 A8 8 0 0 0 38 13"
-        fill={`url(#${defsId}-moon)`}
-        opacity={0.92}
-        stroke={accent}
-        strokeWidth={0.3}
-        strokeOpacity={0.35}
-      />
-      <circle cx="18" cy="15" r="0.9" fill="#f8fafc" opacity={0.9} />
-      <circle cx="40" cy="19" r="0.7" fill="#f8fafc" opacity={0.85} />
-      <text x="28" y="31" textAnchor="middle" fill={accent} fontSize={fs} fontWeight={900} fontFamily="system-ui, sans-serif">
-        {lineA}
-      </text>
-      <text x="28" y="41" textAnchor="middle" fill={ring} fontSize={fs} fontWeight={800} fontFamily="system-ui, sans-serif" opacity={0.95}>
-        {lineB}
-      </text>
-    </>
-  );
-  return wrapMedal(p, inner);
-}
-
-function GlyphFallbackTrophy(p: GlyphCommon) {
-  const { ring, accent, defsId } = p;
-  const inner = (
-    <>
-      <defs>
-        <linearGradient id={`${defsId}-cup`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#fde68a" stopOpacity={0.9} />
-          <stop offset="100%" stopColor={accent} stopOpacity={0.75} />
-        </linearGradient>
-      </defs>
-      <path d="M28 14 L32 26 L36 26 L33 32 L38 40 L28 36 L18 40 L23 32 L20 26 L24 26 Z" fill={`url(#${defsId}-cup)`} stroke={ring} strokeWidth={0.6} strokeLinejoin="round" />
-      <path d="M16 26 h4 v8 M40 26 h-4 v8" fill="none" stroke={ring} strokeWidth={1.2} strokeLinecap="round" opacity={0.65} />
-      <rect x="22" y="38" width="12" height="4" rx="1" fill={ring} opacity={0.85} />
-    </>
-  );
-  return wrapMedal(p, inner);
-}
-
-/** SVG distintivo por medalla estilo videojuego arcade de motos. */
-export default function MedalGlyph({ def, size = 56, className = '' }: Props) {
-  const defsId = useId().replace(/:/g, '');
-  const { id, ring, core, accent } = def;
-  const s = size;
-  const commonClass = className;
-  const p: GlyphCommon = { ring, core, accent, s, className: commonClass, defsId };
-
-  if (KM_MEDAL_IDS.has(id)) {
-    const km = KM_DISTANCE_BY_ID[id];
-    if (km === undefined) return <GlyphFallbackTrophy {...p} />;
-    return <GlyphKm {...p} km={km} />;
-  }
-  if (id === 'first_ride') {
-    return <GlyphFirstRide {...p} />;
-  }
-  if (RIDES_MEDAL_IDS.has(id)) {
-    const c = RIDES_COUNT_BY_ID[id];
-    if (c === undefined) return <GlyphFallbackTrophy {...p} />;
-    return <GlyphRides {...p} count={c} />;
-  }
-  if (CURVES_MEDAL_IDS.has(id)) {
-    const c = CURVE_COUNT_BY_ID[id];
-    if (c === undefined) return <GlyphFallbackTrophy {...p} />;
-    return <GlyphCurves {...p} count={c} />;
-  }
-  if (id === 'speed_safe') {
-    return <GlyphPrudent {...p} />;
-  }
-  if (id === 'speed_turtle') {
-    return <GlyphTurtle {...p} />;
-  }
-  if (id === 'speed_over_120') {
-    return <GlyphSpeedCrack {...p} />;
-  }
-  if (id === 'club_80') {
-    return <GlyphSpeedo {...p} label="80" />;
-  }
-  if (id === 'speed_hundred') {
-    return <GlyphSpeedo {...p} label="100" />;
-  }
-  if (id === 'huracan') {
-    return <GlyphHuracan {...p} />;
-  }
-  if (id.startsWith('lean_')) {
-    return <GlyphLean {...p} label={leanDegreeLabel(id)} />;
-  }
-  if (id.startsWith('level_')) {
-    return <GlyphLevel {...p} roman={levelRomanLabel(id)} />;
-  }
-
-  switch (id) {
-    case 'mule':
-      return <GlyphMule {...p} />;
-    case 'silver_road':
-      return <GlyphSilverRoad {...p} />;
-    case 'gold_odyssey':
-      return <GlyphGoldOdyssey {...p} />;
-    case 'curve_hunter':
-      return <GlyphCurveHunter {...p} />;
-    case 'compass_rose':
-      return <GlyphCompassRose {...p} />;
-    case 'peregrino':
-      return <GlyphPeregrino {...p} />;
-    case 'chain_master':
-      return <GlyphChainMaster {...p} />;
-    case 'coffee_loop':
-      return <GlyphCoffeeLoop {...p} />;
-    case 'mirror_polish':
-      return <GlyphMirrorPolish {...p} />;
-    case 'night_style':
-      return <GlyphNightStyle {...p} />;
-    case 'wildcard':
-      return <GlyphWildcard {...p} />;
-    default:
-      return <GlyphFallbackTrophy {...p} />;
-  }
-}
+export default memo(MedalGlyph);

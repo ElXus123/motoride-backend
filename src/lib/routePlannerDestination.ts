@@ -5,7 +5,12 @@
 
 import { requestJson } from './network';
 import { SUPPORT_EMAIL } from './clientInfo';
-import { pickBestNominatimResult, sortNominatimResults, type NominatimItem } from './nominatimPick';
+import {
+  isRoutableNominatimResult,
+  pickBestNominatimResult,
+  sortRoutableNominatimResults,
+  type NominatimItem,
+} from './nominatimPick';
 
 export type { NominatimItem };
 
@@ -137,7 +142,7 @@ export async function fetchNominatimSuggestions(
     signal: options?.signal,
   });
   if (!Array.isArray(data) || data.length === 0) return [];
-  return sortNominatimResults(data, q);
+  return sortRoutableNominatimResults(data, q);
 }
 
 export type ResolveDestinationResult =
@@ -174,7 +179,8 @@ export async function resolveDestinationForRouting(
     ) {
       try {
         const place = await fetchNominatimPlaceByOsmId(ot, oid, options);
-        if (place) {
+        // Si el id resuelve a una provincia/comarca, su centroide no es un destino: usar coords de la selección.
+        if (place && isRoutableNominatimResult(place)) {
           const lat = parseFloat(String(place.lat));
           const lon = parseFloat(String(place.lon));
           if (Number.isFinite(lat) && Number.isFinite(lon)) {
@@ -234,8 +240,11 @@ export async function resolveDestinationForRouting(
     if (!geoData || geoData.length === 0) {
       return { ok: false, reason: 'not_found' };
     }
-    const best = pickBestNominatimResult(geoData, trimmed);
-    const item = best || geoData[0];
+    // Sin respaldo a geoData[0]: si solo hay provincias/comarcas, no hay destino de ruta válido.
+    const item = pickBestNominatimResult(geoData, trimmed);
+    if (!item) {
+      return { ok: false, reason: 'not_found' };
+    }
     const lat = parseFloat(String(item.lat));
     const lon = parseFloat(String(item.lon));
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) {

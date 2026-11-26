@@ -8,7 +8,7 @@
   "scope": "/",
   "start_url": "/",
   "display": "standalone",
-  "display_override": ["standalone", "fullscreen", "minimal-ui"],
+  "display_override": ["fullscreen", "standalone", "minimal-ui"],
   "background_color": "#09090b",
   "theme_color": "#09090b",
   "prefer_related_applications": false,

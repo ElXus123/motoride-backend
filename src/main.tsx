@@ -2,7 +2,6 @@ import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
-import appIcon from '../ICONO.png';
 
 // Polyfill process.nextTick for browser environment
 if (typeof window !== 'undefined' && !window.process) {
@@ -25,7 +24,7 @@ const setupPWAAssets = () => {
     document.head.appendChild(favicon);
   }
   favicon.type = 'image/png';
-  favicon.href = appIcon;
+  favicon.href = '/icon-192.png';
 
   // Apple home screen icon.
   let appleIcon = document.querySelector("link[rel='apple-touch-icon']") as HTMLLinkElement | null;
@@ -34,7 +33,7 @@ const setupPWAAssets = () => {
     appleIcon.rel = 'apple-touch-icon';
     document.head.appendChild(appleIcon);
   }
-  appleIcon.href = appIcon;
+  appleIcon.href = '/icon-192.png';
 
 };
 

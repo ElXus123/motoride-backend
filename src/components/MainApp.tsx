@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef, Suspense, useCallback } from 'react';
+import { useState, useEffect, useRef, Suspense, useCallback, lazy } from 'react';
 import Dashboard from './Dashboard';
-import MapView from './MapView';
-import Profile from './Profile';
+import MapSkeleton from './MapSkeleton';
+import ProfileSkeleton from './ProfileSkeleton';
 import PendingRideInviteOverlay from './PendingRideInviteOverlay';
 import WhatsNewModal from './WhatsNewModal';
 import { useAuth } from '../contexts/AuthContext';
@@ -9,12 +9,69 @@ import { useAppMessage } from '../contexts/AppMessageContext';
 import { doc, getDoc, updateDoc, arrayUnion } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { syncUserPointsAndLevelFromServer } from '../lib/userPointsSync';
+import { readActiveRouteSnapshot } from '../lib/activeRouteSnapshot';
 import { formatScheduledRideDayOnlyEs } from '../lib/scheduledRouteShare';
 import { useMotorideSystemNotifications } from '../hooks/useMotorideSystemNotifications';
 import { registerWebPushFcm, startForegroundFcmListeners, stopForegroundFcmListeners } from '../lib/fcmWeb';
 import NotificationPermissionBanner from './NotificationPermissionBanner';
 import AppLogoSplash from './AppLogoSplash';
 import { Calendar, MapPin } from 'lucide-react';
+
+/** Mapa (Leaflet + lógica de ruta) y perfil: chunks separados, se descargan al entrar en ellos. */
+const MapView = lazy(() => import('./MapView'));
+const Profile = lazy(() => import('./Profile'));
+
+// Precarga de mapa y perfil en segundo plano cuando el navegador está libre,
+// para que al abrir una ruta o el perfil casi nunca haya que esperar a descargar el código.
+if (typeof window !== 'undefined') {
+  const warmMap = () => {
+    void import('./MapView');
+    void import('./Profile');
+  };
+  window.setTimeout(() => {
+    if ('requestIdleCallback' in window) {
+      (window as any).requestIdleCallback(warmMap, { timeout: 4000 });
+    } else {
+      warmMap();
+    }
+  }, 3000);
+}
+
+const ACTIVE_ROUTE_KEY = 'motoride_active_route_v1';
+/** Pasado este tiempo no se intenta reenganchar (la ruta ya habrá terminado). */
+const ACTIVE_ROUTE_MAX_AGE_MS = 14 * 60 * 60 * 1000;
+
+function saveActiveRoute(groupId: string, uid: string | undefined) {
+  if (!uid || groupId === 'REPEATED') return;
+  try {
+    localStorage.setItem(ACTIVE_ROUTE_KEY, JSON.stringify({ groupId, uid, savedAt: Date.now() }));
+  } catch {
+    /* modo privado */
+  }
+}
+
+function readActiveRoute(): { groupId: string; uid: string } | null {
+  try {
+    const raw = localStorage.getItem(ACTIVE_ROUTE_KEY);
+    if (!raw) return null;
+    const v = JSON.parse(raw) as { groupId?: string; uid?: string; savedAt?: number };
+    if (!v.groupId || !v.uid || !v.savedAt || Date.now() - v.savedAt > ACTIVE_ROUTE_MAX_AGE_MS) {
+      localStorage.removeItem(ACTIVE_ROUTE_KEY);
+      return null;
+    }
+    return { groupId: v.groupId, uid: v.uid };
+  } catch {
+    return null;
+  }
+}
+
+function clearActiveRoute() {
+  try {
+    localStorage.removeItem(ACTIVE_ROUTE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
 
 type ScheduledJoinPromptState =
   | null
@@ -123,6 +180,68 @@ export default function MainApp() {
   useEffect(() => {
     if (!user) setScheduledJoinPrompt(null);
   }, [user]);
+
+  /**
+   * Reenganche automático: si la app se cerró / recargó / la mató el sistema estando en una ruta
+   * (sin pulsar «Salir»), al volver a abrirla se entra de nuevo en esa ruta si sigue en marcha.
+   */
+  useEffect(() => {
+    if (activeGroupId) {
+      saveActiveRoute(activeGroupId, user?.uid);
+    }
+  }, [activeGroupId, user?.uid]);
+
+  const resumeTriedRef = useRef(false);
+  useEffect(() => {
+    if (!user?.uid || activeGroupId || resumeTriedRef.current) return;
+    if (new URLSearchParams(window.location.search).get('join')) return;
+    resumeTriedRef.current = true;
+    const saved = readActiveRoute();
+    if (!saved || saved.uid !== user.uid) return;
+    void (async () => {
+      try {
+        let snap;
+        try {
+          snap = await getDoc(doc(db, 'groups', saved.groupId));
+        } catch (netErr) {
+          // Sin cobertura y sin documento en caché: si hay copia local del trazado, seguir con ella.
+          if (readActiveRouteSnapshot(saved.groupId)) {
+            openRouteMap(saved.groupId);
+            showMessage({
+              variant: 'info',
+              title: 'Ruta sin cobertura',
+              message: 'Sigues en la ruta con la copia guardada en el móvil. Los compañeros y avisos volverán al recuperar señal.',
+            });
+          }
+          throw netErr;
+        }
+        if (!snap.exists() && snap.metadata.fromCache && readActiveRouteSnapshot(saved.groupId)) {
+          openRouteMap(saved.groupId);
+          return;
+        }
+        if (!snap.exists()) {
+          clearActiveRoute();
+          return;
+        }
+        const d = snap.data();
+        const members = Array.isArray(d.members) ? d.members.map((x: unknown) => String(x)) : [];
+        const stillRunning = d.isRecording === true || d.ridePaused === true;
+        if (!members.includes(user.uid) || !stillRunning) {
+          clearActiveRoute();
+          return;
+        }
+        openRouteMap(saved.groupId);
+        showMessage({
+          variant: 'success',
+          title: 'Ruta recuperada',
+          message: 'Te hemos vuelto a conectar a la ruta en la que estabas.',
+        });
+      } catch (e) {
+        console.warn('No se pudo recuperar la ruta activa', e);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.uid, activeGroupId, openRouteMap]);
 
   useEffect(() => {
     if (activeGroupId || repeatedRoute) {
@@ -311,13 +430,15 @@ export default function MainApp() {
       <>
         {notificationBanner}
         {inviteOverlay}
-        <Profile
-          onBack={() => setShowProfile(false)}
-          onRepeatRoute={(route) => {
-            setRepeatedRoute(route);
-            setShowProfile(false);
-          }}
-        />
+        <Suspense fallback={<ProfileSkeleton />}>
+          <Profile
+            onBack={() => setShowProfile(false)}
+            onRepeatRoute={(route) => {
+              setRepeatedRoute(route);
+              setShowProfile(false);
+            }}
+          />
+        </Suspense>
       </>
     );
   }
@@ -326,27 +447,30 @@ export default function MainApp() {
     return (
       <>
         {inviteOverlay}
-        <MapView
-          groupId={activeGroupId || 'REPEATED'}
-          preloadedRoute={repeatedRoute}
-          prepareHistoryLeave={() => {
-            bypassRoutePopRef.current = true;
-          }}
-          onPromoteFromRepeat={(liveCode) => {
-            try {
-              hideSplash();
-            } catch {
-              /* ignore */
-            }
-            setActiveGroupId(liveCode);
-            setRepeatedRoute(null);
-          }}
-          onLeave={() => {
-            routeHistoryInsertedRef.current = false;
-            setActiveGroupId(null);
-            setRepeatedRoute(null);
-          }}
-        />
+        <Suspense fallback={<MapSkeleton />}>
+          <MapView
+            groupId={activeGroupId || 'REPEATED'}
+            preloadedRoute={repeatedRoute}
+            prepareHistoryLeave={() => {
+              bypassRoutePopRef.current = true;
+            }}
+            onPromoteFromRepeat={(liveCode) => {
+              try {
+                hideSplash();
+              } catch {
+                /* ignore */
+              }
+              setActiveGroupId(liveCode);
+              setRepeatedRoute(null);
+            }}
+            onLeave={() => {
+              clearActiveRoute();
+              routeHistoryInsertedRef.current = false;
+              setActiveGroupId(null);
+              setRepeatedRoute(null);
+            }}
+          />
+        </Suspense>
       </>
     );
   }

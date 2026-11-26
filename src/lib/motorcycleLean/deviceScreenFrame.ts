@@ -15,9 +15,12 @@ export function remapDeviceVectorToNaturalPortrait(
   screenAngleDeg: number
 ): [number, number, number] {
   const a = ((Math.round(screenAngleDeg) % 360) + 360) % 360;
-  // 0° natural; 90° típico landscape (home button izquierda o derecha según dispositivo)
-  if (a === 90) return [y, -x, z];
-  if (a === 270) return [-y, x, z];
+  // Ángulo según screen.orientation / window.orientation: rotación ANTIHORARIA de la pantalla.
+  // 90 = parte superior del móvil a la izquierda; 270 = parte superior a la derecha.
+  // Verificado con datos sintéticos (scratchpad/lean-test): con la asignación contraria el signo
+  // de la inclinación se invertía en horizontal (a derecha salía negativo).
+  if (a === 90) return [-y, x, z];
+  if (a === 270) return [y, -x, z];
   if (a === 180) return [-x, -y, z];
   return [x, y, z];
 }
@@ -63,6 +66,57 @@ export function getScreenOrientationAngleDeg(): number {
     /* ignore */
   }
   return 0;
+}
+
+/** iPhone / iPad (todos los navegadores de iOS usan WebKit). */
+export function isAppleMobileWebKit(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  if (/iPad|iPhone|iPod/i.test(ua)) return true;
+  // iPadOS se presenta como Mac de escritorio pero con pantalla táctil.
+  return navigator.platform === 'MacIntel' && (navigator.maxTouchPoints ?? 0) > 1;
+}
+
+/**
+ * Signo de `accelerationIncludingGravity` / `acceleration` respecto a la norma W3C
+ * (norma: móvil boca arriba en la mesa → z ≈ +9,8). Safari en iOS lo entrega **invertido**
+ * (z ≈ −9,8), lo que en iPhone cambiaba izquierda/derecha y desincronizaba el término cinemático.
+ *
+ * Arranca con el valor típico de la plataforma y se confirma en vivo comparando con
+ * `deviceorientation` (β, γ), que sí sigue la norma en todos los navegadores.
+ */
+export class AccelSignDetector {
+  private score = 0;
+  sign: 1 | -1 = isAppleMobileWebKit() ? -1 : 1;
+  private beta: number | null = null;
+  private gamma: number | null = null;
+
+  onOrientation(beta: number | null, gamma: number | null): void {
+    this.beta = typeof beta === 'number' && Number.isFinite(beta) ? beta : null;
+    this.gamma = typeof gamma === 'number' && Number.isFinite(gamma) ? gamma : null;
+  }
+
+  /** Recibe la aceleración cruda (ejes hardware). Devuelve true si el signo cambió. */
+  vote(ax: number, ay: number, az: number): boolean {
+    if (this.beta == null || this.gamma == null) return false;
+    const n = Math.hypot(ax, ay, az);
+    // Solo con el móvil casi quieto: la aceleración medida ≈ gravedad.
+    if (n < 8.3 || n > 11.3) return false;
+    const b = this.beta * (Math.PI / 180);
+    const g = this.gamma * (Math.PI / 180);
+    // «Arriba» terrestre expresado en ejes del dispositivo (W3C: R = Rz(α)·Rx(β)·Ry(γ)).
+    const ux = -Math.sin(g) * Math.cos(b);
+    const uy = Math.sin(b);
+    const uz = Math.cos(g) * Math.cos(b);
+    const d = (ax * ux + ay * uy + az * uz) / n;
+    if (d > 0.7) this.score = Math.min(40, this.score + 1);
+    else if (d < -0.7) this.score = Math.max(-40, this.score - 1);
+    else return false;
+    const prev = this.sign;
+    if (this.score >= 15) this.sign = 1;
+    else if (this.score <= -15) this.sign = -1;
+    return this.sign !== prev;
+  }
 }
 
 /**

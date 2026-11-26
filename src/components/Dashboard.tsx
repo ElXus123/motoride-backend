@@ -1,6 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet';
-import L from 'leaflet';
+import React, { useState, useEffect, useRef, useCallback, useMemo, Suspense, lazy } from 'react';
 import {
   doc,
   setDoc,
@@ -22,7 +20,6 @@ import { getLineCoordinates } from '../lib/navigationPose';
 import { getDistance } from '../lib/geoUtils';
 import { calculateLevel, formatDurationHoursMinutes } from '../lib/utils';
 import { requestJson } from '../lib/network';
-import { LEAFLET_LIGHT_ERROR_TILE } from '../lib/leafletTiles';
 import { Users, Plus, LogOut, User as UserIcon, Activity, Trash2, Calendar, MapPin, Search, Clock, ChevronRight, Upload, X, Map as MapIcon, HeartHandshake, CircleDollarSign, Shield, CheckCircle2, AlertCircle, Mail, Share2, Copy, Check, Loader2, Globe, Lock, Inbox, UserPlus, ListOrdered, FileText, MessageCircle } from 'lucide-react';
 import { copyTextToClipboard, getSupportMailtoHref } from '../lib/clientInfo';
 import { buildScheduledInviteSharePayload, formatScheduledRideDayOnlyEs } from '../lib/scheduledRouteShare';
@@ -34,25 +31,44 @@ import {
   ROUTE_LISTING_LABELS,
   type RouteListing,
 } from '../lib/routeListing';
-import { requestUserLocation, reverseGeocodeProvinceMunicipality } from '../lib/reverseGeocode';
+import { requestUserLocation, reverseGeocodeProvinceMunicipality, reverseGeocodeShortLabel } from '../lib/reverseGeocode';
+import { buildExploreProvinceOptions, selectExploreRoutes } from '../lib/exploreRouteFilters';
+import ExplorePlaceSelects from './ExplorePlaceSelects';
 import { getLevelRingWrapperClass } from '../lib/levelRing';
+import { getEquippedFrame } from '../lib/frames';
+import { AvatarFrame } from './AvatarFrame';
 import { canEnterScheduledRouteSession } from '../lib/scheduledRouteAccess';
 import {
   fetchNominatimSuggestions,
   resolveDestinationForRouting,
-  formatOsrmDestCoords,
   destinationLabelsMatch,
   type PickedDestination,
   type NominatimItem,
 } from '../lib/routePlannerDestination';
-import appIcon from '../../ICONO.png';
+import { formatNominatimSuggestion } from '../lib/nominatimPick';
+import {
+  CURVE_LEVELS,
+  CURVE_LEVEL_ORDER,
+  planCurveRoute,
+  type CurveLevel,
+  type LonLat,
+  type OsrmRouteResult,
+  type RouteFetcher,
+} from '../lib/curvePlanner';
+import { motion, useReducedMotion } from 'motion/react';
 import FriendsModal from './FriendsModal';
 import InvitesMailboxModal from './InvitesMailboxModal';
 import InviteFriendsModal from './InviteFriendsModal';
 import PremiumBadge from './PremiumBadge';
+import { WeeklyChallengeCard } from './WeeklyChallengeCard';
 import ScheduledRouteAttendees from './ScheduledRouteAttendees';
 import ScheduledRouteSoonOverlay from './ScheduledRouteSoonOverlay';
 import ScheduledRoutePlanChatModal from './ScheduledRoutePlanChatModal';
+
+/** Leaflet solo se descarga al abrir la vista previa de una ruta (no en el arranque). */
+const RoutePreviewMap = lazy(() => import('./RoutePreviewMap'));
+/** Mapa para fijar el destino con chincheta (también lazy: Leaflet no entra en el arranque). */
+const DestinationPickerMap = lazy(() => import('./DestinationPickerMap'));
 import FriendDirectChatModal from './FriendDirectChatModal';
 import { useMailboxChatUnread } from '../hooks/useMailboxChatUnread';
 
@@ -102,9 +118,10 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   const [joinCode, setJoinCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [scheduledRoutes, setScheduledRoutes] = useState<any[]>([]);
-  const [nearbyRoutes, setNearbyRoutes] = useState<any[]>([]);
+  /** Todas las rutas programadas visibles para este usuario (base de los desplegables de Explorar). */
+  const [exploreAllRoutes, setExploreAllRoutes] = useState<any[]>([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [routeGenFeedback, setRouteGenFeedback] = useState<null | { kind: 'success' | 'error'; title: string; detail?: string }>(null);
+  const [routeGenFeedback, setRouteGenFeedback] = useState<null | { kind: 'success' | 'error'; title: string; detail?: string; note?: string }>(null);
   const [showFriendsModal, setShowFriendsModal] = useState(false);
   const [showSupportModal, setShowSupportModal] = useState(false);
   const [donationEngagementStart, setDonationEngagementStart] = useState<number | null>(null);
@@ -182,9 +199,25 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     secondary: true,
     highway: false
   });
+  /** Nivel de curvas de la última ruta generada (solo para mostrarlo; no se guarda en Firestore). */
+  const [routeCurveSummary, setRouteCurveSummary] = useState<null | {
+    level: CurveLevel;
+    detourPct: number;
+    curveCount: number;
+    curvesPerKm: number;
+  }>(null);
+  const [curveLevelPickerOpen, setCurveLevelPickerOpen] = useState(false);
+  /** Chincheta del destino en el mapa de planificación (coordenadas exactas). */
+  const [destinationPin, setDestinationPin] = useState<{ lat: number; lon: number } | null>(null);
+  const [pinResolving, setPinResolving] = useState(false);
+  /** Incrementa en cada chincheta: descarta respuestas de geocodificación inversa obsoletas. */
+  const pinSeqRef = useRef(0);
+  /** true mientras el texto del destino lo pone la chincheta: no lanzar búsqueda de sugerencias. */
+  const skipSuggestRef = useRef(false);
 
   // Debounce destino: misma orden que `resolveDestinationForRouting` (pickBest) para alinear lista y cálculo
   useEffect(() => {
+    if (skipSuggestRef.current) return;
     const ac = new AbortController();
     if (destination.trim().length < 3) {
       setDestinationPreview(null);
@@ -248,6 +281,10 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     setDestinationSuggestions([]);
     setDestinationHighlightIdx(0);
     destinationPickedRef.current = null;
+    setDestinationPin(null);
+    setPinResolving(false);
+    pinSeqRef.current++;
+    skipSuggestRef.current = false;
   }, []);
 
   const clearGpxRouteState = useCallback(() => {
@@ -255,6 +292,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     setGpxFromFile(false);
     setRouteStats(null);
     setRouteGenerated(false);
+    setRouteCurveSummary(null);
   }, []);
 
   const estimateMinutesFromGpxDistanceKm = useCallback((distKm: number) => {
@@ -548,8 +586,8 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       const parts = await reverseGeocodeProvinceMunicipality(pos.lat, pos.lon);
       if (!parts || cancelled) return;
       exploreGpsFilledRef.current = true;
+      // Solo la provincia: la localidad se elige del desplegable (solo las que tienen rutas).
       if (parts.province) setSearchProvince(parts.province);
-      if (parts.municipality) setSearchMunicipality(parts.municipality);
       setExploreFromGpsHint(true);
     })();
     return () => {
@@ -574,28 +612,18 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     };
   }, [showCreateModal, user]);
 
-  // Search for routes
+  // Rutas programadas visibles (una sola suscripción; los desplegables de provincia/localidad se calculan en memoria)
   useEffect(() => {
-    if (!searchProvince) {
-      setNearbyRoutes([]);
+    if (!user?.uid) {
+      setExploreAllRoutes([]);
       return;
     }
-
-    let q = query(
-      collection(db, 'groups'), 
-      where('province', '==', searchProvince.trim().toLowerCase()),
-      where('isScheduled', '==', true)
-    );
-
-    if (searchMunicipality) {
-      q = query(q, where('municipality', '==', searchMunicipality.trim().toLowerCase()));
-    }
-
     const friendIds = normalizeFriendIds(userData?.friends);
+    const uid = user.uid;
+    const q = query(collection(db, 'groups'), where('isScheduled', '==', true));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as any[];
-      const uid = user?.uid;
-      setNearbyRoutes(
+      setExploreAllRoutes(
         data.filter(
           (r) =>
             (r.scheduledTimestamp || 0) > Date.now() &&
@@ -603,12 +631,18 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
         )
       );
     }, (error) => {
-      console.error("Error buscando rutas cercanas:", error);
+      console.error("Error buscando rutas planificadas:", error);
       handleFirestoreError(error, OperationType.LIST, 'groups');
     });
 
     return () => unsubscribe();
-  }, [searchProvince, searchMunicipality, user?.uid, userData?.friends]);
+  }, [user?.uid, userData?.friends]);
+
+  const exploreProvinces = useMemo(() => buildExploreProvinceOptions(exploreAllRoutes), [exploreAllRoutes]);
+  const nearbyRoutes = useMemo(
+    () => selectExploreRoutes(exploreAllRoutes, searchProvince, searchMunicipality),
+    [exploreAllRoutes, searchProvince, searchMunicipality]
+  );
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const input = e.currentTarget;
@@ -772,7 +806,37 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     }
   };
 
-  const generateLocalRoute = async () => {
+  /** Pide a OSRM público una ruta por los waypoints ([lon, lat]; origen primero, destino último). */
+  const fetchOsrmRoute: RouteFetcher = async (waypoints: LonLat[]): Promise<OsrmRouteResult | null> => {
+    const coordStr = waypoints.map(([lon, lat]) => `${lon},${lat}`).join(';');
+    // steps=false aligera la respuesta del servidor público OSRM (solo necesitamos la geometría).
+    const url = `https://router.project-osrm.org/route/v1/driving/${coordStr}?overview=full&geometries=geojson&steps=false`;
+    const data = await requestJson<any>(url, { timeoutMs: 15000, retries: 0, backoffMs: 500 });
+    if (data?.code !== 'Ok' || !data.routes?.[0]) return null;
+    const route = data.routes[0];
+    const snapped: LonLat[] | undefined = Array.isArray(data.waypoints)
+      ? data.waypoints.map((w: any) => w.location as LonLat)
+      : undefined;
+    return {
+      distance: route.distance,
+      duration: route.duration,
+      coords: route.geometry.coordinates as LonLat[],
+      snapped,
+    };
+  };
+
+  /** Abre la pregunta de nivel de curvas antes de calcular (el cálculo se lanza al elegir). */
+  const openCurveLevelPicker = () => {
+    if (!destination.trim() || !user || loading) return;
+    if (gpxFromFile) {
+      // generateLocalRoute muestra el aviso de GPX activo sin calcular nada.
+      void generateLocalRoute('medio');
+      return;
+    }
+    setCurveLevelPickerOpen(true);
+  };
+
+  const generateLocalRoute = async (level: CurveLevel) => {
     if (!destination.trim() || !user) return;
     if (gpxFromFile) {
       showMessage({
@@ -833,23 +897,29 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
         return;
       }
 
-      const destCoords = formatOsrmDestCoords(destRes.lon, destRes.lat);
       const geoData = [destRes.primary];
       const pos = gpsOutcome.p;
 
-      const start = `${pos.coords.longitude},${pos.coords.latitude}`;
-      const profile = 'driving';
-      // steps=false aligera la respuesta del servidor público OSRM (solo necesitamos la geometría).
-      const url = `https://router.project-osrm.org/route/v1/${profile}/${start};${destCoords}?overview=full&geometries=geojson&steps=false`;
-
-      const data = await requestJson<any>(url, { timeoutMs: 15000, retries: 0, backoffMs: 500 });
-      if (data.code === 'Ok') {
-        const route = data.routes[0];
+      // Ruta directa + puntos intermedios según el nivel (curvas reales de la geometría OSRM).
+      const plan = await planCurveRoute({
+        start: [pos.coords.longitude, pos.coords.latitude],
+        dest: [destRes.lon, destRes.lat],
+        level,
+        fetchRoute: fetchOsrmRoute,
+      });
+      if (plan.ok) {
+        const { chosen, warning } = plan;
         setGpxFromFile(false);
-        setGpxData(JSON.stringify(route.geometry));
+        setGpxData(JSON.stringify({ type: 'LineString', coordinates: chosen.coords }));
         setRouteStats({
-          distance: route.distance / 1000,
-          duration: route.duration / 60
+          distance: chosen.distance / 1000,
+          duration: chosen.duration / 60
+        });
+        setRouteCurveSummary({
+          level,
+          detourPct: chosen.detourPct,
+          curveCount: chosen.stats.curveCount,
+          curvesPerKm: chosen.stats.curvesPerKm,
         });
         setRouteGenerated(true);
         setIsEsporadica(false);
@@ -864,14 +934,11 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           setMunicipality(rev.municipality);
         }
 
-        if (!routeOptions.highway && route.distance > 0) {
-          console.log('Route generated with OSRM. Note: OSRM public API defaults to fastest route.');
-        }
-
         setRouteGenFeedback({
           kind: 'success',
           title: '¡Ruta lista!',
-          detail: destRes.displayName || geoData[0]?.display_name || destination
+          detail: destRes.displayName || geoData[0]?.display_name || destination,
+          note: warning ?? undefined,
         });
       } else {
         setRouteGenFeedback({
@@ -973,9 +1040,40 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     setDeletingType(null);
   };
 
+  /**
+   * Chincheta en el mapa: el destino usa las coordenadas exactas del punto. El nombre (Nominatim reverse)
+   * solo sustituye al texto de coordenadas si sigue siendo la misma chincheta y el usuario no ha escrito.
+   */
+  const pickDestinationOnMap = (lat: number, lon: number) => {
+    const seq = ++pinSeqRef.current;
+    const label = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+    skipSuggestRef.current = true;
+    setDestinationPin({ lat, lon });
+    setDestination(label);
+    setDestinationPreview(null);
+    setDestinationSuggestions([]);
+    setDestinationHighlightIdx(0);
+    destinationPickedRef.current = { label, lat, lon };
+    setPinResolving(true);
+    reverseGeocodeShortLabel(lat, lon)
+      .then((name) => {
+        if (seq !== pinSeqRef.current) return;
+        setPinResolving(false);
+        if (!name || destinationPickedRef.current?.label !== label) return;
+        destinationPickedRef.current = { label: name, lat, lon };
+        setDestination(name);
+        setDestinationPreview(name);
+      })
+      .catch(() => {
+        if (seq === pinSeqRef.current) setPinResolving(false);
+      });
+  };
+
   const applyDestinationSuggestion = useCallback(
     (item: NominatimItem) => {
       const name = (item.display_name || '').trim();
+      skipSuggestRef.current = false;
+      setDestinationPin(null);
       setDestination(name);
       setDestinationPreview(name || null);
       setDestinationSuggestions([]);
@@ -1004,22 +1102,30 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   const isPremiumUser = user?.isPremium === true || userData?.isPremium === true;
   const displayName = userData?.displayName || user?.displayName || 'Motero';
 
+  /** Marco equipado validado con las mismas estadísticas que el perfil. */
+  const headerFrameId = getEquippedFrame(
+    { ...(userData || {}), isPremium: isPremiumUser },
+    userData?.profileFrameId
+  ).id;
+
   const renderHeaderAvatar = () => (
-    <button
-      type="button"
-      onClick={onOpenProfile}
-      className={`shrink-0 w-10 h-10 sm:w-11 sm:h-11 rounded-full p-[2px] hover:opacity-90 transition-opacity ${getLevelRingWrapperClass(level, isPremiumUser)}`}
-    >
-      <span className="block w-full h-full rounded-full overflow-hidden bg-zinc-800 border border-zinc-900">
-        {userData?.photoURL ? (
-          <img src={userData.photoURL} alt="Avatar" className="w-full h-full object-cover" />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center">
-            <UserIcon size={20} className="text-zinc-500" />
-          </div>
-        )}
-      </span>
-    </button>
+    <AvatarFrame frameId={headerFrameId} size={40} className="shrink-0">
+      <button
+        type="button"
+        onClick={onOpenProfile}
+        className={`w-10 h-10 rounded-full p-[2px] hover:opacity-90 transition-opacity ${getLevelRingWrapperClass(level, isPremiumUser)}`}
+      >
+        <span className="block w-full h-full rounded-full overflow-hidden bg-zinc-800 border border-zinc-900">
+          {userData?.photoURL ? (
+            <img src={userData.photoURL} alt="Avatar" className="w-full h-full object-cover" />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center">
+              <UserIcon size={20} className="text-zinc-500" />
+            </div>
+          )}
+        </span>
+      </button>
+    </AvatarFrame>
   );
 
   const renderHeaderProfileCard = () => (
@@ -1029,7 +1135,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       className="flex w-full min-w-0 flex-col gap-0 py-0 text-center rounded-[1rem] sm:rounded-[1.15rem] focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/70 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
       aria-label={`Abrir perfil: nivel ${level} y experiencia hacia el nivel ${level + 1}`}
     >
-      <div className="relative flex flex-col gap-1 rounded-[1rem] sm:rounded-[1.15rem] border border-zinc-800 bg-zinc-900/90 px-2 py-1.5 sm:px-2.5 sm:py-1.5 transition-colors hover:border-zinc-700 hover:bg-zinc-900">
+      <div className="relative flex flex-col gap-1 rounded-[1rem] sm:rounded-[1.15rem] border border-white/[0.07] bg-zinc-900/80 px-2 py-1.5 sm:px-2.5 sm:py-1.5 transition-colors hover:border-white/[0.14] hover:bg-zinc-900">
         {isOffline && (
           <span
             className="absolute right-1.5 top-1.5 h-1.5 w-1.5 animate-pulse rounded-full bg-red-500 ring-1 ring-red-900/40"
@@ -1037,7 +1143,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           />
         )}
         <div className="flex min-h-0 w-full min-w-0 flex-nowrap items-center justify-start gap-1.5 text-left leading-none pl-0.5">
-          <span className="shrink-0 whitespace-nowrap rounded-md bg-orange-500/15 px-1.5 py-0.5 text-[10px] sm:text-[11px] font-black text-orange-400">
+          <span className="shrink-0 whitespace-nowrap rounded-md bg-orange-500/15 px-1.5 py-0.5 text-[11px] sm:text-[11px] font-black text-orange-400">
             Lv. {level}
           </span>
           {isPremiumUser && (
@@ -1054,7 +1160,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           aria-hidden
         >
           <div
-            className="h-full rounded-full bg-gradient-to-r from-orange-600 via-amber-500 to-amber-400 transition-[width] duration-500 ease-out"
+            className="h-full rounded-full bg-orange-500 transition-[width] duration-500 ease-out"
             style={{ width: `${levelProgressPercent}%` }}
           />
         </div>
@@ -1081,7 +1187,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
       >
         <Inbox size={18} className="sm:w-5 sm:h-5" />
         {inboxBadgeTotal > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-orange-500 text-[10px] font-black text-white flex items-center justify-center border-2 border-zinc-950">
+          <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-orange-500 text-[11px] font-black text-white flex items-center justify-center border-2 border-zinc-950">
             {inboxBadgeTotal > 9 ? '9+' : inboxBadgeTotal}
           </span>
         )}
@@ -1109,6 +1215,8 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
     </>
   );
 
+  const reduceMotion = useReducedMotion();
+
   return (
     <div className="min-h-dvh overflow-x-hidden bg-zinc-950 pb-[env(safe-area-inset-bottom,0px)] text-white">
       {/* Header — una fila: avatar | nivel/nombre/XP | acciones (como HUD compacto) */}
@@ -1120,20 +1228,22 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto space-y-8 py-6 pl-[max(1.5rem,env(safe-area-inset-left,0px))] pr-[max(1.5rem,env(safe-area-inset-right,0px))]">
+      <motion.main
+        initial={reduceMotion ? false : { opacity: 0, y: 14 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+        className="max-w-5xl mx-auto space-y-8 py-6 pl-[max(1.5rem,env(safe-area-inset-left,0px))] pr-[max(1.5rem,env(safe-area-inset-right,0px))]"
+      >
+        {user?.uid && <WeeklyChallengeCard uid={user.uid} />}
+
         {/* Quick Actions — estética alineada con cabecera zinc + acento naranja */}
         <div className="grid grid-cols-1 gap-6">
-          <div className="relative overflow-hidden rounded-[1.75rem] border border-orange-500/20 bg-gradient-to-br from-zinc-900 via-zinc-900 to-orange-950/35 p-6 sm:p-8 shadow-[0_0_0_1px_rgba(24,24,27,0.8),0_24px_48px_-16px_rgba(0,0,0,0.55)] ring-1 ring-orange-500/10">
-            <div
-              className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_90%_55%_at_50%_-15%,rgba(249,115,22,0.18),transparent_55%)]"
-              aria-hidden
-            />
-            <div className="pointer-events-none absolute -right-12 -bottom-12 h-44 w-44 rounded-full bg-orange-500/15 blur-3xl" aria-hidden />
-            <div className="pointer-events-none absolute right-6 top-5 h-14 w-14 rounded-2xl opacity-[0.14] ring-1 ring-orange-400/40 overflow-hidden sm:h-16 sm:w-16">
-              <img src={appIcon} alt="" className="h-full w-full object-cover" />
-            </div>
+          <div className="mr-sheet relative overflow-hidden rounded-[var(--radius-hero)] p-6 sm:p-9">
+            <svg className="pointer-events-none absolute -right-4 bottom-0 hidden h-40 w-72 text-orange-500/25 sm:block sm:h-52 sm:w-96" viewBox="0 0 380 200" fill="none" aria-hidden>
+              <path className="mr-route-line" d="M-10 170 C 70 170, 90 90, 170 110 S 280 40, 390 30" stroke="currentColor" strokeWidth="3" />
+            </svg>
             <div className="relative z-10 max-w-xl pr-16 sm:pr-20">
-              <h2 className="text-2xl sm:text-3xl font-black mb-2 leading-tight text-white tracking-tight">
+              <h2 className="mb-2 text-4xl uppercase leading-[0.95] text-zinc-50 sm:text-5xl">
                 ¿Listo para rodar?
               </h2>
               <p className="text-zinc-400 mb-6 text-sm sm:text-base leading-relaxed">
@@ -1146,36 +1256,28 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                     setLoading(false);
                     setShowCreateModal(true);
                   }}
-                  className="min-h-[52px] w-full sm:flex-1 rounded-2xl bg-gradient-to-r from-orange-500 via-orange-500 to-amber-500 px-4 py-3.5 text-sm sm:text-base font-black text-zinc-950 shadow-lg shadow-orange-500/25 transition-all hover:brightness-105 active:scale-[0.99] flex items-center justify-center gap-2"
+                  className="mr-focus min-h-[52px] w-full sm:flex-1 rounded-[var(--radius-control)] bg-orange-500 px-4 py-3.5 text-sm sm:text-base font-bold text-zinc-950 shadow-[var(--shadow-ember)] transition-colors duration-200 hover:bg-orange-400 active:scale-[0.99] flex items-center justify-center gap-2"
                 >
                   <Plus size={22} strokeWidth={2.5} className="shrink-0" />
                   <span>Crear ruta</span>
                 </button>
-                <div className="hidden shrink-0 items-center justify-center text-orange-400/80 sm:flex" aria-hidden>
-                  <ChevronRight size={22} strokeWidth={2.5} />
-                </div>
-                <button
+                                <button
                   type="button"
                   onClick={() => setShowJoinCodeModal(true)}
-                  className="min-h-[52px] w-full sm:flex-1 rounded-2xl border border-zinc-600/90 bg-zinc-800/90 px-4 py-3.5 text-sm sm:text-base font-bold text-zinc-100 shadow-inner transition-all hover:border-zinc-500 hover:bg-zinc-800 active:scale-[0.99]"
+                  className="mr-focus min-h-[52px] w-full sm:flex-1 rounded-[var(--radius-control)] border border-white/[0.12] bg-white/[0.04] px-4 py-3.5 text-sm sm:text-base font-semibold text-zinc-100 transition-colors duration-200 hover:border-white/25 hover:bg-white/[0.07] active:scale-[0.99]"
                 >
                   Unirse con código
                 </button>
               </div>
             </div>
-            <MapIcon
-              size={160}
-              className="pointer-events-none absolute -left-6 -bottom-8 text-orange-500/[0.07] sm:-left-4 sm:-bottom-6"
-              aria-hidden
-            />
-          </div>
+                      </div>
         </div>
 
         {/* Search & Discovery */}
-        <section className="bg-zinc-900/50 border border-zinc-800 rounded-3xl p-6">
+        <section className="mr-surface rounded-[var(--radius-sheet)] p-5 sm:p-6">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
             <div>
-              <h2 className="text-xl font-bold flex items-center gap-2">
+              <h2 className="text-3xl uppercase flex items-center gap-2 text-zinc-50">
                 <Search className="text-orange-500" size={20} />
                 Explorar rutas planificadas
               </h2>
@@ -1184,52 +1286,39 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                 <span className="text-zinc-400">1 h antes</span> de la hora.
               </p>
               {exploreFromGpsHint && (
-                <p className="text-[10px] text-emerald-500/90 mt-1 flex items-center gap-1">
-                  <MapPin size={10} /> Provincia y municipio sugeridos desde tu ubicación (puedes cambiarlos).
+                <p className="text-[11px] text-emerald-500/90 mt-1 flex items-center gap-1">
+                  <MapPin size={10} /> Provincia sugerida desde tu ubicación (puedes cambiarla).
                 </p>
               )}
             </div>
-            <div className="flex flex-wrap gap-2">
-              <div className="relative flex-1 sm:flex-none">
-                <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" size={14} />
-                <input 
-                  placeholder="Provincia" 
-                  value={searchProvince}
-                  onChange={(e) => setSearchProvince(e.target.value)}
-                  className="bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-4 py-2 text-sm focus:border-orange-500 outline-none w-full sm:w-40 transition-all"
-                />
-              </div>
-              <div className="relative flex-1 sm:flex-none">
-                <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" size={14} />
-                <input 
-                  placeholder="Municipio" 
-                  value={searchMunicipality}
-                  onChange={(e) => setSearchMunicipality(e.target.value)}
-                  className="bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-4 py-2 text-sm focus:border-orange-500 outline-none w-full sm:w-40 transition-all"
-                />
-              </div>
-              {(searchProvince || searchMunicipality) && (
-                <button 
-                  onClick={() => { setSearchProvince(''); setSearchMunicipality(''); }}
-                  className="p-2 text-zinc-500 hover:text-white transition-colors"
-                >
-                  <X size={18} />
-                </button>
-              )}
-            </div>
+            <ExplorePlaceSelects
+              provinces={exploreProvinces}
+              provinceKey={searchProvince}
+              localityKey={searchMunicipality}
+              onProvinceChange={(key) => {
+                setSearchProvince(key);
+                setSearchMunicipality('');
+              }}
+              onLocalityChange={(key) => setSearchMunicipality(key)}
+              onClear={() => {
+                setSearchProvince('');
+                setSearchMunicipality('');
+              }}
+              matchCount={nearbyRoutes.length}
+            />
           </div>
 
           {nearbyRoutes.length > 0 ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {nearbyRoutes.map(route => (
-                <div key={route.id} className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl hover:border-orange-500/50 transition-all group">
+                <div key={route.id} className="mr-ticket bg-zinc-900 border border-zinc-800 p-4 rounded-2xl hover:border-orange-500/50 transition-all group">
                   <div className="flex justify-between items-start mb-3 gap-2 flex-wrap">
                     <div className="flex flex-wrap gap-1.5">
-                      <div className="bg-orange-500/10 text-orange-500 text-[10px] font-bold px-2 py-1 rounded-full uppercase">
+                      <div className="bg-orange-500/10 text-orange-500 text-[11px] font-bold px-2 py-1 rounded-full uppercase">
                         {route.isEsporadica ? 'Espontánea' : 'GPX'}
                       </div>
                       {route.routeListing === 'friends_only' && (
-                        <div className="bg-blue-500/15 text-blue-400 text-[10px] font-bold px-2 py-1 rounded-full uppercase flex items-center gap-1">
+                        <div className="bg-blue-500/15 text-blue-400 text-[11px] font-bold px-2 py-1 rounded-full uppercase flex items-center gap-1">
                           <HeartHandshake size={10} /> Solo amigos
                         </div>
                       )}
@@ -1247,11 +1336,11 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                   </div>
                   <h3 className="font-bold mb-1 group-hover:text-orange-500 transition-colors">{route.name}</h3>
                   {route.description && (
-                    <p className="text-[10px] text-zinc-400 mb-2 line-clamp-2 italic">"{route.description}"</p>
+                    <p className="text-[11px] text-zinc-400 mb-2 line-clamp-2 italic">"{route.description}"</p>
                   )}
                   <p className="text-xs text-zinc-500 mb-4 flex items-center gap-1 capitalize">
                     <MapPin size={12} />
-                    {route.municipality}, {route.province}
+                    {[route.municipality, route.province].filter(Boolean).join(', ') || 'Sin localidad'}
                   </p>
                   <div className="mb-3" aria-hidden />
                     <div className="flex gap-2">
@@ -1309,19 +1398,19 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
             <div className="text-center py-12 border-2 border-dashed border-zinc-800 rounded-2xl">
               <MapIcon className="mx-auto text-zinc-700 mb-2" size={32} />
               <p className="text-zinc-500 text-sm">
-                {searchProvince ? 'No hay rutas programadas en esta zona' : 'Introduce tu provincia para buscar rutas'}
+                {searchProvince ? 'No hay rutas programadas en esta zona. Prueba otra localidad o limpia el filtro.' : 'Elige una provincia para ver las rutas planificadas.'}
               </p>
             </div>
           )}
         </section>
 
         {/* Rutas planificadas por tus amigos (encima de Mis próximas rutas) */}
-        <section className="bg-zinc-900/40 border border-zinc-800 rounded-3xl p-6 max-w-xl mx-auto w-full">
-          <h2 className="text-lg font-bold flex items-center gap-2 mb-4">
-            <Users className="text-orange-500" size={20} />
+        <section className="mr-surface rounded-[var(--radius-sheet)] p-5 sm:p-6 max-w-xl mx-auto w-full">
+          <h2 className="text-3xl uppercase flex items-center gap-2 mb-4 text-zinc-50">
+            <Users className="text-sky-brand-400" size={20} />
             Rutas de amigos
           </h2>
-          <p className="text-[10px] text-zinc-500 mb-4 leading-relaxed">
+          <p className="text-[11px] text-zinc-500 mb-4 leading-relaxed">
             Apunta y revisa la ruta en vista previa. Los apuntados pueden usar <span className="text-zinc-400">Chat planificación</span> para acordar. El mapa, participantes y chat de voz en vivo se abren desde{' '}
             <span className="text-zinc-400">1 hora antes</span> de la hora programada.
           </p>
@@ -1338,7 +1427,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                   >
                     <div className="flex justify-between items-start gap-2 flex-wrap">
                       <p className="font-bold text-white truncate min-w-0">{route.name}</p>
-                      <div className="text-zinc-500 text-[10px] flex items-center gap-2 shrink-0">
+                      <div className="text-zinc-500 text-[11px] flex items-center gap-2 shrink-0">
                         <span className="flex items-center gap-0.5">
                           <Users size={10} />
                           {route.members?.length || 0}
@@ -1354,7 +1443,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                         </span>
                       </div>
                     </div>
-                    <p className="text-[10px] text-zinc-600 capitalize flex items-center gap-1">
+                    <p className="text-[11px] text-zinc-600 capitalize flex items-center gap-1">
                       <MapPin size={10} />
                       {route.municipality}, {route.province}
                     </p>
@@ -1431,9 +1520,9 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
         </section>
 
         <div className="max-w-xl mx-auto w-full space-y-4">
-            <h3 className="text-lg font-bold flex items-center gap-2">
-              <Calendar className="text-blue-500" size={18} />
-              Mis Próximas Rutas
+            <h3 className="text-2xl uppercase flex items-center gap-2 text-zinc-50">
+              <Calendar className="text-sky-brand-400" size={18} />
+              Mis próximas rutas
             </h3>
             <div className="space-y-3">
               {scheduledRoutes.length > 0 ? (
@@ -1441,7 +1530,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                   const canEnterSession = canEnterScheduledRouteSession(route.scheduledTimestamp);
                   const canInviteScheduled = canInviteToScheduledRoute(route, user?.uid);
                   return (
-                    <div key={route.id} className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl flex flex-col gap-3 group">
+                    <div key={route.id} className="mr-ticket bg-zinc-900 border border-zinc-800 p-4 rounded-2xl flex flex-col gap-3 group">
                       <div className="flex items-center justify-between">
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-1.5 pr-2">
@@ -1457,7 +1546,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                               </span>
                             )}
                           </div>
-                          <div className="flex items-center gap-3 text-[10px] text-zinc-500 mt-1">
+                          <div className="flex items-center gap-3 text-[11px] text-zinc-500 mt-1">
                             <p>
                               {new Date(route.scheduledTimestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
                             </p>
@@ -1474,24 +1563,27 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                                 <div className="flex items-center gap-1 animate-in fade-in slide-in-from-right-2 bg-zinc-950 p-1 rounded-lg border border-zinc-800 shadow-xl">
                                   <button 
                                     onClick={(e) => { e.stopPropagation(); confirmDeleteScheduled(route.id); }}
-                                    className="bg-red-600 text-white text-[10px] px-3 py-1.5 rounded-md font-bold hover:bg-red-700 transition-colors"
+                                    className="bg-red-600 text-white text-[11px] px-3 py-1.5 rounded-md font-bold hover:bg-red-700 transition-colors"
                                   >
                                     Confirmar Borrado
                                   </button>
                                   <button 
                                     onClick={(e) => { e.stopPropagation(); setDeletingId(null); }}
-                                    className="bg-zinc-800 text-zinc-400 text-[10px] px-3 py-1.5 rounded-md hover:text-white transition-colors"
+                                    className="bg-zinc-800 text-zinc-400 text-[11px] px-3 py-1.5 rounded-md hover:text-white transition-colors"
                                   >
                                     Cancelar
                                   </button>
                                 </div>
                               ) : (
-                                <button 
+                                <button
+                                  type="button"
                                   onClick={(e) => deleteScheduledRoute(e, route.id)}
-                                  className="p-2 text-zinc-600 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
+                                  className="inline-flex min-h-[36px] shrink-0 items-center gap-1 rounded-lg border border-red-500/35 bg-red-500/10 px-2.5 text-[11px] font-bold text-red-400 transition-colors hover:bg-red-500/20"
                                   title="Borrar ruta programada"
+                                  aria-label={`Borrar la ruta ${String(route.name || '')}`}
                                 >
-                                  <Trash2 size={16} />
+                                  <Trash2 size={14} aria-hidden />
+                                  Borrar
                                 </button>
                               )}
                             </div>
@@ -1506,7 +1598,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                           <button
                             type="button"
                             onClick={() => setShowPreviewModal(route)}
-                            className="flex min-w-[calc(50%-0.25rem)] flex-1 items-center justify-center gap-1 rounded-lg bg-zinc-800 py-1.5 text-[10px] font-bold text-white transition-all hover:bg-zinc-700"
+                            className="flex min-w-[calc(50%-0.25rem)] flex-1 items-center justify-center gap-1 rounded-lg bg-zinc-800 py-1.5 text-[11px] font-bold text-white transition-all hover:bg-zinc-700"
                           >
                             <MapIcon size={12} /> Vista Previa
                           </button>
@@ -1515,7 +1607,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                           <button
                             type="button"
                             onClick={() => void joinGroup(route.code)}
-                            className="flex min-w-[calc(50%-0.25rem)] flex-1 items-center justify-center gap-1 rounded-lg bg-orange-500 py-1.5 text-[10px] font-bold text-white transition-all hover:bg-orange-600"
+                            className="flex min-w-[calc(50%-0.25rem)] flex-1 items-center justify-center gap-1 rounded-lg bg-orange-500 py-1.5 text-[11px] font-bold text-white transition-all hover:bg-orange-600"
                           >
                             <ChevronRight size={12} />
                             Entrar a la ruta
@@ -1525,7 +1617,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                           <button
                             type="button"
                             onClick={() => openScheduledInvite(route)}
-                            className="flex min-w-[calc(50%-0.25rem)] flex-1 items-center justify-center gap-1 rounded-lg border border-orange-500/35 bg-orange-500/10 py-1.5 text-[10px] font-bold text-orange-200 hover:bg-orange-500/20"
+                            className="flex min-w-[calc(50%-0.25rem)] flex-1 items-center justify-center gap-1 rounded-lg border border-orange-500/35 bg-orange-500/10 py-1.5 text-[11px] font-bold text-orange-200 hover:bg-orange-500/20"
                           >
                             <UserPlus size={12} />
                             Invitar
@@ -1534,7 +1626,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                         <button
                           type="button"
                           onClick={() => setPlanChatRoute({ id: route.id, name: String(route.name || 'Ruta') })}
-                          className="flex min-w-[calc(50%-0.25rem)] flex-1 items-center justify-center gap-1 rounded-lg border border-emerald-500/35 bg-emerald-500/10 py-1.5 text-[10px] font-bold text-emerald-200 hover:bg-emerald-500/20"
+                          className="flex min-w-[calc(50%-0.25rem)] flex-1 items-center justify-center gap-1 rounded-lg border border-emerald-500/35 bg-emerald-500/10 py-1.5 text-[11px] font-bold text-emerald-200 hover:bg-emerald-500/20"
                         >
                           <MessageCircle size={12} />
                           Chat
@@ -1543,14 +1635,14 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                           <button
                             type="button"
                             onClick={() => toggleRSVP(route.code, true)}
-                            className="flex min-w-[calc(50%-0.25rem)] flex-1 items-center justify-center gap-1 rounded-lg bg-red-500/10 py-1.5 text-[10px] font-bold text-red-500 transition-all hover:bg-red-500/20"
+                            className="flex min-w-[calc(50%-0.25rem)] flex-1 items-center justify-center gap-1 rounded-lg bg-red-500/10 py-1.5 text-[11px] font-bold text-red-500 transition-all hover:bg-red-500/20"
                           >
                             <X size={12} />
                             Desapuntarse
                           </button>
                         )}
                         {!canEnterSession && route.createdBy === user?.uid && !canInviteScheduled && (
-                          <div className="flex min-w-full flex-1 items-center justify-center gap-1 rounded-lg border border-zinc-700/80 bg-zinc-800/80 px-1 py-1.5 text-center text-[10px] font-medium text-zinc-500">
+                          <div className="flex min-w-full flex-1 items-center justify-center gap-1 rounded-lg border border-zinc-700/80 bg-zinc-800/80 px-1 py-1.5 text-center text-[11px] font-medium text-zinc-500">
                             Organizador — papelera arriba para borrar
                           </div>
                         )}
@@ -1558,7 +1650,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                       <button
                         type="button"
                         onClick={() => bumpAttendeesList(route.members)}
-                        className="mt-3 w-full py-2 rounded-xl border border-zinc-600/60 bg-zinc-800/50 text-zinc-100 text-[10px] font-bold flex items-center justify-center gap-1.5 hover:bg-zinc-800 hover:border-zinc-500 transition-colors"
+                        className="mt-3 w-full py-2 rounded-xl border border-zinc-600/60 bg-zinc-800/50 text-zinc-100 text-[11px] font-bold flex items-center justify-center gap-1.5 hover:bg-zinc-800 hover:border-zinc-500 transition-colors"
                       >
                         <ListOrdered size={12} className="text-orange-400 shrink-0" />
                         Ver lista de apuntados
@@ -1576,7 +1668,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           memberUids={attendeesListMemberUids}
           expandNonce={attendeesListOpenNonce}
         />
-      </main>
+      </motion.main>
 
       {/* Friends Modal */}
       {showFriendsModal && <FriendsModal onClose={() => setShowFriendsModal(false)} onRepeatRoute={onRepeatRoute} />}
@@ -1656,6 +1748,62 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
         />
       )}
 
+      {/* Nivel de curvas antes de generar la ruta */}
+      {curveLevelPickerOpen && (
+        <div
+          className="fixed inset-0 z-[90] flex items-end sm:items-center justify-center p-4 bg-black/75 backdrop-blur-md"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="curve-level-title"
+          onClick={() => setCurveLevelPickerOpen(false)}
+        >
+          <div
+            className="mr-sheet w-full max-w-sm p-5 sm:p-6 animate-in fade-in zoom-in duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="mr-eyebrow">Ruta revirada</p>
+            <h2 id="curve-level-title" className="font-display text-2xl font-black text-white tracking-tight mt-1">
+              ¿Cuántas curvas quieres?
+            </h2>
+            <p className="text-xs text-zinc-400 leading-relaxed mt-2">
+              El trazado sale de carreteras reales. Cuanto más alto el nivel, más puede alejarse de la ruta más directa.
+            </p>
+            <div className="mt-4 grid gap-2">
+              {CURVE_LEVEL_ORDER.map((id) => {
+                const cfg = CURVE_LEVELS[id];
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => {
+                      setCurveLevelPickerOpen(false);
+                      void generateLocalRoute(id);
+                    }}
+                    className="mr-focus w-full text-left px-4 py-3 rounded-2xl border border-zinc-700 bg-zinc-950/60 hover:border-orange-500/60 hover:bg-orange-500/5 transition-all flex items-center justify-between gap-3"
+                  >
+                    <span className="min-w-0">
+                      <span className="block font-display text-lg font-black text-white uppercase tracking-wide">{cfg.label}</span>
+                      <span className="block text-xs text-zinc-400 leading-snug">{cfg.description}</span>
+                    </span>
+                    <span className="shrink-0 text-[11px] font-bold text-orange-400 tabular-nums text-right">
+                      hasta +{Math.round(cfg.maxDetour * 100)} %
+                      <span className="block text-[10px] font-semibold text-zinc-500">de distancia</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              type="button"
+              onClick={() => setCurveLevelPickerOpen(false)}
+              className="w-full mt-3 py-2.5 text-xs font-bold text-zinc-400 hover:text-white transition-colors"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Resultado generar ruta (sustituye alert nativo) */}
       {routeGenFeedback && (
         <div
@@ -1666,7 +1814,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           onClick={() => setRouteGenFeedback(null)}
         >
           <div
-            className={`w-full max-w-sm rounded-3xl border shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 ${
+            className={`w-full max-w-sm rounded-[1.5rem] border shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 ${
               routeGenFeedback.kind === 'success'
                 ? 'bg-zinc-900 border-orange-500/35 ring-1 ring-orange-500/20'
                 : 'bg-zinc-900 border-red-500/30 ring-1 ring-red-500/15'
@@ -1698,6 +1846,9 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                   )}
                 </p>
               )}
+              {routeGenFeedback.note && (
+                <p className="mt-3 text-center text-xs text-amber-400/90 leading-relaxed">{routeGenFeedback.note}</p>
+              )}
               {routeGenFeedback.kind === 'success' && (
                 <p className="mt-4 text-center text-xs text-zinc-500">
                   Revisa distancia y duración abajo y pulsa crear cuando quieras guardar la ruta.
@@ -1728,7 +1879,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           onClick={closeSupportModal}
         >
           <div
-            className="bg-zinc-900 border border-zinc-800 w-full max-w-md rounded-3xl overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-200"
+            className="bg-zinc-900 border border-zinc-800 w-full max-w-md rounded-[1.5rem] overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-200"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
@@ -1795,7 +1946,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           onClick={() => setShowJoinCodeModal(false)}
         >
           <div
-            className="bg-zinc-900 border border-zinc-800 w-full max-w-md rounded-3xl overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-200"
+            className="bg-zinc-900 border border-zinc-800 w-full max-w-md rounded-[1.5rem] overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-200"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="p-5 border-b border-zinc-800 flex items-center justify-between shrink-0">
@@ -1847,7 +1998,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           onClick={closeCreateModal}
         >
           <div
-            className="bg-zinc-900 border border-zinc-800 w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-200 max-h-[min(92dvh,900px)] flex flex-col min-h-0"
+            className="bg-zinc-900 border border-zinc-800 w-full max-w-lg rounded-[1.5rem] overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-200 max-h-[min(92dvh,900px)] flex flex-col min-h-0"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="p-6 border-b border-zinc-800 flex items-center justify-between shrink-0">
@@ -1873,7 +2024,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                   >
                     <Activity size={20} className={isEsporadica ? 'text-orange-500 mb-2' : 'mb-2'} />
                     <p className="font-bold text-sm">Espontánea</p>
-                    <p className="text-[10px] opacity-60">Sin trazado fijo</p>
+                    <p className="text-[11px] opacity-60">Sin trazado fijo</p>
                   </button>
                   <button 
                     onClick={() => {
@@ -1883,7 +2034,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                   >
                     <MapIcon size={20} className={!isEsporadica ? 'text-blue-500 mb-2' : 'mb-2'} />
                     <p className="font-bold text-sm">Planificar</p>
-                    <p className="text-[10px] opacity-60">Ruta con destino</p>
+                    <p className="text-[11px] opacity-60">Ruta con destino</p>
                   </button>
                 </div>
 
@@ -1895,7 +2046,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                       </div>
                       <div>
                         <p className="text-sm font-bold">Programar para después</p>
-                        <p className="text-[10px] text-zinc-500">Elige fecha y hora</p>
+                        <p className="text-[11px] text-zinc-500">Elige fecha y hora</p>
                       </div>
                     </div>
                     <button 
@@ -1951,11 +2102,11 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                         </div>
                         <div className="grid grid-cols-2 gap-2">
                           <div className="bg-zinc-900/90 p-3 rounded-xl border border-zinc-800">
-                            <p className="text-[10px] text-zinc-500 uppercase font-bold">Distancia</p>
+                            <p className="text-[11px] text-zinc-500 uppercase font-bold">Distancia</p>
                             <p className="text-lg font-black text-white tabular-nums">{routeStats.distance.toFixed(1)} km</p>
                           </div>
                           <div className="bg-zinc-900/90 p-3 rounded-xl border border-zinc-800">
-                            <p className="text-[10px] text-zinc-500 uppercase font-bold">Tiempo est.</p>
+                            <p className="text-[11px] text-zinc-500 uppercase font-bold">Tiempo est.</p>
                             <p className="text-lg font-black text-white">{formatDurationHoursMinutes(routeStats.duration)}</p>
                           </div>
                         </div>
@@ -1995,10 +2146,12 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                             value={destination}
                             onChange={(e) => {
                               const v = e.target.value;
+                              skipSuggestRef.current = false;
                               setDestination(v);
                               const p = destinationPickedRef.current;
                               if (p && !destinationLabelsMatch(v, p.label)) {
                                 destinationPickedRef.current = null;
+                                setDestinationPin(null);
                               }
                             }}
                             onKeyDown={(e) => {
@@ -2025,7 +2178,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                             (destinationPreview === 'No encontrado' ||
                               destinationPreview === 'Error al buscar' ||
                               destinationPreview === 'Demasiadas peticiones, espera un poco...') && (
-                              <p className="text-[10px] text-amber-500/90 mt-1.5 ml-1 leading-snug">
+                              <p className="text-[11px] text-amber-500/90 mt-1.5 ml-1 leading-snug">
                                 {destinationPreview}
                               </p>
                             )}
@@ -2043,14 +2196,50 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                                       : 'text-zinc-300 hover:bg-zinc-800'
                                   }`}
                                 >
-                                  {item.display_name}
+                                  {(() => {
+                                    const sug = formatNominatimSuggestion(item);
+                                    return (
+                                      <>
+                                        <span className="block font-semibold text-zinc-100">{sug.title}</span>
+                                        {sug.subtitle && (
+                                          <span className="block text-[11px] text-zinc-500 leading-snug">{sug.subtitle}</span>
+                                        )}
+                                      </>
+                                    );
+                                  })()}
                                 </button>
                               ))}
                             </div>
                           )}
                         </div>
+                        <div className="space-y-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-[11px] text-zinc-500 leading-snug">
+                              O toca el mapa (o mantén pulsado) para fijar el destino. Arrastra la chincheta para ajustarla.
+                            </p>
+                            {destinationPin && (
+                              <button
+                                type="button"
+                                onClick={() => clearPlannerSearchState()}
+                                className="shrink-0 text-[11px] font-bold text-zinc-400 hover:text-white px-2 py-1 rounded-lg bg-zinc-800/80 border border-zinc-700"
+                              >
+                                Quitar
+                              </button>
+                            )}
+                          </div>
+                          <div className="relative h-56 rounded-xl overflow-hidden border border-zinc-800 bg-zinc-900">
+                            <Suspense fallback={<div className="h-full w-full bg-zinc-900 animate-pulse" />}>
+                              <DestinationPickerMap pin={destinationPin} onPick={pickDestinationOnMap} />
+                            </Suspense>
+                            {pinResolving && (
+                              <span className="absolute bottom-2 left-2 z-[500] text-[11px] text-zinc-200 bg-zinc-950/85 px-2 py-1 rounded-md">
+                                Buscando nombre…
+                              </span>
+                            )}
+                          </div>
+                        </div>
                         <button
-                          onClick={() => void generateLocalRoute()}
+                          onClick={openCurveLevelPicker}
                           disabled={!destination.trim() || loading}
                           className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-sm font-bold transition-all shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2"
                         >
@@ -2060,13 +2249,26 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
 
                         {routeGenerated && routeStats && !gpxFromFile && (
                           <div className="flex flex-col gap-3 animate-in fade-in slide-in-from-top-2 pt-1 border-t border-zinc-800/80">
+                            {routeCurveSummary && (
+                              <p className="text-[11px] text-zinc-400 leading-snug">
+                                <span className="font-bold text-orange-400 uppercase tracking-wider">
+                                  Curvas {CURVE_LEVELS[routeCurveSummary.level].label.toLowerCase()}
+                                </span>
+                                {' · '}
+                                {routeCurveSummary.detourPct < 0.5
+                                  ? 'ruta directa'
+                                  : `desvío +${Math.round(routeCurveSummary.detourPct)} %`}
+                                {' · '}
+                                {routeCurveSummary.curveCount} curvas ({routeCurveSummary.curvesPerKm.toFixed(1)}/km)
+                              </p>
+                            )}
                             <div className="grid grid-cols-2 gap-2">
                               <div className="bg-zinc-900 p-3 rounded-xl border border-zinc-800">
-                                <p className="text-[10px] text-zinc-500 uppercase font-bold">Distancia</p>
+                                <p className="text-[11px] text-zinc-500 uppercase font-bold">Distancia</p>
                                 <p className="text-lg font-black text-white">{routeStats.distance.toFixed(1)} km</p>
                               </div>
                               <div className="bg-zinc-900 p-3 rounded-xl border border-zinc-800">
-                                <p className="text-[10px] text-zinc-500 uppercase font-bold">Duración</p>
+                                <p className="text-[11px] text-zinc-500 uppercase font-bold">Duración</p>
                                 <p className="text-lg font-black text-white">{formatDurationHoursMinutes(routeStats.duration)}</p>
                               </div>
                             </div>
@@ -2176,7 +2378,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
                             />
                             <span className="min-w-0">
                               <span className="block text-sm font-bold text-white">{meta.title}</span>
-                              <span className="block text-[10px] text-zinc-500 mt-0.5 leading-snug">{meta.description}</span>
+                              <span className="block text-[11px] text-zinc-500 mt-0.5 leading-snug">{meta.description}</span>
                             </span>
                           </button>
                         );
@@ -2206,7 +2408,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           onClick={() => setPostScheduleInvite(null)}
         >
           <div
-            className="bg-zinc-900 border border-orange-500/40 w-full max-w-md rounded-3xl overflow-hidden shadow-2xl shadow-orange-500/10"
+            className="bg-zinc-900 border border-orange-500/40 w-full max-w-md rounded-[1.5rem] overflow-hidden shadow-2xl shadow-orange-500/10"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="p-6 border-b border-zinc-800">
@@ -2240,7 +2442,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
             </div>
             <div className="p-6 space-y-4">
               <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 text-center">
-                <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-1">Código</p>
+                <p className="text-[11px] font-black uppercase tracking-widest text-zinc-500 mb-1">Código</p>
                 <p className="text-3xl font-black text-orange-500 tracking-wider">{postScheduleInvite.code}</p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -2329,7 +2531,7 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
           onClick={() => setShowPreviewModal(null)}
         >
           <div
-            className="bg-zinc-900 border border-zinc-800 w-full max-w-4xl h-[80vh] rounded-3xl overflow-hidden shadow-2xl flex flex-col"
+            className="bg-zinc-900 border border-zinc-800 w-full max-w-4xl h-[80vh] rounded-[1.5rem] overflow-hidden shadow-2xl flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="p-4 border-b border-zinc-800 flex items-center justify-between bg-zinc-900">
@@ -2342,32 +2544,15 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
               </button>
             </div>
             <div className="flex-1 relative bg-[#dfe0e6]">
-              <MapContainer 
-                center={[40.4168, -3.7038]} 
-                zoom={6} 
-                className="w-full h-full"
-                zoomControl={true}
-                fadeAnimation={false}
+              <Suspense
+                fallback={
+                  <div className="absolute inset-0 flex items-center justify-center text-sm text-zinc-500">
+                    Cargando mapa…
+                  </div>
+                }
               >
-                <TileLayer 
-                  url="https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png"
-                  attribution='&copy; OpenStreetMap'
-                  keepBuffer={200}
-                  updateWhenIdle={false}
-                  updateWhenZooming
-                  detectRetina={false}
-                  crossOrigin
-                  className="motoride-base-tiles"
-                  errorTileUrl={LEAFLET_LIGHT_ERROR_TILE}
-                />
-                {showPreviewModal.routeGeoJSON && parseRouteData(showPreviewModal.routeGeoJSON) && (
-                  <GeoJSON 
-                    data={parseRouteData(showPreviewModal.routeGeoJSON) as any} 
-                    style={{ color: '#f97316', weight: 5, opacity: 0.8 }} 
-                  />
-                )}
-                <PreviewBounds route={showPreviewModal.routeGeoJSON} />
-              </MapContainer>
+                <RoutePreviewMap routeGeoJSON={showPreviewModal.routeGeoJSON} />
+              </Suspense>
               
               <div className="absolute bottom-4 left-4 right-4 bg-zinc-900/90 backdrop-blur-md p-4 rounded-2xl border border-zinc-800 shadow-xl z-[1000]">
                 <p className="text-xs font-bold text-zinc-500 uppercase mb-1">Punto de encuentro</p>
@@ -2386,18 +2571,3 @@ export default function Dashboard({ onJoinGroup, onRepeatRoute, onOpenProfile }:
   );
 }
 
-function PreviewBounds({ route }: { route: string }) {
-  const map = useMap();
-  useEffect(() => {
-    if (!route) return;
-    try {
-      const geojson = parseRouteData(route);
-      if (!geojson) return;
-      const layer = L.geoJSON(geojson as any);
-      map.fitBounds(layer.getBounds(), { padding: [50, 50] });
-    } catch (e) {
-      console.error(e);
-    }
-  }, [route, map]);
-  return null;
-}

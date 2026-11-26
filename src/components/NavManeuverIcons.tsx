@@ -1,6 +1,8 @@
 /**
- * Iconos de maniobra OSRM: trazo vectorial limpio (sin superposición fill+stroke
- * que genera bordes dentados). Rotondas: anillo visible + número de salida.
+ * Iconos de maniobra OSRM: trazo vectorial limpio con grosor único (SW) en todas
+ * las maniobras, para que se lean igual a 32 px (compacto) y 40 px (normal).
+ * Las puntas se dibujan centradas en el extremo del trazo y sobresalen 9 u.
+ * Rotondas: anillo con flecha de sentido + número de salida centrado.
  */
 
 import type { ReactNode } from 'react';
@@ -16,177 +18,93 @@ type Props = {
 
 const VB = '0 0 64 64';
 
-/** Flecha en punta triangular (relleno sólido). */
+/** Grosor único de trazo (viewBox 64). A 32 px ≈ 3.5 px; a 40 px ≈ 4.4 px. */
+const SW = 7;
+
+const STROKE = {
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: SW,
+  strokeLinecap: 'round' as const,
+  strokeLinejoin: 'round' as const,
+};
+
+/** Punta triangular centrada en el extremo del trazo (sobresale hacia delante). */
+const HEAD_D = 'M 0 -9 L 8 6 L -8 6 Z';
+
+/** Punta en (x,y); rotDeg 0 = apunta hacia arriba, positivo = sentido horario. */
 function ArrowHead({ x, y, rotDeg }: { x: number; y: number; rotDeg: number }) {
-  return (
-    <path
-      fill="currentColor"
-      transform={`translate(${x} ${y}) rotate(${rotDeg})`}
-      d="M 0 -7 L 7 7 L -7 7 Z"
-    />
-  );
+  return <path fill="currentColor" transform={`translate(${x} ${y}) rotate(${rotDeg})`} d={HEAD_D} />;
 }
 
-/** Giro ~90° a la izquierda: solo trazo + cabeza. */
-function LeftTurn90Flat() {
+/** Espejo horizontal (derecha a partir de la izquierda). */
+function Mirror({ children }: { children: ReactNode }) {
+  return <g transform="translate(64 0) scale(-1 1)">{children}</g>;
+}
+
+/** Giro ~90° a la izquierda. */
+function LeftTurn90() {
   return (
     <>
-      <path
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="7.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M 38 54 V 30 Q 38 17 26 17 H 16"
-      />
+      <path {...STROKE} d="M 38 54 V 30 Q 38 17 26 17 H 16" />
       <ArrowHead x={16} y={17} rotDeg={-90} />
     </>
-  );
-}
-
-function RightTurn90Flat() {
-  return (
-    <g transform="translate(64 0) scale(-1 1)">
-      <path
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="7.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M 38 54 V 30 Q 38 17 26 17 H 16"
-      />
-      <ArrowHead x={16} y={17} rotDeg={-90} />
-    </g>
   );
 }
 
 function StraightArrow() {
   return (
     <>
-      <path
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="7.5"
-        strokeLinecap="round"
-        d="M 32 50 V 14"
-      />
-      <ArrowHead x={32} y={14} rotDeg={0} />
+      <path {...STROKE} d="M 32 54 V 18" />
+      <ArrowHead x={32} y={16} rotDeg={0} />
     </>
   );
 }
 
+/** Leve a la izquierda: tramo recto y diagonal suave (~30°). */
 function SlightLeft() {
   return (
-    <g transform="translate(32 32) rotate(-32) translate(-32 -32)">
-      <path
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="7.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M 32 50 L 32 22 Q 32 14 24 14 H 14"
-      />
-      <ArrowHead x={14} y={14} rotDeg={-90} />
-    </g>
+    <>
+      <path {...STROKE} d="M 36 54 V 34 L 24 12" />
+      <ArrowHead x={24} y={12} rotDeg={-30} />
+    </>
   );
 }
 
-function SlightRight() {
-  return (
-    <g transform="translate(64 0) scale(-1 1)">
-      <g transform="translate(32 32) rotate(-32) translate(-32 -32)">
-        <path
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="7.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          d="M 32 50 L 32 22 Q 32 14 24 14 H 14"
-        />
-        <ArrowHead x={14} y={14} rotDeg={-90} />
-      </g>
-    </g>
-  );
-}
-
+/** Cerrado a la izquierda: horquilla que vuelve hacia abajo-izquierda. */
 function SharpLeft() {
   return (
     <>
-      <path
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="7.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M 42 54 V 34 Q 42 12 22 12 H 12"
-      />
-      <ArrowHead x={12} y={12} rotDeg={-90} />
+      <path {...STROKE} d="M 42 54 V 26 L 18 44" />
+      <ArrowHead x={18} y={44} rotDeg={-130} />
     </>
   );
 }
 
-function SharpRight() {
-  return (
-    <g transform="translate(64 0) scale(-1 1)">
-      <path
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="7.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M 42 54 V 34 Q 42 12 22 12 H 12"
-      />
-      <ArrowHead x={12} y={12} rotDeg={-90} />
-    </g>
-  );
-}
-
+/** Cambio de sentido: sube, gira por arriba y baja. */
 function UTurn() {
   return (
     <>
-      <path
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="7.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M 44 52 V 38 Q 44 10 22 10 Q 10 10 10 22 V 30"
-      />
-      <ArrowHead x={10} y={30} rotDeg={180} />
+      <path {...STROKE} d="M 44 54 V 30 Q 44 12 26 12 Q 14 12 14 24" />
+      <ArrowHead x={14} y={24} rotDeg={180} />
     </>
   );
 }
 
 /**
- * Rotonda: círculo grueso + arco de sentido + número de salida centrado.
+ * Rotonda: anillo grueso, flecha de sentido sobre el anillo (abajo-izquierda,
+ * sentido horario) y número de salida centrado.
  */
 function RoundaboutIcon({ exit }: { exit: number | null }) {
-  const label =
-    exit != null && exit > 0 && exit <= 99 ? String(exit) : '?';
-  const fs = label.length > 1 ? 22 : 28;
+  const label = exit != null && exit > 0 && exit <= 99 ? String(exit) : '?';
+  const fs = label.length > 1 ? 20 : 26;
   return (
     <>
-      <circle
-        cx="32"
-        cy="32"
-        r="21"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="6.5"
-        strokeLinecap="round"
-      />
-      {/* Indicación de sentido horario (entrada típica por abajo) */}
-      <path
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="4"
-        strokeLinecap="round"
-        d="M 32 54 A 22 22 0 0 1 10 32"
-        opacity="0.88"
-      />
+      <circle cx="32" cy="32" r="20" fill="none" stroke="currentColor" strokeWidth={SW} />
+      <ArrowHead x={17.86} y={46.14} rotDeg={-45} />
       <text
         x="32"
-        y="32"
+        y="33"
         textAnchor="middle"
         dominantBaseline="central"
         fill="currentColor"
@@ -201,96 +119,50 @@ function RoundaboutIcon({ exit }: { exit: number | null }) {
   );
 }
 
-/** Salir de rotonda: arco de circulación + flecha que sale. */
+/** Salir de rotonda: arco de circulación que sale hacia la derecha. */
 function ExitRoundaboutIcon() {
   return (
     <>
-      <path
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="6"
-        strokeLinecap="round"
-        d="M 42 38 A 17 17 0 1 1 30 16"
-      />
-      <path
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="6.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M 10 28 L 4 22"
-      />
-      <ArrowHead x={4} y={22} rotDeg={-125} />
+      <path {...STROKE} d="M 32 50 A 16 16 0 0 1 32 18" />
+      <path {...STROKE} d="M 32 18 Q 32 10 46 10" />
+      <ArrowHead x={46} y={10} rotDeg={90} />
     </>
   );
 }
 
+/** Rampa de autovía/autopista (salida o entrada), espejada si es por la izquierda. */
 function HighwayRamp({ side }: { side: 'left' | 'right' }) {
   const ramp = (
     <>
-      <path
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="7"
-        strokeLinecap="round"
-        d="M 24 52 V 16"
-      />
-      <path
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M 32 52 L 32 36 L 50 18"
-      />
+      <path {...STROKE} d="M 22 54 V 16" />
+      <path {...STROKE} d="M 32 54 V 36 L 50 18" />
       <ArrowHead x={50} y={18} rotDeg={45} />
     </>
   );
   if (side === 'right') return <>{ramp}</>;
-  return (
-    <g transform="translate(64 0) scale(-1 1)">
-      {ramp}
-    </g>
-  );
+  return <Mirror>{ramp}</Mirror>;
 }
 
+/** Bifurcación: tronco y dos ramas con punta en cada salida. */
 function ForkIcon() {
   return (
     <>
-      <path fill="none" stroke="currentColor" strokeWidth="7" strokeLinecap="round" d="M 32 52 V 20" />
-      <path
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="7"
-        strokeLinecap="round"
-        d="M 32 20 L 20 12"
-      />
-      <path
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="7"
-        strokeLinecap="round"
-        d="M 32 20 L 44 12"
-      />
-      <ArrowHead x={20} y={12} rotDeg={-130} />
-      <ArrowHead x={44} y={12} rotDeg={130} />
+      <path {...STROKE} d="M 32 54 V 26" />
+      <path {...STROKE} d="M 32 26 L 19 12" />
+      <path {...STROKE} d="M 32 26 L 45 12" />
+      <ArrowHead x={19} y={12} rotDeg={-56} />
+      <ArrowHead x={45} y={12} rotDeg={56} />
     </>
   );
 }
 
+/** Incorporación: carril recto que absorbe el carril de la derecha. */
 function MergeIcon() {
   return (
     <>
-      <path fill="none" stroke="currentColor" strokeWidth="7" strokeLinecap="round" d="M 22 52 V 28" />
-      <path
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M 42 52 L 42 38 L 28 24"
-      />
-      <ArrowHead x={22} y={28} rotDeg={180} />
+      <path {...STROKE} d="M 22 54 V 14" />
+      <ArrowHead x={22} y={14} rotDeg={0} />
+      <path {...STROKE} d="M 44 54 V 38 L 28 24" />
     </>
   );
 }
@@ -371,8 +243,8 @@ export function ManeuverTurnIcon({
   }
 
   if (t === 'end of road') {
-    if (bucket === 'left' || bucket === 'slight_left' || bucket === 'sharp_left') return wrap(<LeftTurn90Flat />);
-    if (bucket === 'right' || bucket === 'slight_right' || bucket === 'sharp_right') return wrap(<RightTurn90Flat />);
+    if (bucket === 'left' || bucket === 'slight_left' || bucket === 'sharp_left') return wrap(<LeftTurn90 />);
+    if (bucket === 'right' || bucket === 'slight_right' || bucket === 'sharp_right') return wrap(<Mirror><LeftTurn90 /></Mirror>);
     return wrap(<StraightArrow />);
   }
 
@@ -391,15 +263,15 @@ export function ManeuverTurnIcon({
       case 'sharp_left':
         return wrap(<SharpLeft />);
       case 'sharp_right':
-        return wrap(<SharpRight />);
+        return wrap(<Mirror><SharpLeft /></Mirror>);
       case 'slight_left':
         return wrap(<SlightLeft />);
       case 'slight_right':
-        return wrap(<SlightRight />);
+        return wrap(<Mirror><SlightLeft /></Mirror>);
       case 'left':
-        return wrap(<LeftTurn90Flat />);
+        return wrap(<LeftTurn90 />);
       case 'right':
-        return wrap(<RightTurn90Flat />);
+        return wrap(<Mirror><LeftTurn90 /></Mirror>);
       case 'straight':
         return wrap(<StraightArrow />);
       default:

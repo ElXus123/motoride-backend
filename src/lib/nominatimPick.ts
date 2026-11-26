@@ -9,6 +9,8 @@
 export type NominatimItem = {
   lat?: string;
   lon?: string;
+  /** Nombre propio del objeto OSM (p. ej. "Huesca/Uesca"); más limpio que display_name. */
+  name?: string;
   display_name?: string;
   osm_type?: string;
   osm_id?: number;
@@ -41,6 +43,11 @@ export function matchesAsWholeWord(haystack: string, needle: string): boolean {
     from = i + 1;
   }
   return false;
+}
+
+/** Minúsculas y sin tildes: «Aínsa» y «Ainsa» son el mismo topónimo. */
+export function foldPlace(s: string): string {
+  return s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().trim();
 }
 
 /**
@@ -90,6 +97,22 @@ function placeFieldMatchesPrimary(placeFieldLower: string, primary: string): boo
   return matchesAsWholeWord(pl, primary);
 }
 
+/** Nombre principal del resultado: primer tramo de `name` (sin «/Uesca»), o el primer tramo de display_name. */
+export function nominatimTitle(item: NominatimItem): string {
+  const fromName = (item.name || '').split('/')[0]?.trim();
+  if (fromName) return fromName;
+  return (item.display_name || '').split(',')[0]?.trim() || '';
+}
+
+const POPULATED_ADDRTYPES = new Set(['city', 'town', 'village', 'municipality', 'hamlet']);
+
+/** Población (ciudad/pueblo/municipio) cuyo nombre es exactamente el buscado: siempre primera. */
+function isExactPopulatedMatch(item: NominatimItem, primaryFolded: string): boolean {
+  if (!primaryFolded) return false;
+  if (!POPULATED_ADDRTYPES.has((item.addresstype || '').toLowerCase())) return false;
+  return foldPlace(nominatimTitle(item)) === primaryFolded;
+}
+
 function scoreItem(item: NominatimItem, queryLower: string): number {
   let s = 0;
   const imp = Number(item.importance);
@@ -103,9 +126,9 @@ function scoreItem(item: NominatimItem, queryLower: string): number {
   if (c === 'place' && (t === 'city' || t === 'town' || t === 'village')) s += 10;
   if (t === 'suburb' || t === 'neighbourhood' || t === 'farm' || t === 'house' || t === 'building') s -= 8;
 
-  const city = (addr.city || addr.town || addr.village || addr.municipality || '').toLowerCase();
-  const state = (addr.state || addr.region || '').toLowerCase();
-  const q = queryLower;
+  const city = foldPlace(addr.city || addr.town || addr.village || addr.municipality || '');
+  const state = foldPlace(addr.state || addr.region || '');
+  const q = foldPlace(queryLower);
   const primary = primaryPlaceToken(q);
 
   const addrType = (item.addresstype || '').toLowerCase();
@@ -118,15 +141,9 @@ function scoreItem(item: NominatimItem, queryLower: string): number {
   }
 
   // Coincidencia del lugar principal con la ciudad/municipio del resultado (p. ej. Huesca/Uesca, Huesca ≠ Adahuesca).
-  const placeFields = [
-    addr.city,
-    addr.town,
-    addr.village,
-    addr.municipality,
-    addr.city_district,
-  ]
+  const placeFields = [addr.city, addr.town, addr.village, addr.municipality, addr.city_district]
     .filter(Boolean)
-    .map((x) => String(x).toLowerCase());
+    .map((x) => foldPlace(String(x)));
   if (primary.length >= 3) {
     for (const pl of placeFields) {
       if (placeFieldMatchesPrimary(pl, primary)) {
@@ -145,9 +162,8 @@ function scoreItem(item: NominatimItem, queryLower: string): number {
   }
 
   // Priorizar población cuyo nombre de ciudad coincide exactamente con el término buscado (p. ej. Huesca ≠ Adahuesca).
-  const cityOrTown = (addr.city || addr.town || addr.village || addr.municipality || '').toLowerCase();
-  if (primary.length >= 3 && cityOrTown) {
-    const head = firstToponymSegment(cityOrTown);
+  if (primary.length >= 3 && city) {
+    const head = firstToponymSegment(city);
     if (head === primary || head.startsWith(`${primary} /`) || head.startsWith(`${primary}/`)) {
       s += 38;
     }
@@ -158,7 +174,7 @@ function scoreItem(item: NominatimItem, queryLower: string): number {
 
   if (state && matchesAsWholeWord(q, state)) s += 3;
 
-  const name = (item.display_name || '').toLowerCase();
+  const name = foldPlace(item.display_name || '');
   const parts = q.split(/[,\s]+/).filter((p) => p.length > 2);
   for (const p of parts) {
     if (matchesAsWholeWord(name, p)) s += 2;
@@ -167,15 +183,58 @@ function scoreItem(item: NominatimItem, queryLower: string): number {
   return s;
 }
 
-/** Ordena resultados de mayor a mejor puntuación y devuelve el primero. */
+/**
+ * Texto para la lista de sugerencias: título = municipio; subtítulo = comarca y provincia.
+ * Así «Hoya de Huesca» (comarca) queda como dato secundario y no como nombre principal.
+ */
+export function formatNominatimSuggestion(item: NominatimItem): { title: string; subtitle: string } {
+  const title = nominatimTitle(item) || (item.display_name || '').trim();
+  const a = item.address || {};
+  const titleKey = foldPlace(title);
+  const parts: string[] = [];
+  for (const raw of [a.county, a.province || a.state || a.region]) {
+    const v = (raw || '').trim();
+    if (!v || foldPlace(v) === titleKey) continue;
+    if (parts.some((x) => foldPlace(x) === foldPlace(v))) continue;
+    parts.push(v);
+  }
+  return { title, subtitle: parts.join(' · ') };
+}
+
+/** Niveles administrativos demasiado grandes: su lat/lon de Nominatim es el centroide del polígono
+ *  (p. ej. provincia de Huesca ≈ 31 km de la ciudad), no un punto habitado; nunca son destino de ruta. */
+const NON_ROUTABLE_ADDRTYPES = new Set(['country', 'state', 'region', 'province', 'county', 'state_district']);
+
+/** ¿Sirve este resultado como destino de ruta (población, no provincia/comarca)? */
+export function isRoutableNominatimResult(item: NominatimItem): boolean {
+  const at = (item.addresstype || '').toLowerCase();
+  if (at) return !NON_ROUTABLE_ADDRTYPES.has(at);
+  const t = (item.type || '').toLowerCase();
+  return !NON_ROUTABLE_ADDRTYPES.has(t);
+}
+
+/** Lista ordenada (mejor primero) solo con resultados enrutables. */
+export function sortRoutableNominatimResults(items: NominatimItem[], query: string): NominatimItem[] {
+  return sortNominatimResults(items.filter(isRoutableNominatimResult), query);
+}
+
+/** Ordena resultados de mayor a mejor puntuación y devuelve el primero enrutable (nunca provincia). */
 export function pickBestNominatimResult(items: NominatimItem[] | null | undefined, query: string): NominatimItem | null {
   if (!Array.isArray(items) || items.length === 0) return null;
-  const sorted = sortNominatimResults(items, query);
+  const sorted = sortRoutableNominatimResults(items, query);
   return sorted[0] ?? null;
 }
 
-/** Lista ordenada (mejor primero) para sugerencias. */
+/**
+ * Lista ordenada (mejor primero). Primero el municipio cuyo nombre es exactamente el buscado
+ * (aunque Nominatim lo devuelva con otro rango), luego por puntuación.
+ * Incluye provincias (uso de búsqueda), penalizadas.
+ */
 export function sortNominatimResults(items: NominatimItem[], query: string): NominatimItem[] {
-  const q = query.trim().toLowerCase();
-  return [...items].sort((a, b) => scoreItem(b, q) - scoreItem(a, q));
+  const q = foldPlace(query);
+  const primary = primaryPlaceToken(q);
+  const exactTier = (x: NominatimItem) => (isExactPopulatedMatch(x, primary) ? 1 : 0);
+  return [...items].sort(
+    (a, b) => exactTier(b) - exactTier(a) || scoreItem(b, q) - scoreItem(a, q)
+  );
 }

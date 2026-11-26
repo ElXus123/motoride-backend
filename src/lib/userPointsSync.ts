@@ -1,6 +1,6 @@
 import { doc, getDoc, getDocFromServer, updateDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { normalizeUserProgress } from './levelProgress';
+import { normalizeUserProgress, PROGRESS_MODEL_VERSION } from './levelProgress';
 
 /**
  * Lee puntos y nivel desde el servidor, normaliza según la curva progresiva (y migra desde el modelo fijo 1000)
@@ -34,14 +34,17 @@ export async function syncUserPointsAndLevelFromServer(uid: string): Promise<boo
 
     const safePoints = Math.max(0, Math.floor(rawPoints));
     const storedLevel = Number.isFinite(rawLevel) ? Math.max(1, Math.floor(rawLevel)) : 1;
+    const progressModel = data.progressModel;
 
-    const { level: nextLevel, points: nextPoints } = normalizeUserProgress(storedLevel, safePoints);
+    const { level: nextLevel, points: nextPoints } = normalizeUserProgress(storedLevel, safePoints, progressModel);
 
     const pointsDirty = nextPoints !== safePoints;
     const levelDirty = nextLevel !== storedLevel;
+    // Perfil antiguo sin marcador: se migra una vez y queda marcado como modelo progresivo (2).
+    const markDirty = progressModel !== PROGRESS_MODEL_VERSION;
 
-    if (pointsDirty || levelDirty) {
-      await updateDoc(ref, { points: nextPoints, level: nextLevel });
+    if (pointsDirty || levelDirty || markDirty) {
+      await updateDoc(ref, { points: nextPoints, level: nextLevel, progressModel: PROGRESS_MODEL_VERSION });
       return true;
     }
   } catch (e) {

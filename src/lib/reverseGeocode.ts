@@ -1,4 +1,47 @@
 import { requestJson } from './network';
+import { getNominatimHeaders } from './routePlannerDestination';
+
+/**
+ * Nombre corto para una chincheta (solo visual: el destino de la ruta usa las coordenadas exactas).
+ * Devuelve null si Nominatim no encuentra nada cerca (p. ej. en mar o despoblado).
+ */
+export async function reverseGeocodeShortLabel(
+  lat: number,
+  lon: number,
+  options?: { signal?: AbortSignal }
+): Promise<string | null> {
+  const params = new URLSearchParams({
+    format: 'jsonv2',
+    lat: String(lat),
+    lon: String(lon),
+    zoom: '16',
+    addressdetails: '1',
+    'accept-language': 'es',
+  });
+  try {
+    const data = await requestJson<{
+      name?: string;
+      display_name?: string;
+      address?: Record<string, string>;
+      error?: string;
+    }>(`https://nominatim.openstreetmap.org/reverse?${params.toString()}`, {
+      timeoutMs: 10000,
+      retries: 0,
+      headers: getNominatimHeaders(),
+      signal: options?.signal,
+    });
+    if (!data || data.error) return null;
+    const a = data.address || {};
+    const place = (a.city || a.town || a.village || a.municipality || a.hamlet || '').trim();
+    const street = [a.road || a.pedestrian || a.path || '', a.house_number || ''].filter(Boolean).join(' ').trim();
+    const parts = [data.name?.trim() || street, place].filter((p, i, arr) => p && arr.indexOf(p) === i);
+    if (parts.length > 0) return parts.join(', ');
+    const full = (data.display_name || '').split(',').slice(0, 3).join(',').trim();
+    return full || null;
+  } catch {
+    return null;
+  }
+}
 
 export type ReverseAddressParts = {
   province: string;

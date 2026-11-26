@@ -1,21 +1,80 @@
 @import "tailwindcss";
 @import "leaflet/dist/leaflet.css";
 
+/* HUD de móvil tumbado: horizontal y poca altura (iPhone 844×390, Android ~800×360).
+   No se aplica a PC ni a tabletas en horizontal, que mantienen el HUD normal. */
+@custom-variant hud-land (@media (orientation: landscape) and (max-height: 500px));
+
+/*
+ * MotoRide — sistema visual
+ * ------------------------------------------------------------
+ * Acento: ámbar de la marca (la burbuja naranja del icono). Neutros cálidos (tinta, no zinc frío).
+ * Display: Barlow Condensed (carácter de cuentakilómetros / señalética). Texto: Plus Jakarta Sans.
+ * Radios: 10 controles · 16 tarjetas · 24 hojas/modales · 32 hero.
+ * Sombras: elevación en tres niveles, siempre con sombra tintada oscura y sin brillos de neón.
+ * Movimiento: 180–320 ms, curva “expo out”. Sin rebotes salvo el logo. Respeta prefers-reduced-motion.
+ */
 @theme {
   --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Barlow Condensed", "Arial Narrow", ui-sans-serif, sans-serif;
+
+  /* Acento de marca (sobrescribe la escala naranja de Tailwind en todo el proyecto) */
+  --color-orange-50: #fff7ec;
+  --color-orange-100: #ffecd0;
+  --color-orange-200: #ffd69e;
+  --color-orange-300: #ffbb67;
+  --color-orange-400: #ffa23d;
+  --color-orange-500: #f58a1f;
+  --color-orange-600: #d9700f;
+  --color-orange-700: #b25a0e;
+  --color-orange-800: #8c4612;
+  --color-orange-900: #6d3814;
+  --color-orange-950: #2e1805;
+
+  /* Neutros cálidos: tinta de asfalto (zinc sobrescrito para toda la app) */
+  --color-zinc-50: #faf8f4;
+  --color-zinc-100: #efebe3;
+  --color-zinc-200: #ddd8cd;
+  --color-zinc-300: #bfb9ad;
+  --color-zinc-400: #9b958a;
+  --color-zinc-500: #77726a;
+  --color-zinc-600: #55514a;
+  --color-zinc-700: #3a3834;
+  --color-zinc-800: #272623;
+  --color-zinc-900: #171614;
+  --color-zinc-950: #0d0c0b;
+
+  /* Acentos secundarios tomados del icono: cielo (social/info) y menta (confirmado) */
+  --color-sky-brand-400: #7cc8e4;
+  --color-sky-brand-500: #3fa9d1;
+  --color-mint-brand-400: #6fd3a6;
+
+  --radius-control: 0.625rem;
+  --radius-card: 1rem;
+  --radius-sheet: 1.5rem;
+  --radius-hero: 2rem;
+
+  --shadow-lift: 0 1px 0 rgb(255 255 255 / 0.04) inset, 0 10px 30px -12px rgb(0 0 0 / 0.65);
+  --shadow-sheet: 0 1px 0 rgb(255 255 255 / 0.05) inset, 0 30px 80px -24px rgb(0 0 0 / 0.8);
+  --shadow-ember: 0 10px 28px -12px rgb(245 138 31 / 0.55);
+
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 :root {
   --app-vh: 1vh;
-  /* iPhone notch / Dynamic Island / bordes — usar con viewport-fit=cover en index.html */
   --motoride-safe-top: env(safe-area-inset-top, 0px);
   --motoride-safe-right: env(safe-area-inset-right, 0px);
   --motoride-safe-bottom: env(safe-area-inset-bottom, 0px);
   --motoride-safe-left: env(safe-area-inset-left, 0px);
+  color-scheme: dark;
+  --mr-ink: #0d0c0b;
+  --mr-paper: #efebe3;
+  --mr-muted: #9b958a;
+  --mr-line: rgb(239 235 227 / 0.08);
 }
 
 html {
-  /* Evita que Safari reescale texto al rotar o al hacer doble tap */
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
 }
@@ -27,14 +86,15 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
-  background-color: #09090b;
-  color: #fafafa;
-  /* Reduce zoom por doble tap; el zoom del mapa va por Leaflet en su capa */
+  background-color: var(--mr-ink);
+  color: var(--mr-paper);
   touch-action: manipulation;
   -webkit-touch-callout: none;
 }
 
-html, body, #root {
+html,
+body,
+#root {
   margin: 0;
   padding: 0;
   min-height: calc(var(--app-vh) * 100);
@@ -45,13 +105,85 @@ html, body, #root {
   box-sizing: border-box;
 }
 
+/* Titulares con carácter: display condensado, peso alto, interlineado apretado */
+h1,
+h2,
+.mr-display {
+  font-family: var(--font-display);
+  letter-spacing: 0.01em;
+  font-weight: 700;
+}
+
 @media (max-width: 420px), (max-height: 760px) {
   html {
     font-size: 15px;
   }
 }
 
-/* Custom Leaflet overrides — mapa base Carto Voyager (claro): placeholders claros = no “cuadros negros” */
+@layer components {
+  /* Utilidades de marca (usar en componentes nuevos o rediseñados) */
+  .mr-eyebrow {
+    font-family: var(--font-sans);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-orange-400);
+  }
+
+  .mr-surface {
+    background: linear-gradient(180deg, rgb(39 38 35 / 0.7), rgb(23 22 20 / 0.92));
+    border: 1px solid var(--mr-line);
+    box-shadow: var(--shadow-lift);
+    border-radius: var(--radius-card);
+  }
+
+  .mr-sheet {
+    background: linear-gradient(180deg, rgb(33 31 28 / 0.98), rgb(19 18 16 / 0.99));
+    border: 1px solid rgb(239 235 227 / 0.09);
+    box-shadow: var(--shadow-sheet);
+    border-radius: var(--radius-sheet);
+  }
+
+  /* Trazo de ruta decorativo: línea discontinua que “se dibuja” al entrar */
+  .mr-route-line {
+    stroke-dasharray: 6 9;
+    stroke-linecap: round;
+  }
+
+  /* Firma de marca: “perforación de billete”. Es el mismo trazo discontinuo de la ruta,
+     en ámbar, usado como separador horizontal (splash, login, perfil, tarjetas de ruta). */
+  .mr-perf {
+    height: 2px;
+    width: 100%;
+    background-image: repeating-linear-gradient(90deg, rgb(245 138 31 / 0.55) 0 7px, transparent 7px 13px);
+    border-radius: 2px;
+  }
+
+  /* Tarjeta de ruta como billete: filo ámbar a la izquierda y perforación en el pie.
+     Sin cambios de tamaño ni de contenido: solo decoración (pointer-events: none). */
+  .mr-ticket {
+    position: relative;
+    box-shadow: inset 3px 0 0 var(--color-orange-500), var(--shadow-lift);
+  }
+  .mr-ticket::after {
+    content: "";
+    position: absolute;
+    left: 1rem;
+    right: 1rem;
+    bottom: 0.5rem;
+    height: 2px;
+    pointer-events: none;
+    background-image: repeating-linear-gradient(90deg, rgb(245 138 31 / 0.3) 0 6px, transparent 6px 11px);
+  }
+
+  .mr-focus:focus-visible {
+    outline: 2px solid var(--color-orange-400);
+    outline-offset: 2px;
+  }
+}
+
+/* Leaflet: fondo de mapa y popups con la misma tinta */
 .leaflet-container {
   font-family: inherit;
   background: #dfe0e6 !important;
@@ -61,7 +193,6 @@ html, body, #root {
   background-color: #e2e2e8 !important;
   background-image: none;
   image-rendering: auto;
-  /* Evita artefactos negros al componer con transformaciones (Android / WebView) */
   mix-blend-mode: normal;
   opacity: 1;
 }
@@ -73,7 +204,7 @@ html, body, #root {
   will-change: transform;
 }
 
-/* Modo bolsillo: anillo de cuenta atrás continuo (evita saltos de Framer + recortes del trazo) */
+/* Modo bolsillo: anillo de cuenta atrás continuo */
 .pocket-countdown-ring {
   stroke-dasharray: 314.16;
   stroke-dashoffset: 314.16;
@@ -86,27 +217,26 @@ html, body, #root {
   }
 }
 
-/* Rain Viewer radar: smooth blend (API max zoom is 7; tiles scale above that) */
 .leaflet-radar-overlay img.leaflet-tile {
   image-rendering: auto;
-  /* Normal blend: more reliable visibility on all devices */
   filter: saturate(1.25) contrast(1.12);
   mix-blend-mode: normal;
 }
 
 .custom-popup .leaflet-popup-content-wrapper {
-  background: #18181b !important;
-  color: white !important;
-  border-radius: 16px;
+  background: #171614 !important;
+  color: var(--mr-paper) !important;
+  border-radius: var(--radius-card);
   padding: 4px;
-  border: 1px solid #27272a;
+  border: 1px solid rgb(239 235 227 / 0.1);
+  box-shadow: var(--shadow-sheet);
 }
 
 .custom-popup .leaflet-popup-tip {
-  background: #18181b !important;
+  background: #171614 !important;
 }
 
-/* Custom Scrollbar */
+/* Scrollbars discretas */
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
@@ -124,15 +254,14 @@ html, body, #root {
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: #27272a;
+  background: #3a3834;
   border-radius: 10px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: #3f3f46;
+  background: #55514a;
 }
 
-/* Smooth Marker Transition */
 .current-user-icon {
   transition: transform 0.2s linear;
 }
@@ -148,7 +277,21 @@ html, body, #root {
   animation: float 3s ease-in-out infinite;
 }
 
-/* Modal Novedades: brillo suave sobre el logo */
+/* Logo de marca: “respiración” lenta y brillo de luz que cruza una vez cada 5 s */
+@keyframes mr-logo-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px rgb(245 138 31 / 0.22), 0 18px 44px -18px rgb(245 138 31 / 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 1px rgb(245 138 31 / 0.4), 0 18px 56px -14px rgb(245 138 31 / 0.65);
+  }
+}
+
+.mr-logo-breathe {
+  animation: mr-logo-breathe 3.6s ease-in-out infinite;
+}
+
 @keyframes whats-new-logo-gleam {
   0%,
   100% {
@@ -180,4 +323,62 @@ html, body, #root {
 
 .whats-new-reflection-pulse {
   animation: whats-new-reflection-pulse 4.2s ease-in-out infinite;
+}
+
+@keyframes mr-route-draw {
+  from {
+    stroke-dashoffset: 240;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Trazo de ruta que avanza: dash de 34 sobre un recorrido de 100 */
+@keyframes mr-route-travel {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: -100;
+  }
+}
+
+.mr-route-travel {
+  animation: mr-route-travel 2.2s linear infinite;
+}
+
+@keyframes mr-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Entrada suave de bloques y tarjetas (CSS puro: sin coste de JS) */
+.mr-enter {
+  animation: mr-fade-up 320ms var(--ease-out-expo) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* El anillo del modo bolsillo marca tiempo real: se conserva su animación. */
+  *:not(.pocket-countdown-ring),
+  *:not(.pocket-countdown-ring)::before,
+  *:not(.pocket-countdown-ring)::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+  .mr-logo-breathe,
+  .mr-route-travel,
+  .animate-float,
+  .whats-new-logo-gleam,
+  .whats-new-reflection-pulse {
+    animation: none !important;
+  }
 }

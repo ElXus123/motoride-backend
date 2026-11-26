@@ -41,6 +41,37 @@ service cloud.firestore {
       return !(field in request.resource.data) || request.resource.data[field] is bool;
     }
 
+    /**
+     * photoURL: solo vacío, https de Google (lh3) o imagen raster en data URI (foto subida desde el perfil).
+     * Bloquea javascript:, http: y dominios ajenos.
+     */
+    function isValidOptionalPhoto(data) {
+      return !('photoURL' in data) ||
+        (data.photoURL is string && (
+          data.photoURL == '' ||
+          data.photoURL.matches('^https://lh3\\.googleusercontent\\.com/.*$') ||
+          data.photoURL.matches('^data:image/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$')
+        ));
+    }
+
+    /**
+     * Progreso del dueño: el nivel no baja, el total de XP (curva 500·L·(L−1) + puntos en tramo)
+     * no baja y cada escritura suma como mucho 5000 XP.
+     */
+    function progressGrowthOk() {
+      let oldLv = resource.data.get('level', 1);
+      let newLv = request.resource.data.get('level', 1);
+      let oldXp = 500 * oldLv * (oldLv - 1) + resource.data.get('points', 0);
+      let newXp = 500 * newLv * (newLv - 1) + request.resource.data.get('points', 0);
+      return newLv >= oldLv && newXp >= oldXp && newXp - oldXp <= 5000;
+    }
+
+    /** Distancia total y rutas completadas solo pueden subir. */
+    function monotonicCountersOk() {
+      return request.resource.data.get('totalDistance', 0) >= resource.data.get('totalDistance', 0) &&
+             request.resource.data.get('ridesCompletedCount', 0) >= resource.data.get('ridesCompletedCount', 0);
+    }
+
     /** Invitaciones: el SDK puede guardar millis como int o number; Timestamp si hubo migración. */
     function validRideInviteSentAt(t) {
       return t is number || t is int || t is timestamp;
@@ -63,6 +94,7 @@ service cloud.firestore {
              isValidString('displayName', 1, 50) &&
              isValidOptionalString('displayNameLower', 50) &&
              isValidOptionalString('photoURL', 200000) &&
+             isValidOptionalPhoto(data) &&
              isValidOptionalNumber('points') &&
              isValidOptionalNumber('level') &&
              isValidOptionalNumber('totalDistance') &&
@@ -78,6 +110,17 @@ service cloud.firestore {
                  data.ridesCompletedCount <= 2000000)) &&
              isValidOptionalBool('statsHadSpeedSample') &&
              validProfileShowcaseMedalIds(data) &&
+             (!('profileFrameId' in data) ||
+               (data.profileFrameId is string && data.profileFrameId in [
+                 'none', 'road', 'lvl_5', 'lvl_10', 'lvl_15', 'lvl_20', 'lvl_25',
+                 'chrome_speed', 'curve_steel', 'ember_lean', 'gold_laurel', 'legend_asphalt',
+                 'season_pulse', 'vip_crown'
+               ])) &&
+             (!('weeklyChallengeLastClaimed' in data) ||
+               (data.weeklyChallengeLastClaimed is string && data.weeklyChallengeLastClaimed.size() <= 12)) &&
+             (!('weeklyChallengeClaims' in data) ||
+               (data.weeklyChallengeClaims is number && data.weeklyChallengeClaims >= 0 && data.weeklyChallengeClaims <= 100000)) &&
+             isValidOptionalNumber('progressModel') &&
              (!('friends' in data) || data.friends is list) &&
              (!('friendRequestsIncoming' in data) || data.friendRequestsIncoming is list) &&
              (!('friendRequestsOutgoing' in data) || data.friendRequestsOutgoing is list) &&
@@ -131,7 +174,9 @@ service cloud.firestore {
              isValidOptionalNumber('heading') &&
              isValidOptionalNumber('score') &&
              isValidOptionalString('photoURL', 200000) &&
+             isValidOptionalPhoto(data) &&
              isValidOptionalString('displayName', 50) &&
+             isValidOptionalString('profileFrameId', 40) &&
              (!('alert' in data) || data.alert is map);
     }
 
@@ -153,6 +198,8 @@ service cloud.firestore {
              isValidOptionalNumber('foodExpenseEuros') &&
              isValidOptionalNumber('splitPerPersonEuros') &&
              isValidOptionalNumber('memberCountForSplit') &&
+             (!('participantCount' in data) ||
+               (data.participantCount is int && data.participantCount >= 1 && data.participantCount <= 100)) &&
              isValidOptionalNumber('durationMs') &&
              isValidOptionalString('rideSessionKey', 200) &&
              (!('routeGeoJSON' in data) ||
@@ -174,43 +221,55 @@ service cloud.firestore {
       return ('friends' in data && data.friends is list) ? data.friends : [];
     }
 
+    /**
+     * Un tercero solo puede AÑADIR su propio uid a una lista ajena (exactamente un elemento, sin tocar los demás).
+     * Si ya estaba, la lista debe quedar igual.
+     */
+    function listAddsOnlySelf(oldL, newL, uid) {
+      return newL.hasAll(oldL) && newL.size() == oldL.size() + (uid in oldL ? 0 : 1) && uid in newL;
+    }
+    /** Un tercero solo puede QUITAR su propio uid; el resto de la lista queda intacto. */
+    function listRemovesOnlySelf(oldL, newL, uid) {
+      return oldL.hasAll(newL) && newL.size() == oldL.size() - (uid in oldL ? 1 : 0) && !(uid in newL);
+    }
     function crossUserAddSelfToTheirIncoming(uId) {
       return request.auth.uid != uId &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['friendRequestsIncoming']) &&
         request.resource.data.friendRequestsIncoming is list &&
-        friendIncomingList(request.resource.data).size() <= friendIncomingList(resource.data).size() + 1 &&
-        request.auth.uid in friendIncomingList(request.resource.data);
+        listAddsOnlySelf(friendIncomingList(resource.data), friendIncomingList(request.resource.data), request.auth.uid);
     }
     function crossUserRemoveSelfFromTheirIncoming(uId) {
       return request.auth.uid != uId &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['friendRequestsIncoming']) &&
         request.resource.data.friendRequestsIncoming is list &&
         request.auth.uid in friendIncomingList(resource.data) &&
-        !(request.auth.uid in friendIncomingList(request.resource.data));
+        listRemovesOnlySelf(friendIncomingList(resource.data), friendIncomingList(request.resource.data), request.auth.uid);
     }
     function crossUserRemoveSelfFromTheirOutgoing(uId) {
       return request.auth.uid != uId &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['friendRequestsOutgoing']) &&
         request.resource.data.friendRequestsOutgoing is list &&
         request.auth.uid in friendOutgoingList(resource.data) &&
-        !(request.auth.uid in friendOutgoingList(request.resource.data));
+        listRemovesOnlySelf(friendOutgoingList(resource.data), friendOutgoingList(request.resource.data), request.auth.uid);
     }
+    /** Aceptar: el aceptador (caller) quita su uid de las solicitudes salientes del solicitante y añade SOLO su uid a sus amigos. */
     function crossUserAcceptFriendOnRequester(uId) {
       return request.auth.uid != uId &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['friendRequestsOutgoing', 'friends']) &&
         request.resource.data.friendRequestsOutgoing is list &&
         request.resource.data.friends is list &&
-        request.auth.uid in friendsList(request.resource.data) &&
-        !(request.auth.uid in friendOutgoingList(request.resource.data)) &&
-        request.auth.uid in friendOutgoingList(resource.data);
+        request.auth.uid in friendOutgoingList(resource.data) &&
+        listRemovesOnlySelf(friendOutgoingList(resource.data), friendOutgoingList(request.resource.data), request.auth.uid) &&
+        listAddsOnlySelf(friendsList(resource.data), friendsList(request.resource.data), request.auth.uid);
     }
     function crossUserRemoveSelfFromTheirFriends(uId) {
       return request.auth.uid != uId &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['friends']) &&
         request.resource.data.friends is list &&
         request.auth.uid in friendsList(resource.data) &&
-        !(request.auth.uid in friendsList(request.resource.data));
+        listRemovesOnlySelf(friendsList(resource.data), friendsList(request.resource.data), request.auth.uid);
     }
+
 
     /** Invitación a ruta: amistad (lista en uno u otro) o ambos ya miembros del mismo grupo. */
     function inviteCoMembersOnGroup(groupId, otherUid) {
@@ -219,14 +278,6 @@ service cloud.firestore {
         get(/databases/$(database)/documents/groups/$(groupId)).data.members is list &&
         request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.members &&
         otherUid in get(/databases/$(database)/documents/groups/$(groupId)).data.members;
-    }
-
-    /** Quien ya es miembro del grupo puede invitar a otros a ese código (la UI solo lista amigos). */
-    function inviterMemberOfGroup(gid) {
-      return gid is string && gid.size() == 6 &&
-        exists(/databases/$(database)/documents/groups/$(gid)) &&
-        get(/databases/$(database)/documents/groups/$(gid)).data.members is list &&
-        request.auth.uid in get(/databases/$(database)/documents/groups/$(gid)).data.members;
     }
 
     function directChatIdMatchesMembers(chatId, members) {
@@ -285,12 +336,12 @@ service cloud.firestore {
         );
     }
 
+    /** Invitar solo a amigos (o solapamiento de amistad/DM/solicitud) o a co-miembros reales del grupo. */
     function rideInviteSocialOk(inviterUid, receiverUid, groupId) {
       return usersAreFriends(inviterUid, receiverUid) ||
         hasDmRoomBetween(inviterUid, receiverUid) ||
         pendingFriendshipAllowsInvite(inviterUid, receiverUid) ||
-        inviteCoMembersOnGroup(groupId, receiverUid) ||
-        inviterMemberOfGroup(groupId);
+        inviteCoMembersOnGroup(groupId, receiverUid);
     }
 
     function rideInviteRootIdMatches(inviteId, data) {
@@ -387,7 +438,8 @@ service cloud.firestore {
           request.resource.data.level >= 1 &&
           request.resource.data.level <= 1000000) ||
         (isOwner(userId) && isValidUser(request.resource.data) &&
-          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isPremium'])) ||
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isPremium']) &&
+          progressGrowthOk() && monotonicCountersOk()) ||
         crossUserAddSelfToTheirIncoming(userId) ||
         crossUserRemoveSelfFromTheirIncoming(userId) ||
         crossUserRemoveSelfFromTheirOutgoing(userId) ||
@@ -535,7 +587,21 @@ service cloud.firestore {
          request.resource.data.members.size() == resource.data.members.size() - 1 &&
          request.auth.uid in resource.data.members &&
          !(request.auth.uid in request.resource.data.members) &&
-         resource.data.createdBy != request.auth.uid)
+         resource.data.createdBy != request.auth.uid) ||
+        // Anfitrión sale de una ruta en marcha: cede el mando a otro miembro y se quita de members
+        // (la ruta sigue para los demás en vez de cortarse).
+        (resource.data.createdBy == request.auth.uid &&
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['createdBy', 'members', 'hostLeftAt', 'hostLeftUid']) &&
+         request.resource.data.createdBy is string &&
+         request.resource.data.createdBy != request.auth.uid &&
+         request.resource.data.createdBy in resource.data.members &&
+         request.resource.data.members.size() == resource.data.members.size() - 1 &&
+         !(request.auth.uid in request.resource.data.members)) ||
+        // El anfitrión ya no está en el grupo: un miembro reclama el mando para poder pausar / finalizar.
+        (!(resource.data.createdBy in resource.data.members) &&
+         request.auth.uid in resource.data.members &&
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['createdBy']) &&
+         request.resource.data.createdBy == request.auth.uid)
       );
       allow delete: if (isAuthenticated() && resource.data.createdBy == request.auth.uid) || isAdmin();
 
@@ -555,10 +621,62 @@ service cloud.firestore {
           request.resource.data.createdAt < request.time.toMillis() + 86400000;
         allow update, delete: if false;
       }
+
+      /**
+       * Votación de paradas por ruta (lib/stopVotes.ts). Lectura y escritura solo para miembros del grupo.
+       * Un miembro solo puede tocar su propia clave dentro de `votes` (true o ausente).
+       * Las reglas no pueden contar votos entre docs: el voto único por miembro lo mantiene el cliente.
+       */
+      match /stopVotes/{voteId} {
+        function isValidStopVoteFields(data) {
+          return data.routeKey is string && data.routeKey.size() >= 1 && data.routeKey.size() <= 200 &&
+            data.stopId is string && data.stopId.matches('^(node|way|relation)/[0-9]{1,20}$') &&
+            data.name is string && data.name.size() <= 80 &&
+            data.kind in ['fuel', 'cafe', 'viewpoint'] &&
+            data.lat is number && data.lat >= -90 && data.lat <= 90 &&
+            data.lng is number && data.lng >= -180 && data.lng <= 180 &&
+            data.km is number && data.km >= 0 && data.km <= 5000 &&
+            data.votes is map;
+        }
+        function hasStopVoteFieldSet(data) {
+          return data.keys().hasOnly(['routeKey', 'stopId', 'name', 'kind', 'lat', 'lng', 'km', 'votes', 'updatedAt']) &&
+            data.keys().hasAll(['routeKey', 'stopId', 'name', 'kind', 'lat', 'lng', 'km', 'votes', 'updatedAt']);
+        }
+
+        allow read: if isAuthenticated() && isGroupMember(groupId);
+
+        // Alta de la candidata (la publica el primer miembro que abre el panel). Votos iniciales: ninguno o solo el propio.
+        allow create: if isAuthenticated() && isGroupMember(groupId) &&
+          voteId.matches('^[a-z0-9]{1,12}_(node|way|relation)_[0-9]{1,20}$') &&
+          hasStopVoteFieldSet(request.resource.data) &&
+          isValidStopVoteFields(request.resource.data) &&
+          request.resource.data.votes.keys().hasOnly([request.auth.uid]) &&
+          request.resource.data.votes.values().hasOnly([true]) &&
+          request.resource.data.updatedAt is timestamp;
+
+        // Voto: solo cambia la clave propia de votes y updatedAt; el resto de campos queda congelado.
+        allow update: if isAuthenticated() && isGroupMember(groupId) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['votes', 'updatedAt']) &&
+          hasStopVoteFieldSet(request.resource.data) &&
+          isValidStopVoteFields(request.resource.data) &&
+          request.resource.data.votes.diff(resource.data.votes).affectedKeys().hasOnly([request.auth.uid]) &&
+          (!(request.auth.uid in request.resource.data.votes) || request.resource.data.votes[request.auth.uid] == true) &&
+          request.resource.data.updatedAt is timestamp;
+
+        allow delete: if false;
+      }
     }
 
+    /**
+     * Ubicación: solo el dueño o un miembro del grupo al que pertenece el documento (campo groupId)
+     * puede leer un documento concreto. Nadie puede listar la colección (las consultas por uid están cerradas).
+     */
     match /locations/{userId} {
-      allow read: if isAuthenticated();
+      allow get: if isAuthenticated() && (
+        isOwner(userId) ||
+        ('groupId' in resource.data && resource.data.groupId is string && isGroupMember(resource.data.groupId))
+      );
+      allow list: if false;
       allow create: if isOwner(userId) && isValidLocation(request.resource.data);
       allow update: if isOwner(userId) && isValidLocation(request.resource.data);
     }
@@ -586,6 +704,43 @@ service cloud.firestore {
     match /pointsEvents/{eventId} {
       allow read: if isAuthenticated();
       allow create, update, delete: if isAdmin();
+    }
+
+    /**
+     * Retos semanales editables (panel de admin). Un documento por reto; el id del documento
+     * debe coincidir con el campo `id`. Solo el admin escribe; cualquier usuario autenticado lee.
+     * Rangos alineados con WEEKLY_CHALLENGE_LIMITS en src/lib/weeklyChallenges.ts.
+     */
+    function isValidWeeklyChallenge(data, docId) {
+      return data.keys().hasOnly([
+               'id', 'title', 'description', 'metric', 'target', 'targetCurves', 'minLean', 'minKm',
+               'rewardPoints', 'enabled', 'seasonFrameId', 'updatedAt', 'updatedBy'
+             ]) &&
+             data.keys().hasAll(['id', 'title', 'description', 'metric', 'target', 'rewardPoints', 'enabled', 'updatedAt']) &&
+             data.id is string && data.id == docId && data.id.matches('^[a-z0-9_-]{1,40}$') &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 60 &&
+             data.description is string && data.description.size() <= 200 &&
+             data.metric is string &&
+             data.metric in ['km', 'rides', 'curves', 'leanRides', 'longRides', 'groupKm', 'kmAndCurves'] &&
+             data.target is number && data.target >= 1 && data.target <= 100000 &&
+             (data.metric != 'kmAndCurves' || (
+               'targetCurves' in data && data.targetCurves is number &&
+               data.targetCurves >= 1 && data.targetCurves <= 100000)) &&
+             (!('targetCurves' in data) || (data.targetCurves is number && data.targetCurves >= 1 && data.targetCurves <= 100000)) &&
+             (!('minLean' in data) || (data.minLean is number && data.minLean >= 0 && data.minLean <= 90)) &&
+             (!('minKm' in data) || (data.minKm is number && data.minKm >= 0 && data.minKm <= 1000)) &&
+             data.rewardPoints is number && data.rewardPoints >= 0 && data.rewardPoints <= 5000 &&
+             data.enabled is bool &&
+             (!('seasonFrameId' in data) || data.seasonFrameId == null ||
+               (data.seasonFrameId is string && data.seasonFrameId.size() <= 40)) &&
+             data.updatedAt is number &&
+             (!('updatedBy' in data) || data.updatedBy == null || data.updatedBy is string);
+    }
+
+    match /weeklyChallenges/{challengeId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin() && isValidWeeklyChallenge(request.resource.data, challengeId);
+      allow delete: if isAdmin();
     }
   }
 }

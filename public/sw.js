@@ -1,7 +1,24 @@
-const CACHE_NAME = 'ruta-motera-v4';
-/** Mismo nombre que MAP_TILE_CACHE_NAME en src/lib/mapTileCache.ts */
-const TILE_CACHE = 'map-tiles-v3';
+const CACHE_NAME = 'ruta-motera-v5';
+/** Mismo nombre que MAP_TILE_CACHE_NAME en src/lib/mapTileCache.ts (v4: descarta teselas «API KEY REQUIRED» de Carto). */
+const TILE_CACHE = 'map-tiles-v4';
+/** Mismo límite que MAP_TILE_CACHE_MAX_ENTRIES en src/lib/mapTileCache.ts. */
+const TILE_CACHE_MAX = 2000;
+let tilePutsSinceTrim = 0;
 const CORE_ASSETS = ['/', '/index.html'];
+
+/** Recorta la caché de teselas (FIFO por inserción) cada ~30 escrituras para no hacer keys() en cada tesela. */
+function trimTileCache(cache) {
+  tilePutsSinceTrim++;
+  if (tilePutsSinceTrim < 30) return Promise.resolve();
+  tilePutsSinceTrim = 0;
+  return cache.keys().then((keys) => {
+    const excess = keys.length - TILE_CACHE_MAX;
+    return keys.slice(0, Math.max(0, excess)).reduce(
+      (p, req) => p.then(() => cache.delete(req)),
+      Promise.resolve()
+    );
+  });
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -32,6 +49,7 @@ self.addEventListener('fetch', (event) => {
   const isNavigation = event.request.mode === 'navigate';
   const isTileRequest =
     requestUrl.hostname.endsWith('.cartocdn.com') ||
+    requestUrl.hostname === 'server.arcgisonline.com' ||
     requestUrl.hostname.includes('tile.openstreetmap.org') ||
     requestUrl.hostname.includes('tilecache.rainviewer.com');
 
@@ -50,21 +68,18 @@ self.addEventListener('fetch', (event) => {
   }
 
   // Cache map tiles (cross-origin) so zoom/movement stays smooth and survives short offline periods.
+  // Cache-first SIN revalidar en segundo plano: cada tesela vista ya no genera otra petición de red.
+  // La caché se recorta (las más antiguas primero) para no crecer sin límite.
   if (isTileRequest) {
     event.respondWith(
       caches.open(TILE_CACHE).then(async (cache) => {
         const cached = await cache.match(event.request);
-        if (cached) {
-          fetch(event.request)
-            .then((res) => {
-              if (res && res.ok) cache.put(event.request, res.clone());
-            })
-            .catch(() => {});
-          return cached;
-        }
+        if (cached) return cached;
 
         const response = await fetch(event.request);
-        if (response && response.ok) cache.put(event.request, response.clone());
+        if (response && response.ok) {
+          cache.put(event.request, response.clone()).then(() => trimTileCache(cache));
+        }
         return response;
       })
     );

@@ -195,13 +195,13 @@ export default function InviteFriendsModal({
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 24, opacity: 0 }}
             transition={{ type: 'spring', damping: 28, stiffness: 320 }}
-            className="w-full sm:max-w-md max-h-[min(85dvh,560px)] bg-zinc-900 border border-zinc-800 sm:rounded-3xl rounded-t-[2rem] shadow-2xl flex flex-col overflow-hidden"
+            className="mr-sheet flex max-h-[min(85dvh,560px)] w-full flex-col overflow-hidden rounded-b-none sm:max-w-md sm:rounded-b-[var(--radius-sheet)] rounded-t-[var(--radius-hero)] sm:rounded-t-[var(--radius-sheet)]"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800 shrink-0">
               <div>
-                <p className="text-[10px] font-black uppercase tracking-widest text-orange-500">Invitar a la ruta</p>
-                <h2 className="text-lg font-black text-white truncate max-w-[220px] sm:max-w-xs">{groupName || 'Ruta'}</h2>
+                <p className="text-[11px] font-black uppercase tracking-widest text-orange-500">Invitar a la ruta</p>
+                <h2 className="truncate text-3xl uppercase text-zinc-50 max-w-[220px] sm:max-w-xs">{groupName || 'Ruta'}</h2>
                 <p className="text-xs text-zinc-500 font-mono mt-0.5">Código {groupId}</p>
               </div>
               <button
@@ -271,7 +271,7 @@ export default function InviteFriendsModal({
                             </p>
                           </div>
                           {inRoute ? (
-                            <span className="text-[10px] font-bold text-emerald-400 shrink-0 px-2">En ruta</span>
+                            <span className="text-[11px] font-bold text-emerald-400 shrink-0 px-2">En ruta</span>
                           ) : (
                             <button
                               type="button"

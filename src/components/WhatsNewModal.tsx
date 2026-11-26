@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Check } from 'lucide-react';
-import appLogo from '../../ICONO.png';
+const appLogo = '/ICONO-512.webp';
 
 /** Sube este valor cuando cambien las novedades para volver a mostrar el aviso una vez por dispositivo. */
 export const WHATS_NEW_VERSION = '2026.04.20';
