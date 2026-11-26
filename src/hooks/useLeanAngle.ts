@@ -17,6 +17,11 @@ import {
   kinematicLeanDegFromSpeedAndYaw,
   yawRateAboutGravityDegPerSec,
 } from '../lib/motorcycleLean/kinematicLean';
+import {
+  applyBikeYawToRotation,
+  ForwardAxisLearner,
+  yawCorrectionFromForward,
+} from '../lib/motorcycleLean/forwardAxis';
 import { PocketInstabilityTracker } from '../lib/motorcycleLean/pocketDetection';
 import { evaluateCurvePlausibility, lateralAccelMagnitude } from '../lib/motorcycleLean/curveDetection';
 import {
@@ -87,6 +92,10 @@ export const useLeanAngle = (
   const gRaw = useRef<[number, number, number]>([0, 0, 1]);
   const gUnit = useRef<[number, number, number]>([0, 0, 1]);
   const RAlign = useRef<number[]>([1, 0, 0, 0, 1, 0, 0, 0, 1]);
+  /** Base de calibración (vertical → +Z) sin corregir el eje de avance. RAlign = Rz(ψ)·RBase. */
+  const RBase = useRef<number[]>([1, 0, 0, 0, 1, 0, 0, 0, 1]);
+  /** Aprende el eje de avance del móvil (frenada/aceleración) para que el cabeceo no entre en el ángulo. */
+  const forwardLearn = useRef(new ForwardAxisLearner());
   const forwardCal = useRef<[number, number, number]>([1, 0, 0]);
   const lateralCal = useRef<[number, number, number]>([0, 1, 0]);
   const upCal = useRef<[number, number, number]>([0, 0, 1]);
@@ -188,19 +197,28 @@ export const useLeanAngle = (
     gLpInit.current = false;
     displayLpRef.current = 0;
     straightAccumSecRef.current = 0;
+    // El móvil de bolsillo cambia de posición: no heredar el eje de avance aprendido en el manillar.
+    forwardLearn.current.reset();
   }, [calibrationProfile]);
+
+  /** Corrección ψ (rad) de la base con el eje de avance aprendido; 0 si aún no hay datos. */
+  const forwardYawRad = useCallback((R0: number[]) => {
+    const F = forwardLearn.current.forwardInDevice();
+    return F ? yawCorrectionFromForward(R0, F) : 0;
+  }, []);
 
   const applyBikeCalibrationFromGravity = useCallback(() => {
     const g = gUnit.current.slice() as [number, number, number];
     if (!normalizeVec3(g)) return;
-    const R = RAlign.current;
-    if (!rotationFromTo(g, EZ, R)) return;
+    if (!rotationFromTo(g, EZ, RBase.current)) return;
+    const psi = forwardYawRad(RBase.current);
+    applyBikeYawToRotation(RBase.current, psi, RAlign.current);
     buildBikeBasisAtCalibration(g, forwardCal.current, lateralCal.current, upCal.current);
     const ld = leanDegFromGravityInBikeFrame(g, RAlign.current, gbScratch.current);
     compAngleRadRef.current = ld * RAD * LEAN_SENSOR_SIGN;
     calibratedRef.current = true;
     straightAccumSecRef.current = 0;
-  }, []);
+  }, [forwardYawRad]);
 
   useEffect(() => {
     if (!permissionGranted) return;
@@ -295,6 +313,7 @@ export const useLeanAngle = (
           calibratedRef.current = false;
           gLpInit.current = false;
           pocket.current.reset();
+          forwardLearn.current.reset();
           compAngleRadRef.current = 0;
           displayLpRef.current = 0;
           prevGravUnitRef.current = null;
@@ -310,7 +329,15 @@ export const useLeanAngle = (
         }
         lastTs.current = now;
 
-        const gLoc = remapDeviceVectorToNaturalPortrait(accg.x, accg.y, accg.z, screenDeg);
+        // Gravedad sin aceleración lineal: accelerationIncludingGravity − acceleration. Así frenar o
+        // acelerar no se confunde con inclinación (el cabeceo ya no pasa por el filtro de gravedad).
+        const gAllLoc = remapDeviceVectorToNaturalPortrait(accg.x, accg.y, accg.z, screenDeg);
+        const aLinLoc: [number, number, number] | null = accLin
+          ? remapDeviceVectorToNaturalPortrait(accLin.x, accLin.y, accLin.z, screenDeg)
+          : null;
+        const gLoc: [number, number, number] = aLinLoc
+          ? [gAllLoc[0] - aLinLoc[0], gAllLoc[1] - aLinLoc[1], gAllLoc[2] - aLinLoc[2]]
+          : gAllLoc;
         gRaw.current[0] = gLoc[0];
         gRaw.current[1] = gLoc[1];
         gRaw.current[2] = gLoc[2];
@@ -367,6 +394,17 @@ export const useLeanAngle = (
         const wx = wRemap[0];
         const wy = wRemap[1];
         const wz = wRemap[2];
+
+        // Eje de avance: aprendido solo con el móvil en el manillar y en tramos rectos (sin giro).
+        if (!isPocketProfile) {
+          const tSec = now / 1000;
+          const spinNow = Math.abs(wx) + Math.abs(wy) + Math.abs(wz);
+          forwardLearn.current.observeSpeed(speedRef.current, tSec);
+          if (aLinLoc) {
+            forwardLearn.current.observeLinear(aLinLoc, gUnit.current, tSec, spinNow < 8);
+          }
+          applyBikeYawToRotation(RBase.current, forwardYawRad(RBase.current), RAlign.current);
+        }
 
         const leanDegAccel =
           leanDegFromGravityInBikeFrame(gUnit.current, RAlign.current, gbScratch.current) * LEAN_SENSOR_SIGN;
@@ -536,7 +574,7 @@ export const useLeanAngle = (
       window.removeEventListener('deviceorientation', onOrientation, true);
       window.removeEventListener('devicemotion', onMotion, true);
     };
-  }, [permissionGranted, calibrationOffset, calibrationProfile, applyBikeCalibrationFromGravity]);
+  }, [permissionGranted, calibrationOffset, calibrationProfile, applyBikeCalibrationFromGravity, forwardYawRad]);
 
   const resetMaxLean = () => {
     setMaxLeanLeft(0);

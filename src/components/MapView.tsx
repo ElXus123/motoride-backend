@@ -209,14 +209,24 @@ const CurrentUserMarker = ({
   subscribeSmooth?: (fn: (p: { lat: number; lng: number }) => void) => () => void;
 }) => {
   const markerRef = useRef<any>(null);
+  /** Último punto escrito en el marcador: no llamar a setLatLng si no se ha movido. */
+  const lastLatLngRef = useRef<{ lat: number; lng: number } | null>(null);
 
   useEffect(() => {
     if (!subscribeSmooth) return;
     return subscribeSmooth((p) => {
       const m = markerRef.current;
-      if (m) m.setLatLng([p.lat, p.lng]);
+      const last = lastLatLngRef.current;
+      if (!m || (last && last.lat === p.lat && last.lng === p.lng)) return;
+      lastLatLngRef.current = { lat: p.lat, lng: p.lng };
+      m.setLatLng([p.lat, p.lng]);
     });
   }, [subscribeSmooth]);
+
+  // Rumbo: ángulo sin envolver (359° → 1° gira 2°, no 358°) y suavizado por tiempo real en rAF, sin re-render.
+  const headingTargetRef = useRef<number | null>(null);
+  const headingAngleRef = useRef<number | null>(null);
+  const arrowRef = useRef<HTMLElement | null>(null);
 
   // La flecha propia no lleva marco de avatar: el marco solo se muestra en los marcadores de los demás.
   const icon = useMemo(() => {
@@ -235,17 +245,43 @@ const CurrentUserMarker = ({
   }, []);
 
   useEffect(() => {
-    if (markerRef.current) {
-      const el = markerRef.current.getElement();
-      if (el) {
-        const container = el.querySelector('.user-arrow-container') as HTMLElement;
-        if (container) {
-          container.style.transform = `rotate(${heading}deg)`;
-          container.style.transition = 'transform 0.18s ease-out';
+    const h = Number.isFinite(heading) ? heading : 0;
+    if (headingTargetRef.current == null || headingAngleRef.current == null) {
+      headingTargetRef.current = h;
+      headingAngleRef.current = h;
+      return;
+    }
+    // Diferencia mínima con signo: el objetivo sigue el giro corto respecto al ángulo acumulado.
+    const cur = headingTargetRef.current;
+    const delta = ((h - cur + 540) % 360) - 180;
+    headingTargetRef.current = cur + delta;
+  }, [heading, icon]);
+
+  useEffect(() => {
+    let rafId = 0;
+    let last = performance.now();
+    const tick = (now: number) => {
+      rafId = requestAnimationFrame(tick);
+      const target = headingTargetRef.current;
+      const angle = headingAngleRef.current;
+      const dt = Math.min(0.1, Math.max(0, (now - last) / 1000));
+      last = now;
+      if (target == null || angle == null || Math.abs(target - angle) < 0.05) return;
+      const next = angle + (target - angle) * (1 - Math.exp(-dt / HEADING_SMOOTH_TAU_S));
+      headingAngleRef.current = next;
+      if (!arrowRef.current || !arrowRef.current.isConnected) {
+        const el = markerRef.current?.getElement?.();
+        const found = el ? (el.querySelector('.user-arrow-container') as HTMLElement | null) : null;
+        if (found) {
+          found.style.transition = 'none';
+          arrowRef.current = found;
         }
       }
-    }
-  }, [heading, icon]);
+      if (arrowRef.current) arrowRef.current.style.transform = `rotate(${next}deg)`;
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, []);
 
   return (
     <Marker
@@ -265,8 +301,17 @@ const CurrentUserMarker = ({
   );
 };
 
-const SELF_MAP_SMOOTH_ALPHA = 0.22;
-const SELF_MAP_SNAP_M = 0.1;
+/** Suavizado de la posición propia por tiempo real (no por frame): constante de tiempo en s. */
+const SELF_MAP_TAU_S = 0.2;
+/** Extrapolación (dead reckoning) tras el último fijo: máximo en s y velocidad mínima (m/s) para usarla. */
+const SELF_MAP_PREDICT_MAX_S = 1.0;
+const SELF_MAP_MIN_VEL_MS = 1.5;
+const SELF_MAP_SNAP_M = 0.05;
+/** Suavizado del rumbo de la flecha (s). */
+const HEADING_SMOOTH_TAU_S = 0.3;
+/** Constante de tiempo del zoom de seguimiento (s): cambios de velocidad no provocan saltos de zoom. */
+const FOLLOW_ZOOM_TAU_S = 1.2;
+const M_PER_DEG_LAT = 111320;
 const PEER_SMOOTH_ALPHA = 0.2;
 const PEER_SNAP_M = 0.12;
 
@@ -404,16 +449,27 @@ const MotorcycleIcon = ({ angle }: { angle: number }) => (
   </div>
 );
 
-/** Seguimiento en ruta: más velocidad → cámara más alejada (lineal 5 km/h→18 … 120 km/h→12). */
+/**
+ * Seguimiento en ruta: más velocidad → cámara más alejada para ver más trazado por delante.
+ * Curva por tramos (km/h → zoom): parado 17, 40 ≈ 15,6, 100 ≈ 13,5, 160 ≈ 12,2. Límites 12–17.
+ */
+const FOLLOW_ZOOM_KNOTS: ReadonlyArray<readonly [number, number]> = [
+  [0, 17], [5, 16.9], [15, 16.4], [30, 15.9], [45, 15.4], [60, 14.8], [80, 14.1], [100, 13.5], [130, 12.8], [160, 12.2],
+];
+const FOLLOW_ZOOM_MIN = 12;
+const FOLLOW_ZOOM_MAX = 17;
 function followZoomFromSpeedKmh(speedKmh: number): number {
-  const lo = 5;
-  const hi = 120;
-  const zNear = 18;
-  const zFar = 12;
-  const s = Math.max(0, speedKmh);
-  const clamped = Math.max(lo, Math.min(hi, s));
-  const t = (clamped - lo) / (hi - lo);
-  return zNear + t * (zFar - zNear);
+  const s = Math.max(0, Number.isFinite(speedKmh) ? speedKmh : 0);
+  let z = FOLLOW_ZOOM_KNOTS[FOLLOW_ZOOM_KNOTS.length - 1][1];
+  for (let i = 1; i < FOLLOW_ZOOM_KNOTS.length; i++) {
+    const [s0, z0] = FOLLOW_ZOOM_KNOTS[i - 1];
+    const [s1, z1] = FOLLOW_ZOOM_KNOTS[i];
+    if (s <= s1) {
+      z = z0 + ((Math.min(s, s1) - s0) / (s1 - s0)) * (z1 - z0);
+      break;
+    }
+  }
+  return Math.max(FOLLOW_ZOOM_MIN, Math.min(FOLLOW_ZOOM_MAX, z));
 }
 
 // Solo invalidar cuando cambia el modo “mapa rotado” o tema; no en cada grado de rumbo (eso recargaba teselas y dejaba cuadrados negros).
@@ -532,6 +588,7 @@ const MapController = ({
   isLandscapeUi,
   smoothFollow = false,
   smoothSubscribe,
+  getSmoothPosition,
   recenterSignal = 0,
   followAnchorRef,
 }: {
@@ -551,6 +608,8 @@ const MapController = ({
   smoothFollow?: boolean;
   /** Suscripción al bucle de suavizado (rAF): la cámara sigue cada frame sin re-renderizar React. */
   smoothSubscribe?: (fn: (p: { lat: number; lng: number }) => void) => () => void;
+  /** Posición suavizada actual (con `smoothSubscribe` la cámara usa esta, no el fijo crudo). */
+  getSmoothPosition?: () => { lat: number; lng: number } | null;
   /** Incrementa al pulsar «recentrar» o al auto-recentrar: fuerza un desplazamiento animado hacia la flecha. */
   recenterSignal?: number;
   followAnchorRef: MutableRefObject<FollowAnchor | null>;
@@ -559,18 +618,28 @@ const MapController = ({
   const hasAutoZoomedRef = useRef(false);
   const lastFollowRef = useRef<{ lat: number; lng: number; zoom: number; t: number } | null>(null);
   const smoothedRecordingZoomRef = useRef<number | null>(null);
+  const lastZoomTickRef = useRef<number | null>(null);
   const forceAnimateRef = useRef(false);
+  /** Hasta este instante (performance.now) el bucle por frame no mueve la cámara: termina la animación de recentrado. */
+  const recenterAnimUntilRef = useRef(0);
 
   const follow = (location: any, fromSmooth = false) => {
     if (isFollowing && location && typeof location.lat === 'number' && typeof location.lng === 'number') {
-      let dynamicZoom = followZoomFromSpeedKmh(speedKmh);
+      const nowPerf = performance.now();
+      if (fromSmooth && nowPerf < recenterAnimUntilRef.current) return;
+      // Zoom suavizado por tiempo real: el objetivo cambia con la velocidad, el zoom solo se acerca a él con tau.
+      const camDt =
+        lastZoomTickRef.current == null ? 0 : Math.min(0.25, Math.max(0, (nowPerf - lastZoomTickRef.current) / 1000));
+      lastZoomTickRef.current = nowPerf;
+      const zoomTarget = followZoomFromSpeedKmh(speedKmh);
+      let dynamicZoom = zoomTarget;
       if (isRecording) {
         if (smoothedRecordingZoomRef.current === null) {
-          smoothedRecordingZoomRef.current = followZoomFromSpeedKmh(speedKmh);
+          smoothedRecordingZoomRef.current = zoomTarget;
         }
-        const alpha = 0.125;
-        smoothedRecordingZoomRef.current += alpha * (dynamicZoom - smoothedRecordingZoomRef.current);
-        dynamicZoom = Math.max(11.4, Math.min(18.6, smoothedRecordingZoomRef.current));
+        smoothedRecordingZoomRef.current +=
+          (1 - Math.exp(-camDt / FOLLOW_ZOOM_TAU_S)) * (zoomTarget - smoothedRecordingZoomRef.current);
+        dynamicZoom = Math.max(FOLLOW_ZOOM_MIN, Math.min(FOLLOW_ZOOM_MAX, smoothedRecordingZoomRef.current));
       } else {
         smoothedRecordingZoomRef.current = null;
       }
@@ -586,15 +655,15 @@ const MapController = ({
       const panOptions = { animate: animatePan, duration: forcedRecenter ? 0.6 : 0.25 };
       const now = Date.now();
       const prev = lastFollowRef.current;
-      const zoomChanged = prev != null && Math.abs(prev.zoom - zoom) > 0.04;
+      const zoomChanged = prev != null && Math.abs(prev.zoom - zoom) > 0.01;
       const movedM =
         prev != null ? getDistance(location.lat, location.lng, prev.lat, prev.lng) : Number.POSITIVE_INFINITY;
       const tooSoon = prev != null && now - prev.t < 1100 && movedM < 3.2 && !zoomChanged;
       if (hasAutoZoomedRef.current && tooSoon && !smoothFollow) {
         return;
       }
-      // Frame de suavizado sin movimiento apreciable (<25 cm) ni cambio de zoom: no mover la cámara.
-      if (fromSmooth && prev != null && !zoomChanged && movedM < 0.25) {
+      // Frame de suavizado sin movimiento apreciable (<5 cm) ni cambio de zoom: no mover la cámara.
+      if (fromSmooth && prev != null && !zoomChanged && movedM < 0.05) {
         return;
       }
 
@@ -652,10 +721,15 @@ const MapController = ({
   const followRef = useRef(follow);
   followRef.current = follow;
 
+  // Con suavizado por frame, los fijos crudos no mueven la cámara (solo el bucle); aquí solo cambios de modo/ajustes.
+  const followInput = smoothSubscribe ? null : location;
   useEffect(() => {
-    followRef.current(location);
+    const loc = smoothSubscribe ? (getSmoothPosition ? getSmoothPosition() : null) : followInput;
+    if (loc) followRef.current(loc);
   }, [
-    location,
+    followInput,
+    smoothSubscribe,
+    getSmoothPosition,
     isFollowing,
     map,
     showRanking,
@@ -674,12 +748,12 @@ const MapController = ({
   }, [smoothSubscribe]);
 
   // Recentrado pedido por el usuario o automático: desplazamiento animado hacia la última posición conocida.
-  const latestLocationRef = useRef(location);
-  latestLocationRef.current = location;
   useEffect(() => {
     if (!recenterSignal) return;
-    const loc = latestLocationRef.current;
+    const loc = smoothSubscribe ? (getSmoothPosition ? getSmoothPosition() : null) : location;
     if (!loc || typeof loc.lat !== 'number' || typeof loc.lng !== 'number') return;
+    // Durante la animación (~0,6 s) el bucle por frame no interrumpe el desplazamiento.
+    recenterAnimUntilRef.current = performance.now() + 650;
     forceAnimateRef.current = true;
     followRef.current(loc);
   }, [recenterSignal]);
@@ -1862,9 +1936,19 @@ export default function MapView({
     return currentLocation;
   }, [currentLocation, navState.snapped, navState.offRouteM, effectiveRouteForNav, horizontalAccuracy]);
 
-  const [smoothMapLocation, setSmoothMapLocation] = useState<{ lat: number; lng: number } | null>(null);
+  /**
+   * Posición propia suavizada. Los fijos GPS llegan cada 1-2 s: entre fijos el punto avanza por frame
+   * (extrapolación con la velocidad medida, máx. SELF_MAP_PREDICT_MAX_S) y se acerca con constante de tiempo real.
+   * Se escribe en refs y se notifica por frame a marcador y cámara; sin setState por frame.
+   */
+  const [markerSeed, setMarkerSeed] = useState<{ lat: number; lng: number } | null>(null);
+  const markerSeedPos = useMemo<[number, number] | null>(
+    () => (markerSeed ? [markerSeed.lat, markerSeed.lng] : null),
+    [markerSeed]
+  );
   const smoothMapRef = useRef<{ lat: number; lng: number } | null>(null);
-  const smoothMapTargetRef = useRef<{ lat: number; lng: number } | null>(null);
+  /** Último fijo: destino, instante de recepción (ms, performance.now) y velocidad estimada (grados/s). */
+  const smoothMapTargetRef = useRef<{ lat: number; lng: number; t: number; vLat: number; vLng: number } | null>(null);
   const smoothListenersRef = useRef(new Set<(p: { lat: number; lng: number }) => void>());
   const subscribeSmoothMap = useCallback((fn: (p: { lat: number; lng: number }) => void) => {
     smoothListenersRef.current.add(fn);
@@ -1872,70 +1956,83 @@ export default function MapView({
       smoothListenersRef.current.delete(fn);
     };
   }, []);
+  const getSmoothMapPosition = useCallback(() => smoothMapRef.current, []);
 
   useEffect(() => {
     if (!displayLocation) {
       smoothMapTargetRef.current = null;
       smoothMapRef.current = null;
-      setSmoothMapLocation(null);
+      setMarkerSeed(null);
       return;
     }
-    const t = { lat: displayLocation.lat, lng: displayLocation.lng };
-    if (typeof t.lat !== 'number' || typeof t.lng !== 'number' || !Number.isFinite(t.lat) || !Number.isFinite(t.lng)) {
+    const lat = displayLocation.lat;
+    const lng = displayLocation.lng;
+    if (typeof lat !== 'number' || typeof lng !== 'number' || !Number.isFinite(lat) || !Number.isFinite(lng)) {
       return;
     }
-    smoothMapTargetRef.current = t;
+    const now = performance.now();
+    const cosLat = Math.max(0.2, Math.cos((lat * Math.PI) / 180));
+    const prev = smoothMapTargetRef.current;
+    let vLat = prev ? prev.vLat : 0;
+    let vLng = prev ? prev.vLng : 0;
+    if (prev) {
+      const dN = (lat - prev.lat) * M_PER_DEG_LAT;
+      const dE = (lng - prev.lng) * M_PER_DEG_LAT * cosLat;
+      // Mismo punto que el anterior (re-render sin fijo nuevo): no tocar nada.
+      if (Math.hypot(dN, dE) < 0.05) return;
+      const dt = (now - prev.t) / 1000;
+      if (dt >= 0.3 && dt <= 5) {
+        const vN = dN / dt;
+        const vE = dE / dt;
+        if (Math.hypot(vN, vE) >= SELF_MAP_MIN_VEL_MS) {
+          // Mezcla con la estimación previa para no amplificar el ruido del GPS.
+          vLat = 0.4 * vLat + 0.6 * (vN / M_PER_DEG_LAT);
+          vLng = 0.4 * vLng + 0.6 * (vE / (M_PER_DEG_LAT * cosLat));
+        } else {
+          vLat = 0;
+          vLng = 0;
+        }
+      }
+    }
+    smoothMapTargetRef.current = { lat, lng, t: now, vLat, vLng };
     if (!smoothMapRef.current) {
-      smoothMapRef.current = t;
-      setSmoothMapLocation(t);
+      smoothMapRef.current = { lat, lng };
+      setMarkerSeed({ lat, lng });
     }
   }, [displayLocation]);
 
+  // Bucle por frame de vida del componente: el paso depende del tiempo real transcurrido (independiente de los Hz de pantalla).
   useEffect(() => {
-    if (!displayLocation || !smoothMapRef.current) return;
-
     let rafId = 0;
-    const tick = () => {
+    let last: number | null = null;
+    const tick = (now: number) => {
+      rafId = requestAnimationFrame(tick);
       try {
-        const targ = smoothMapTargetRef.current;
+        const dt = last == null ? 0 : Math.min(0.1, Math.max(0, (now - last) / 1000));
+        last = now;
         const cur = smoothMapRef.current;
-        if (!targ || !cur) return;
-
-        const nlat = cur.lat + (targ.lat - cur.lat) * SELF_MAP_SMOOTH_ALPHA;
-        const nlng = cur.lng + (targ.lng - cur.lng) * SELF_MAP_SMOOTH_ALPHA;
-        const errM = getDistance(nlat, nlng, targ.lat, targ.lng);
-
-        // Cada frame: solo se notifica a marcador y cámara (sin setState → sin re-render de MapView).
-        const snapped = errM <= SELF_MAP_SNAP_M;
-        smoothMapRef.current = snapped ? { lat: targ.lat, lng: targ.lng } : { lat: nlat, lng: nlng };
-        const p = smoothMapRef.current;
-        smoothListenersRef.current.forEach((fn) => fn(p));
-
-        const remainM = getDistance(p.lat, p.lng, targ.lat, targ.lng);
-        if (remainM > SELF_MAP_SNAP_M) {
-          rafId = requestAnimationFrame(tick);
-        } else {
-          // Fin de la animación: una sola actualización de estado para props y render.
-          setSmoothMapLocation({ lat: p.lat, lng: p.lng });
+        const targ = smoothMapTargetRef.current;
+        if (!cur || !targ) return;
+        const ahead = Math.min(SELF_MAP_PREDICT_MAX_S, Math.max(0, (now - targ.t) / 1000));
+        const gx = targ.lat + targ.vLat * ahead;
+        const gy = targ.lng + targ.vLng * ahead;
+        const k = 1 - Math.exp(-dt / SELF_MAP_TAU_S);
+        let nlat = cur.lat + (gx - cur.lat) * k;
+        let nlng = cur.lng + (gy - cur.lng) * k;
+        if (getDistance(nlat, nlng, gx, gy) <= SELF_MAP_SNAP_M) {
+          nlat = gx;
+          nlng = gy;
         }
+        const p = { lat: nlat, lng: nlng };
+        smoothMapRef.current = p;
+        smoothListenersRef.current.forEach((fn) => fn(p));
       } catch {
         /* ignore */
       }
     };
-
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [displayLocation?.lat, displayLocation?.lng, displayLocation]);
-
-  const mapVisualLocation =
-    smoothMapLocation ??
-    (displayLocation &&
-    typeof displayLocation.lat === 'number' &&
-    typeof displayLocation.lng === 'number' &&
-    Number.isFinite(displayLocation.lat) &&
-    Number.isFinite(displayLocation.lng)
-      ? { lat: displayLocation.lat, lng: displayLocation.lng }
-      : null);
+  }, []);
 
   const { nearestRadarDistanceM, radarsNearby, precipPoints } = useRoadData(
     currentLocation,
@@ -5325,6 +5422,8 @@ export default function MapView({
             attributionControl={false}
             fadeAnimation={false}
             zoomAnimation
+            /* Zoom fraccionario: el zoom de seguimiento se acerca de forma continua (sin saltos de un nivel entero). */
+            zoomSnap={0}
           >
         <MapInvalidateHelper layoutKey={`${groupId}-${mapHeadingRotationActive ? 1 : 0}`} />
         <MapTilePrefetchBridge
@@ -5462,9 +5561,9 @@ export default function MapView({
         ))}
 
         {/* Current User Marker (Navigation Arrow) */}
-        {mapVisualLocation && typeof mapVisualLocation.lat === 'number' && typeof mapVisualLocation.lng === 'number' && (
+        {markerSeedPos && (
           <CurrentUserMarker
-            position={[mapVisualLocation.lat, mapVisualLocation.lng]}
+            position={markerSeedPos}
             heading={navigationHeading}
             displayNameToUse={displayNameToUse}
             userLevel={userLevel}
@@ -5475,7 +5574,7 @@ export default function MapView({
         )}
 
         <MapController
-          location={mapVisualLocation}
+          location={displayLocation}
           bearingForMapOffset={navigationHeading}
           headingRotationActive={mapHeadingRotationActive}
           isFollowing={isFollowing}
@@ -5486,6 +5585,7 @@ export default function MapView({
           isLandscapeUi={isLandscapeUi}
           smoothFollow
           smoothSubscribe={subscribeSmoothMap}
+          getSmoothPosition={getSmoothMapPosition}
           recenterSignal={recenterSignal}
           followAnchorRef={followAnchorRef}
         />
@@ -5514,7 +5614,7 @@ export default function MapView({
           );
         })}
         <MapFollowGuard
-          location={mapVisualLocation}
+          location={displayLocation}
           isFollowing={isFollowing}
           autoRecenterEnabled={isRecording && !!effectiveRouteForNav}
           followAnchorRef={followAnchorRef}
